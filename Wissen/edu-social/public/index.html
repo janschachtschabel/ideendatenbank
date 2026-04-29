@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>edu-social - API Tester</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a2e; padding: 20px; }
+    h1 { text-align: center; margin-bottom: 6px; font-size: 1.6rem; }
+    .subtitle { text-align: center; color: #666; margin-bottom: 24px; font-size: 0.9rem; }
+    .config-bar {
+      display: flex; gap: 12px; flex-wrap: wrap; align-items: end;
+      background: #fff; padding: 16px; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      margin-bottom: 20px;
+    }
+    .config-bar .field { display: flex; flex-direction: column; gap: 4px; }
+    .config-bar .field.grow { flex: 1; min-width: 200px; }
+    .config-bar label { font-size: 0.75rem; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+    .config-bar input { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; }
+    .config-bar input:focus { outline: none; border-color: #4a6cf7; }
+    .hint { font-size: 0.75rem; color: #999; margin-top: 2px; }
+    .tabs { display: flex; gap: 0; margin-bottom: 0; }
+    .tab {
+      padding: 10px 24px; background: #e2e6ea; border: none; cursor: pointer;
+      font-size: 0.9rem; font-weight: 600; color: #555; border-radius: 10px 10px 0 0;
+      transition: all 0.15s;
+    }
+    .tab.active { background: #fff; color: #4a6cf7; }
+    .panel {
+      display: none; background: #fff; padding: 24px; border-radius: 0 10px 10px 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .panel.active { display: block; }
+    .action-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-bottom: 16px; }
+    .action-row .field { display: flex; flex-direction: column; gap: 4px; }
+    .action-row .field.grow { flex: 1; min-width: 160px; }
+    .action-row label { font-size: 0.75rem; font-weight: 600; color: #555; }
+    .action-row input, .action-row select, .action-row textarea {
+      padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem;
+    }
+    .action-row textarea { resize: vertical; min-height: 60px; }
+    button.action {
+      padding: 8px 20px; border: none; border-radius: 6px; font-size: 0.9rem;
+      font-weight: 600; cursor: pointer; color: #fff; transition: opacity 0.15s;
+    }
+    button.action:hover { opacity: 0.85; }
+    .btn-get { background: #61affe; }
+    .btn-put { background: #fca130; }
+    .btn-post { background: #49cc90; }
+    .btn-delete { background: #f93e3e; }
+    .result-box {
+      margin-top: 16px; background: #1e1e2e; color: #cdd6f4; border-radius: 8px;
+      padding: 16px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.82rem;
+      max-height: 500px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    }
+    .result-box .status { font-weight: bold; margin-bottom: 8px; }
+    .status-ok { color: #a6e3a1; }
+    .status-err { color: #f38ba8; }
+    .comment-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+    .comment-card {
+      background: #f8f9fa; border-radius: 8px; padding: 12px; border-left: 3px solid #4a6cf7;
+    }
+    .comment-card.reply { margin-left: 30px; border-left-color: #89b4fa; }
+    .comment-meta { font-size: 0.78rem; color: #888; margin-bottom: 4px; }
+    .comment-text { font-size: 0.9rem; }
+    .comment-actions { margin-top: 6px; display: flex; gap: 8px; }
+    .comment-actions button { font-size: 0.75rem; padding: 3px 10px; border-radius: 4px; border: 1px solid #ddd; background: #fff; cursor: pointer; }
+    .comment-actions button:hover { background: #f0f0f0; }
+    .comment-actions button.del:hover { background: #fee; color: #f33; border-color: #f99; }
+    .rating-display { display: flex; align-items: center; gap: 16px; margin-top: 12px; flex-wrap: wrap; }
+    .rating-info { font-size: 0.9rem; color: #555; }
+    .node-info { background: #f0f7ff; border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 0.85rem; border-left: 3px solid #61affe; }
+    .node-info strong { color: #333; }
+    .auth-hint { background: #fff8e1; border-radius: 6px; padding: 8px 12px; font-size: 0.8rem; color: #8a6d00; margin-bottom: 12px; }
+    hr { border: none; border-top: 1px solid #eee; margin: 16px 0; }
+  </style>
+</head>
+<body>
+  <h1>edu-social</h1>
+  <p class="subtitle" id="subtitle">Comment & Rating Tester</p>
+
+  <div class="config-bar" style="flex-direction:column; gap:12px;">
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end; width:100%;">
+      <div class="field">
+        <label>Umgebung</label>
+        <select id="envSelect" onchange="onEnvChange()" style="padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; font-weight:600;">
+          <option value="staging">Staging</option>
+          <option value="prod">Produktion</option>
+        </select>
+      </div>
+      <div class="field grow">
+        <label>Node-ID</label>
+        <input type="text" id="nodeId" placeholder="Node-ID eingeben oder Beispiel waehlen">
+      </div>
+      <div class="field">
+        <label>Beispiel-Node</label>
+        <select id="exampleNode" onchange="onExampleChange()" style="padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem;">
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end; width:100%;">
+      <div class="field">
+        <label>Benutzername</label>
+        <input type="text" id="username" placeholder="optional fuer Lesen">
+        <span class="hint">Nur fuer Schreiben noetig</span>
+      </div>
+      <div class="field">
+        <label>Passwort</label>
+        <input type="password" id="password" placeholder="optional fuer Lesen">
+      </div>
+      <button class="action btn-get" onclick="loadAll()" style="align-self:flex-end;">Alles laden</button>
+    </div>
+  </div>
+
+  <div id="node-info-bar"></div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('comments')">Kommentare</button>
+    <button class="tab" onclick="switchTab('rating')">Rating</button>
+    <button class="tab" onclick="switchTab('feedback')">Feedback</button>
+  </div>
+
+  <!-- COMMENTS -->
+  <div id="panel-comments" class="panel active">
+    <div class="action-row">
+      <button class="action btn-get" onclick="loadComments()">Kommentare laden</button>
+    </div>
+    <div id="comments-display"></div>
+    <hr>
+    <h3 style="margin-bottom:10px; font-size:0.95rem;">Neuer Kommentar</h3>
+    <div class="auth-hint">Kommentare lesen und schreiben erfordert Authentifizierung (Comment-Permission).</div>
+    <div class="action-row">
+      <div class="field grow">
+        <label>Kommentartext</label>
+        <textarea id="commentText" placeholder="Kommentar eingeben..."></textarea>
+      </div>
+      <div class="field">
+        <label>Antwort auf (optional)</label>
+        <input type="text" id="replyTo" placeholder="Comment-ID">
+      </div>
+      <button class="action btn-put" onclick="addComment()">Absenden</button>
+    </div>
+    <div id="comments-result" class="result-box" style="display:none;"></div>
+  </div>
+
+  <!-- RATING -->
+  <div id="panel-rating" class="panel">
+    <div class="action-row">
+      <button class="action btn-get" onclick="loadRating()">Rating laden</button>
+      <span class="hint" style="align-self:center;">Lesen geht ohne Login (via Node-Metadaten)</span>
+    </div>
+    <div id="rating-display"></div>
+    <hr>
+    <h3 style="margin-bottom:10px; font-size:0.95rem;">Bewertung abgeben</h3>
+    <div class="auth-hint">Bewertung abgeben/loeschen erfordert Authentifizierung.</div>
+    <div class="action-row">
+      <div class="field">
+        <label>Rating (1-5)</label>
+        <select id="ratingValue">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5" selected>5</option>
+        </select>
+      </div>
+      <button class="action btn-put" onclick="addRating()">Bewerten</button>
+      <button class="action btn-delete" onclick="deleteRating()">Meine Bewertung loeschen</button>
+    </div>
+    <div id="rating-result" class="result-box" style="display:none;"></div>
+  </div>
+
+  <!-- FEEDBACK -->
+  <div id="panel-feedback" class="panel">
+    <div class="action-row">
+      <button class="action btn-get" onclick="loadFeedbacks()">Feedbacks laden</button>
+      <span class="hint" style="align-self:center;">Lesen erfordert Coordinator-Rechte</span>
+    </div>
+    <div id="feedback-display"></div>
+    <hr>
+    <h3 style="margin-bottom:10px; font-size:0.95rem;">Feedback abgeben</h3>
+    <div class="auth-hint">Feedback senden erfordert Authentifizierung + Feedback-Berechtigung.</div>
+    <div class="action-row">
+      <div class="field grow">
+        <label>Feedback-Text</label>
+        <textarea id="feedbackText" placeholder="Feedback eingeben..."></textarea>
+      </div>
+      <button class="action btn-put" onclick="addFeedback()">Feedback senden</button>
+    </div>
+    <div id="feedback-result" class="result-box" style="display:none;"></div>
+  </div>
+
+  <script>
+    const REPO = '-home-';
+
+    const EXAMPLES = {
+      staging: [
+        { id: 'eb3ab633-3449-45f8-bab6-333449f5f84b', label: 'Metakognition - Lernen zu Lernen' },
+      ],
+      prod: [
+        { id: '8207f3ed-b572-475b-951e-dac8b7a3986d', label: 'Bundesweiter Wettbewerb Physik' },
+      ]
+    };
+
+    const ENV_LABELS = {
+      staging: 'repository.staging.openeduhub.net',
+      prod: 'redaktion.openeduhub.net'
+    };
+
+    function getEnv() {
+      return document.getElementById('envSelect').value;
+    }
+
+    function onEnvChange() {
+      const env = getEnv();
+      document.getElementById('subtitle').textContent = `Comment & Rating Tester \u2014 ${ENV_LABELS[env]}`;
+      populateExamples();
+      document.getElementById('nodeId').value = '';
+      document.getElementById('node-info-bar').innerHTML = '';
+      document.getElementById('comments-display').innerHTML = '';
+      document.getElementById('rating-display').innerHTML = '';
+      document.getElementById('feedback-display').innerHTML = '';
+    }
+
+    function populateExamples() {
+      const env = getEnv();
+      const sel = document.getElementById('exampleNode');
+      sel.innerHTML = '<option value="">-- Beispiel waehlen --</option>' +
+        EXAMPLES[env].map(e => `<option value="${e.id}">${e.label}</option>`).join('');
+    }
+
+    function onExampleChange() {
+      const val = document.getElementById('exampleNode').value;
+      if (val) document.getElementById('nodeId').value = val;
+    }
+
+    function getNodeId() {
+      return document.getElementById('nodeId').value.trim();
+    }
+
+    function getAuth() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
+      if (!username || !password) return null;
+      return { username, password };
+    }
+
+    function requireAuth() {
+      const auth = getAuth();
+      if (!auth) {
+        alert('Bitte Benutzername und Passwort eingeben (fuer Schreiboperationen erforderlich).');
+        return null;
+      }
+      return auth;
+    }
+
+    async function apiCall(method, endpoint, body, auth) {
+      const payload = { method, endpoint, env: getEnv() };
+      if (auth) {
+        payload.username = auth.username;
+        payload.password = auth.password;
+      }
+      if (body !== undefined) payload.body = body;
+      const res = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return res.json();
+    }
+
+    function showResult(elId, result) {
+      const el = document.getElementById(elId);
+      el.style.display = 'block';
+      const ok = result.status >= 200 && result.status < 300;
+      el.innerHTML = `<div class="status ${ok ? 'status-ok' : 'status-err'}">${result.status} ${result.statusText}</div>${typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2)}`;
+    }
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.querySelector(`#panel-${name}`).classList.add('active');
+      event.target.classList.add('active');
+      const nodeId = getNodeId();
+      if (!nodeId) return;
+      if (name === 'comments') loadComments();
+      else if (name === 'rating') loadRating();
+      else if (name === 'feedback') loadFeedbacks();
+    }
+
+    function loadAll() {
+      const nodeId = getNodeId();
+      if (!nodeId) { alert('Bitte Node-ID eingeben.'); return; }
+      loadNodeInfo();
+      loadRating();
+      loadComments();
+      loadFeedbacks();
+    }
+
+    // --- NODE INFO ---
+    async function loadNodeInfo() {
+      const nodeId = getNodeId();
+      if (!nodeId) return;
+      const auth = getAuth();
+      const result = await apiCall('GET', `/node/v1/nodes/${REPO}/${nodeId}/metadata`, undefined, auth);
+      const el = document.getElementById('node-info-bar');
+      if (!result || result.status < 200 || result.status >= 300) {
+        el.innerHTML = '';
+        return;
+      }
+      const node = result.data?.node || result.data;
+      const access = (node.access || []).join(', ');
+      el.innerHTML = `<div class="node-info">
+        <strong>${escapeHtml(node.title || node.name || nodeId)}</strong><br>
+        <span style="color:#666;">Typ: ${node.mediatype || '?'} | Erstellt: ${node.createdAt ? new Date(node.createdAt).toLocaleDateString('de-DE') : '?'} | Von: ${node.createdBy ? (node.createdBy.firstName + ' ' + node.createdBy.lastName).trim() : '?'}</span><br>
+        <span style="color:#888; font-size:0.8rem;">Deine Rechte: ${access}</span>
+      </div>`;
+    }
+
+    // --- COMMENTS ---
+    async function loadComments() {
+      const nodeId = getNodeId();
+      if (!nodeId) { alert('Bitte Node-ID eingeben.'); return; }
+      const auth = getAuth();
+      const result = await apiCall('GET', `/comment/v1/comments/${REPO}/${nodeId}`, undefined, auth);
+      const el = document.getElementById('comments-display');
+      if (!result || result.status < 200 || result.status >= 300) {
+        const msg = result?.data?.message || '';
+        if (result?.status === 403) {
+          el.innerHTML = `<div class="auth-hint">Kein Zugriff (403). Kommentare erfordern die "Comment"-Berechtigung. Versuche dich einzuloggen.</div>`;
+        } else {
+          el.innerHTML = `<div class="result-box"><span class="status-err">${result?.status} ${result?.statusText}</span><br>${escapeHtml(msg)}</div>`;
+        }
+        return;
+      }
+      const comments = result.data.comments || result.data || [];
+      if (comments.length === 0) {
+        el.innerHTML = '<p style="color:#888; margin-top:12px;">Keine Kommentare vorhanden.</p>';
+        return;
+      }
+      el.innerHTML = `<p style="color:#49cc90; margin-top:8px; font-weight:600;">${comments.length} Kommentar(e) gefunden</p>` +
+        '<div class="comment-list">' + comments.map(c => {
+        const isReply = c.replyTo && c.replyTo.id;
+        const date = c.created ? new Date(c.created).toLocaleString('de-DE') : '';
+        const author = c.creator ? `${c.creator.firstName || ''} ${c.creator.lastName || ''}`.trim() || c.creator.authorityName : 'Unbekannt';
+        return `<div class="comment-card ${isReply ? 'reply' : ''}">
+          <div class="comment-meta">${escapeHtml(author)} &mdash; ${date} &mdash; ID: ${c.ref?.id || '?'}</div>
+          <div class="comment-text">${escapeHtml(c.comment || '')}</div>
+          <div class="comment-actions">
+            <button onclick="document.getElementById('replyTo').value='${c.ref?.id || ''}'">Antworten</button>
+            <button class="del" onclick="deleteComment('${c.ref?.id || ''}')">Loeschen</button>
+          </div>
+        </div>`;
+      }).join('') + '</div>' +
+        `<details style="margin-top:12px;"><summary style="cursor:pointer;color:#888;font-size:0.8rem;">Raw JSON Response</summary><div class="result-box">${JSON.stringify(result.data, null, 2)}</div></details>`;
+    }
+
+    async function addComment() {
+      const nodeId = getNodeId();
+      if (!nodeId) { alert('Bitte Node-ID eingeben.'); return; }
+      const auth = requireAuth();
+      if (!auth) return;
+      const text = document.getElementById('commentText').value.trim();
+      if (!text) { alert('Kommentartext eingeben.'); return; }
+      const replyTo = document.getElementById('replyTo').value.trim();
+      let endpoint = `/comment/v1/comments/${REPO}/${nodeId}`;
+      if (replyTo) endpoint += `?commentReference=${replyTo}`;
+      const result = await apiCall('PUT', endpoint, text, auth);
+      showResult('comments-result', result);
+      if (result.status >= 200 && result.status < 300) {
+        document.getElementById('commentText').value = '';
+        document.getElementById('replyTo').value = '';
+        loadComments();
+      }
+    }
+
+    async function deleteComment(commentId) {
+      if (!confirm('Kommentar wirklich loeschen?')) return;
+      const auth = requireAuth();
+      if (!auth) return;
+      const result = await apiCall('DELETE', `/comment/v1/comments/${REPO}/${commentId}`, undefined, auth);
+      showResult('comments-result', result);
+      loadComments();
+    }
+
+    // --- RATING (lesen via Node-Metadaten, kein Admin noetig) ---
+    async function loadRating() {
+      const nodeId = getNodeId();
+      if (!nodeId) { alert('Bitte Node-ID eingeben.'); return; }
+      const auth = getAuth();
+      const result = await apiCall('GET', `/node/v1/nodes/${REPO}/${nodeId}/metadata`, undefined, auth);
+      const el = document.getElementById('rating-display');
+      if (!result || result.status < 200 || result.status >= 300) {
+        el.innerHTML = `<div class="result-box"><span class="status-err">${result?.status} ${result?.statusText}</span></div>`;
+        return;
+      }
+      const node = result.data?.node || result.data;
+      const rating = node?.rating;
+      if (rating) {
+        const overall = rating.overall || {};
+        const userRating = rating.user || 0;
+        const avg = overall.rating || 0;
+        const starsHtml = [1,2,3,4,5].map(i => `<span style="color:${i <= Math.round(avg) ? '#fbbf24' : '#ddd'}; font-size:1.5rem;">&#9733;</span>`).join('');
+        el.innerHTML = `<div class="rating-display">
+          <div>${starsHtml}</div>
+          <div class="rating-info">
+            <strong>Durchschnitt:</strong> ${avg.toFixed(1)} / 5
+            (${overall.count || 0} Bewertung${(overall.count || 0) !== 1 ? 'en' : ''})<br>
+            <strong>Eigene Bewertung:</strong> ${userRating ? userRating : 'keine'}
+            ${auth ? '' : '<span style="color:#999;"> (als Gast)'}
+          </div>
+        </div>
+        <details style="margin-top:12px;"><summary style="cursor:pointer;color:#888;font-size:0.8rem;">Raw JSON Response (Rating)</summary><div class="result-box">${JSON.stringify(rating, null, 2)}</div></details>`;
+      } else {
+        el.innerHTML = '<p style="color:#888; margin-top:12px;">Noch keine Bewertungen vorhanden.</p>';
+      }
+    }
+
+    async function addRating() {
+      const nodeId = getNodeId();
+      if (!nodeId) { alert('Bitte Node-ID eingeben.'); return; }
+      const auth = requireAuth();
+      if (!auth) return;
+      const rating = document.getElementById('ratingValue').value;
+      const result = await apiCall('PUT', `/rating/v1/ratings/${REPO}/${nodeId}?rating=${rating}`, ' ', auth);
+      showResult('rating-result', result);
+      if (result.status >= 200 && result.status < 300) loadRating();
+    }
+
+    async function deleteRating() {
+      if (!confirm('Eigene Bewertung loeschen?')) return;
+      const nodeId = getNodeId();
+      if (!nodeId) return;
+      const auth = requireAuth();
+      if (!auth) return;
+      const result = await apiCall('DELETE', `/rating/v1/ratings/${REPO}/${nodeId}`, undefined, auth);
+      showResult('rating-result', result);
+      loadRating();
+    }
+
+    // --- FEEDBACK ---
+    async function loadFeedbacks() {
+      const nodeId = getNodeId();
+      if (!nodeId) { alert('Bitte Node-ID eingeben.'); return; }
+      const auth = getAuth();
+      const result = await apiCall('GET', `/feedback/v1/feedback/${REPO}/${nodeId}/list`, undefined, auth);
+      const el = document.getElementById('feedback-display');
+      if (!result || result.status < 200 || result.status >= 300) {
+        const msg = result?.data?.message || '';
+        if (result?.status === 403) {
+          el.innerHTML = `<div class="auth-hint">Kein Zugriff (403). Feedbacks lesen erfordert Coordinator-Berechtigung.</div>`;
+        } else if (result?.status === 500) {
+          el.innerHTML = `<div class="auth-hint">Server-Fehler (500). Der Feedback-Service ist auf dieser Staging-Instanz moeglicherweise nicht aktiv.</div>`;
+        } else {
+          el.innerHTML = `<div class="result-box"><span class="status-err">${result?.status} ${result?.statusText}</span><br>${escapeHtml(msg)}</div>`;
+        }
+        return;
+      }
+      const feedbacks = result.data || [];
+      if (feedbacks.length === 0) {
+        el.innerHTML = '<p style="color:#888; margin-top:12px;">Keine Feedbacks vorhanden.</p>';
+        return;
+      }
+      el.innerHTML = `<p style="color:#49cc90; margin-top:8px; font-weight:600;">${feedbacks.length} Feedback(s) gefunden</p>` +
+        '<div class="comment-list">' + feedbacks.map(f => {
+        const date = f.createdAt ? new Date(f.createdAt).toLocaleString('de-DE') : '';
+        const dataStr = f.data ? Object.entries(f.data).map(([k,v]) => `<strong>${escapeHtml(k)}:</strong> ${Array.isArray(v) ? v.map(escapeHtml).join(', ') : escapeHtml(String(v))}`).join('<br>') : '';
+        return `<div class="comment-card">
+          <div class="comment-meta">${f.authority || 'Anonym'} &mdash; ${date}</div>
+          <div class="comment-text">${dataStr}</div>
+        </div>`;
+      }).join('') + '</div>' +
+        `<details style="margin-top:12px;"><summary style="cursor:pointer;color:#888;font-size:0.8rem;">Raw JSON Response</summary><div class="result-box">${JSON.stringify(result.data, null, 2)}</div></details>`;
+    }
+
+    async function addFeedback() {
+      const nodeId = getNodeId();
+      if (!nodeId) { alert('Bitte Node-ID eingeben.'); return; }
+      const auth = requireAuth();
+      if (!auth) return;
+      const text = document.getElementById('feedbackText').value.trim();
+      if (!text) { alert('Feedback-Text eingeben.'); return; }
+      const result = await apiCall('PUT', `/feedback/v1/feedback/${REPO}/${nodeId}/add`, { feedback: [text] }, auth);
+      showResult('feedback-result', result);
+      if (result.status === 500) {
+        const el = document.getElementById('feedback-result');
+        el.innerHTML += '\n\n<span style="color:#fbbf24;">Hinweis: Der Server liefert 500, das Feedback wurde aber trotzdem gespeichert (bekannter Server-Bug).</span>';
+        document.getElementById('feedbackText').value = '';
+      }
+      if (result.status >= 200 && result.status < 300) {
+        document.getElementById('feedbackText').value = '';
+        loadFeedbacks();
+      }
+    }
+
+    function escapeHtml(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+
+    // Init
+    onEnvChange();
+  </script>
+</body>
+</html>

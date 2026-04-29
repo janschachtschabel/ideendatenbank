@@ -1,0 +1,33 @@
+@use '@angular/material' as mat;
+
+html {
+  color-scheme: light;
+  --wlo-primary: #002855;
+  --wlo-primary-600: #003c7e;
+  --wlo-accent: #f5b600;
+  --wlo-bg: #f4f6f9;
+  --wlo-surface: #ffffff;
+  --wlo-text: #1a2235;
+  --wlo-muted: #5b6778;
+  --wlo-border: #e2e7ef;
+
+  @include mat.theme((
+    color: (
+      primary: mat.$azure-palette,
+      tertiary: mat.$blue-palette,
+    ),
+    typography: Roboto,
+    density: 0,
+  ));
+}
+
+ideendb-app, ideendb-tile-grid {
+  display: block;
+  color: var(--wlo-text);
+  font-family: 'Inter', 'Roboto', system-ui, -apple-system, Segoe UI, sans-serif;
+  line-height: 1.5;
+  background: var(--wlo-bg);
+}
+
+body { margin: 0; background: var(--wlo-bg); }
+button, input, textarea, select { font: inherit; }

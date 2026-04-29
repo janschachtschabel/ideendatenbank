@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>HackathOERn Ideen — Embed-Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      color: #1a2235;
+      background: #fff;
+      line-height: 1.6;
+    }
+    h1 { color: #002855; margin-top: 0; }
+    h2 { color: #002855; margin-top: 40px; border-bottom: 2px solid #e2e7ef; padding-bottom: 8px; }
+    pre {
+      background: #f4f6f9;
+      border: 1px solid #e2e7ef;
+      border-radius: 8px;
+      padding: 14px 18px;
+      overflow-x: auto;
+      font-size: .88rem;
+    }
+    .demo {
+      background: #f4f6f9;
+      border: 1px solid #e2e7ef;
+      border-radius: 12px;
+      padding: 24px;
+      margin: 20px 0;
+    }
+    .demo h3 {
+      margin: 0 0 14px;
+      color: #002855;
+      font-size: 1.05rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    code { background: #f4f6f9; padding: 2px 6px; border-radius: 4px; font-size: .9em; }
+    .note {
+      background: #fff8db;
+      border-left: 3px solid #f5b600;
+      padding: 10px 16px;
+      border-radius: 4px;
+      margin: 14px 0;
+      font-size: .9rem;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>HackathOERn Ideendatenbank — Integration in Drittseiten</h1>
+
+  <p>Die App stellt zwei Web Components bereit, die sich per HTML-Tag in beliebige
+    Seiten (WordPress, statische Seiten, andere CMS) einbetten lassen.
+    Unten drei typische Einbett-Szenarien mit Live-Rendering.</p>
+
+  <div class="note">
+    <strong>Setup:</strong> einmalig <code>&lt;script src="main.js"&gt;</code> und
+    <code>&lt;link rel="stylesheet" href="styles.css"&gt;</code> in den Seitenkopf.
+    Danach können die Tags beliebig oft verwendet werden.
+  </div>
+
+  <h2>1. Komplette Ideen-App</h2>
+  <p>Nimmt die ganze verfügbare Seitenbreite und bringt Navigation, Filter,
+    Einreichungsformular und Detailseiten mit. Typisch für eine eigene
+    „Ideendatenbank"-Unterseite im CMS.</p>
+  <pre>&lt;ideendb-app api-base="https://api.example.com/api/v1"&gt;&lt;/ideendb-app&gt;</pre>
+
+  <h2>2. Kachel-Grid für die Startseite</h2>
+  <p>Zeigt die neuesten Ideen als Teaser — ideal für Blog-Startseiten oder eine
+    „Aktuelle Ideen"-Box in der Sidebar.</p>
+  <div class="demo">
+    <h3>Neueste Ideen (Limit 6)</h3>
+    <ideendb-tile-grid
+      api-base="/api/v1"
+      sort="modified"
+      limit="6">
+    </ideendb-tile-grid>
+  </div>
+  <pre>&lt;ideendb-tile-grid
+  api-base="https://api.example.com/api/v1"
+  sort="modified"
+  limit="6"&gt;
+&lt;/ideendb-tile-grid&gt;</pre>
+
+  <h2>3. Top-Ideen eines HackathOERn-Events</h2>
+  <p>Zeigt nur Ideen eines bestimmten Events — praktisch für Event-Landingpages
+    („Unsere Ideen beim HackathOERn 2").</p>
+  <div class="demo">
+    <h3>Ideen beim HackathOERn 2</h3>
+    <ideendb-tile-grid
+      api-base="/api/v1"
+      event="HackathOERn 2"
+      sort="rating"
+      limit="4">
+    </ideendb-tile-grid>
+  </div>
+  <pre>&lt;ideendb-tile-grid
+  api-base="https://api.example.com/api/v1"
+  event="HackathOERn 2"
+  sort="rating"
+  limit="4"&gt;
+&lt;/ideendb-tile-grid&gt;</pre>
+
+  <h2>4. Ideen einer Herausforderung</h2>
+  <p>Filter nach Topic-ID (Sammlungs-ID aus edu-sharing) — für Themenseiten,
+    die zu einer konkreten Herausforderung gehören.</p>
+  <div class="demo">
+    <h3>Auffindbarkeit und Nutzungsverbesserung von OER</h3>
+    <ideendb-tile-grid
+      api-base="/api/v1"
+      topic-id="430ebc36-30c7-4ce0-8ebc-3630c7ece08c"
+      sort="modified"
+      limit="6">
+    </ideendb-tile-grid>
+  </div>
+  <pre>&lt;ideendb-tile-grid
+  api-base="https://api.example.com/api/v1"
+  topic-id="430ebc36-30c7-4ce0-8ebc-3630c7ece08c"
+  limit="6"&gt;
+&lt;/ideendb-tile-grid&gt;</pre>
+
+  <h2>Attribute-Übersicht</h2>
+  <h3><code>&lt;ideendb-app&gt;</code></h3>
+  <ul>
+    <li><code>api-base</code> — URL des FastAPI-Backends (Default: <code>http://127.0.0.1:8000/api/v1</code>)</li>
+  </ul>
+
+  <h3><code>&lt;ideendb-tile-grid&gt;</code></h3>
+  <ul>
+    <li><code>api-base</code> — Backend-URL</li>
+    <li><code>topic-id</code> — edu-sharing Sammlungs-ID (alle Ideen aus Sub-Sammlungen werden mitgezogen)</li>
+    <li><code>phase</code> — Phase-Filter (z.B. „Anregung", „In Umsetzung")</li>
+    <li><code>event</code> — Event-Filter (z.B. „HackathOERn 2")</li>
+    <li><code>q</code> — Freitextsuche</li>
+    <li><code>sort</code> — <code>modified | created | rating | comments | title</code> (Default: modified)</li>
+    <li><code>limit</code> — Anzahl (Default: 12)</li>
+    <li><code>hide-footer</code> — <code>true</code> blendet den „Mehr laden"-Button aus</li>
+  </ul>
+
+  <h2>CORS / Deployment</h2>
+  <p>Das FastAPI-Backend erlaubt per Default lokale Dev-Hosts
+    (<code>localhost</code>, <code>127.0.0.1</code>). Für Produktions-Einbettung
+    setze <code>APP_CORS_ORIGINS</code> im Backend-Env auf deine CMS-Domain:</p>
+  <pre>APP_CORS_ORIGINS=https://www.wirlernenonline.de,https://hackathoern.openeduhub.net</pre>
+
+  <!-- Load the web component bundles (relative to the dev server) -->
+  <link rel="stylesheet" href="/styles.css" />
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

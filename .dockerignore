@@ -1,0 +1,54 @@
+# Niemals ins Image einbauen
+.git
+.gitignore
+.github
+.vscode
+.idea
+.claude
+
+# Python-Artefakte
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/venv
+**/env
+backend/.venv
+
+# Node-Artefakte (Bundle wird im Container neu gebaut)
+**/node_modules
+**/dist
+**/.angular
+frontend/dist
+frontend/.angular
+
+# Lokale Daten + Secrets — KEINE in der Image-Layer
+data/
+backend/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+.env
+backend/.env
+*.env.local
+
+# IDE / OS
+**/.DS_Store
+**/Thumbs.db
+*.swp
+
+# Doku / Skills, die im Container nichts zu suchen haben
+Wissen/
+scripts/
+*.md
+!README.md
+
+# Test-Output
+coverage/
+htmlcov/
+.tox/

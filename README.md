@@ -170,9 +170,68 @@ MODERATION_BOOTSTRAP_USERS=admin,jan
 
 ---
 
-## Deployment (same-origin, empfohlen)
+## Deployment (Docker, empfohlen)
 
-Ein einziger Uvicorn-Prozess liefert API + Frontend aus:
+Ein-Container-Image baut Backend + Frontend in einem Schritt und serviert
+beides aus demselben Uvicorn-Prozess. Image wird via GitHub Actions auf
+[GitHub Container Registry](https://ghcr.io) gepusht.
+
+### Quick-Start (Docker Compose)
+
+```bash
+git clone https://github.com/janschachtschabel/ideendatenbank.git
+cd ideendatenbank
+cp .env.example .env             # Pflichtfelder setzen, v.a. EDU_GUEST_USER/PASS
+
+docker compose up -d             # baut + startet
+docker compose logs -f           # Log live mitlesen
+open http://localhost:8000       # Voll-App
+```
+
+Persistente Daten landen im Docker-Volume `ideendb-data` (SQLite + Backups).
+Reset:
+
+```bash
+docker compose down -v           # ACHTUNG: löscht das Volume
+```
+
+### Aus GHCR ziehen (ohne lokalen Build)
+
+```bash
+docker pull ghcr.io/janschachtschabel/ideendatenbank:main
+
+docker run -d --name ideendb \
+  -p 127.0.0.1:8000:8000 \
+  -v ideendb-data:/data \
+  -e EDU_GUEST_USER=WLO-Upload \
+  -e EDU_GUEST_PASS='wlo#upload!20' \
+  -e MODERATION_BOOTSTRAP_USERS=dein-username \
+  -e APP_CORS_ORIGINS=https://ideen.example.de \
+  ghcr.io/janschachtschabel/ideendatenbank:main
+```
+
+Verfügbare Tags:
+
+| Tag | Bedeutung |
+|---|---|
+| `main` | Letzter erfolgreicher Build vom main-Branch |
+| `vX.Y.Z` | Release-Tag |
+| `latest` | Letzter Release-Tag |
+| `sha-<short>` | Pinned auf einen Commit |
+
+### Update auf neue Version
+
+```bash
+docker compose pull              # neuestes Image holen
+docker compose up -d             # Container neu starten, Volume bleibt
+```
+
+DB-Migrationen laufen idempotent beim Startup über `init_db()` —
+bestehende Daten bleiben heile.
+
+### Lokal bauen ohne Docker
+
+Wer ohne Container entwickeln will:
 
 ```bash
 cd frontend && npm run build:embed         # → dist/embed/browser/
@@ -181,6 +240,23 @@ cd ../backend && uvicorn app.main:app      # serviert API + Bundle
 
 Das Backend mountet `frontend/dist/embed/browser/` automatisch als Root,
 sofern das Verzeichnis existiert. Keine CORS-Sorgen, eine Deploy-Einheit.
+
+### CI/CD
+
+`.github/workflows/`:
+
+- **`ci.yml`** — bei jedem Push/PR: Backend-Imports + Frontend-Build prüfen
+- **`docker.yml`** — bei Push auf main, git-Tag `vX.Y.Z` oder manuell:
+  Image bauen + nach `ghcr.io/janschachtschabel/ideendatenbank` pushen
+  - PRs bauen das Image, pushen aber nicht (nur Sanity-Check)
+  - Tags + Labels werden automatisch via `docker/metadata-action` gesetzt
+  - Build-Cache liegt in der GitHub-Actions-Cache-Schicht
+  - Provenance + SBOM werden mit signiert (Sigstore via OIDC)
+
+Erste Veröffentlichung nach Repo-Push: GitHub Actions läuft automatisch.
+Im GitHub-Repo unter **Settings → Packages** sicherstellen, dass das
+veröffentlichte Image auf „Public" gestellt ist (sonst braucht jeder
+Pull einen GHCR-Login).
 
 ### Updates / Wartung
 

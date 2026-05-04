@@ -1,0 +1,65 @@
+# Lokales Test-Setup. Für Production lieber direkt das Image aus GHCR
+# ziehen und mit ordentlichem Reverse-Proxy (TLS, Basic-Auth auf /admin)
+# davorschalten — siehe README, Sektion „Sicherheit".
+#
+# Quick-Start:
+#   cp .env.example .env
+#   docker compose up -d
+#   open http://localhost:8000
+#
+# Logs:    docker compose logs -f
+# Stop:    docker compose down
+# Reset:   docker compose down -v   # ACHTUNG: löscht das Daten-Volume
+
+services:
+  ideendb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ideendatenbank:local
+    container_name: ideendb
+    restart: unless-stopped
+    ports:
+      # Nur an localhost binden — nginx/caddy sollte davor sitzen
+      - "127.0.0.1:8000:8000"
+    environment:
+      # ---- edu-sharing ----
+      EDU_REPO_BASE_URL: ${EDU_REPO_BASE_URL:-https://redaktion.openeduhub.net}
+      EDU_REPO_API: ${EDU_REPO_API:-https://redaktion.openeduhub.net/edu-sharing/rest}
+      EDU_GUEST_USER: ${EDU_GUEST_USER:?EDU_GUEST_USER fehlt — bitte .env anlegen}
+      EDU_GUEST_PASS: ${EDU_GUEST_PASS:?EDU_GUEST_PASS fehlt — bitte .env anlegen}
+      EDU_GUEST_INBOX_ID: ${EDU_GUEST_INBOX_ID:-21144164-30c0-4c01-ae16-264452197063}
+      IDEENDB_ROOT_COLLECTION_ID: ${IDEENDB_ROOT_COLLECTION_ID:-4197d4d2-c700-400c-97d4-d2c700900c68}
+
+      # ---- App ----
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
+
+      # ---- Daten ----
+      SQLITE_PATH: /data/ideendb.sqlite
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-300}
+
+      # ---- Backup ----
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_DIR: /data/backups
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP: ${BACKUP_KEEP:-3}
+
+      # ---- Moderation ----
+      MODERATION_GROUP: ${MODERATION_GROUP:-GROUP_HackathOERn_Moderation}
+      MODERATION_FALLBACK_GROUPS: ${MODERATION_FALLBACK_GROUPS:-GROUP_ALFRESCO_ADMINISTRATORS}
+      MODERATION_BOOTSTRAP_USERS: ${MODERATION_BOOTSTRAP_USERS:-}
+    volumes:
+      # Persistente Daten: SQLite + Backups landen hier
+      - ideendb-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/topics"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  ideendb-data:
+    driver: local

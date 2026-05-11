@@ -13,14 +13,32 @@
 # =========================================================================
 # Stage 1 — Frontend bauen
 # =========================================================================
-FROM node:20-bookworm-slim AS frontend-builder
+# Node 22 LTS: Angular 19 + @angular-eslint 21 + typescript-eslint 8
+# erwarten >=20.19; Node 20 in der `slim`-Variante hängt auf 20.x ohne
+# Patch-Updates und führte beim CI-Build zu Auflösungsfehlern.
+FROM node:22-bookworm-slim AS frontend-builder
 
 WORKDIR /build
 
 # Erst nur die package.* — Layer-Cache für npm install bleibt heile,
 # solange sich Dependencies nicht ändern.
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+
+# Build-Tools werden für native Module gelegentlich gebraucht (esbuild,
+# sass-embedded, …). `python3 + make + g++` deckt 99 % ab, ohne
+# nennenswert die Image-Größe der Build-Stage zu treiben — die Stage
+# wird sowieso verworfen.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Wir nutzen `npm install --no-save` statt `npm ci`, weil das Lockfile
+# auf Windows-Hosts gelegentlich Linux-spezifische peer-Deps (z.B.
+# `chokidar@^5` für native filesystem watchers) NICHT enthält, die
+# der Build im Linux-Container aber braucht. `--no-save` lässt das
+# Lockfile unverändert, ergänzt nur fehlende Pakete im Workspace.
+# Effekt: deterministisch wo möglich, robust wo nötig.
+RUN npm install --no-save --no-audit --no-fund
 
 COPY frontend/ ./
 RUN npm run build:embed

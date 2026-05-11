@@ -17,6 +17,10 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Migration auf Node 24 als Default für JavaScript-basierte Actions —
+  # Node 20 wird in den GitHub-Runnern ab Q3 2026 entfernt. Lokal-Aktionen
+  # (actions/*, docker/*) sind dann Node-24-kompatibel.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:

@@ -242,77 +242,81 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                   {{ sortOrder === 'desc' ? '↓' : '↑' }}
                 </button>
               </div>
-              @if (!currentTopic()) {
-                <select [(ngModel)]="filterTopic" (change)="onTopicDropdown()">
-                  <option value="">Alle Herausforderungen</option>
-                  @for (t of rootTopics(); track t.id) {
-                    <option [value]="t.id">{{ t.title }}</option>
-                  }
-                </select>
-              }
+<!-- Herausforderungen werden komplett über die Pillen-Reihe unten
+                   gewählt — kein separates Dropdown nötig. -->
+
             </div>
 
-            @if (availablePhases().length || availableEvents().length || availableCategories().length) {
-              <div class="facet-row">
-                @if (availablePhases().length) {
-                  <div class="facet-group">
-                    <label>Phase:</label>
-                    <button class="facet-chip" [class.on]="!filterPhase"
-                            (click)="setPhase(null)">Alle</button>
-                    @for (p of availablePhases(); track p.value) {
-                      <button class="facet-chip" [class.on]="filterPhase===p.value"
-                              (click)="setPhase(p.value)">
-                        {{ phaseLabel(p.value) }} <small>{{ p.count }}</small>
-                      </button>
-                    }
-                  </div>
+            <!-- Facet-Pillen: bleiben grundsätzlich sichtbar, damit Filter
+                 nicht unter dem User wegrutschen, sobald eine Kombination 0
+                 Treffer liefert. Die „Bereich:"-Reihe erscheint zusätzlich nur,
+                 wenn eine Herausforderung gewählt ist (sonst gibt's keine
+                 Unter-Sammlungen zum Anzeigen). -->
+            <div class="facet-row">
+              <div class="facet-group">
+                <label>Phase:</label>
+                <button class="facet-chip" [class.on]="!filterPhase"
+                        (click)="setPhase(null)">Alle</button>
+                @for (p of availablePhases(); track p.value) {
+                  <button class="facet-chip" [class.on]="filterPhase===p.value"
+                          (click)="setPhase(p.value)">
+                    {{ phaseLabel(p.value) }} <small>{{ p.count }}</small>
+                  </button>
                 }
-                @if (availableEvents().length) {
-                  <div class="facet-group">
-                    <label>Veranstaltung:</label>
-                    <button class="facet-chip" [class.on]="!filterEvent"
-                            (click)="setEvent(null)">Alle</button>
-                    @for (e of availableEvents(); track e.value) {
-                      <button class="facet-chip" [class.on]="filterEvent===e.value"
-                              (click)="setEvent(e.value)">
-                        {{ eventLabel(e.value) }} <small>{{ e.count }}</small>
-                      </button>
-                    }
-                  </div>
-                }
-                @if (availableCategories().length) {
-                  <div class="facet-group">
-                    <label>Kategorie:</label>
-                    <button class="facet-chip" [class.on]="!filterCategory"
-                            (click)="setCategory(null)">Alle</button>
-                    @for (c of availableCategories(); track c.value) {
-                      <button class="facet-chip" [class.on]="filterCategory===c.value"
-                              (click)="setCategory(c.value)">
-                        {{ c.value }} <small>{{ c.count }}</small>
-                      </button>
-                    }
-                  </div>
-                }
-                <!-- Sub-Bereiche (Untersammlungen) der aktuell gewählten Herausforderung
-                     als dritte Filter-Reihe. Funktioniert auf beiden Drilldown-Ebenen:
-                     auf Level-1 zeigen wir die eigenen Children, auf Level-2 die
-                     Geschwister (= Children des Parents) inkl. der aktuellen Auswahl. -->
-                @if (currentTopic() && subTopicsForFilter().length) {
-                  <div class="facet-group">
-                    <label>Bereich:</label>
-                    <button class="facet-chip"
-                            [class.on]="filterTopic === currentRootId()"
-                            (click)="openTopicById(currentRootId()!)">Alle</button>
-                    @for (c of subTopicsForFilter(); track c.id) {
-                      <button class="facet-chip" [class.on]="filterTopic === c.id"
-                              (click)="openTopicById(c.id)">
-                        {{ c.title }} <small>{{ subtopicCount(c.id) }}</small>
-                      </button>
-                    }
-                  </div>
+                @if (filterPhase && !phaseInAvailable(filterPhase)) {
+                  <!-- Aktiver Filter, der nicht mehr in den Result-Counts steht
+                       (0 Treffer): trotzdem als „on"-Pille zum Wegklicken. -->
+                  <button class="facet-chip on" (click)="setPhase(null)">
+                    {{ phaseLabel(filterPhase) }} <small>0</small>
+                  </button>
                 }
               </div>
-            }
+              <div class="facet-group">
+                <label>Veranstaltung:</label>
+                <button class="facet-chip" [class.on]="!filterEvent"
+                        (click)="setEvent(null)">Alle</button>
+                @for (e of availableEvents(); track e.value) {
+                  <button class="facet-chip" [class.on]="filterEvent===e.value"
+                          (click)="setEvent(e.value)">
+                    {{ eventLabel(e.value) }} <small>{{ e.count }}</small>
+                  </button>
+                }
+                @if (filterEvent && !eventInAvailable(filterEvent)) {
+                  <button class="facet-chip on" (click)="setEvent(null)">
+                    {{ eventLabel(filterEvent) }} <small>0</small>
+                  </button>
+                }
+              </div>
+              <!-- Herausforderungen als Pillen — Selektion spiegelt den
+                   oberen Dropdown. Bei aktivem Sub-Topic-Drilldown bleibt
+                   die zugehörige Wurzel-Pille markiert (currentRootId). -->
+              <div class="facet-group">
+                <label>Herausforderung:</label>
+                <button class="facet-chip" [class.on]="!currentRootId()"
+                        (click)="clearTopicFilter()">Alle</button>
+                @for (t of rootTopics(); track t.id) {
+                  <button class="facet-chip"
+                          [class.on]="currentRootId() === t.id"
+                          (click)="openTopicById(t.id)">
+                    {{ t.title }}
+                  </button>
+                }
+              </div>
+              @if (currentTopic() && subTopicsForFilter().length) {
+                <div class="facet-group">
+                  <label>Bereich:</label>
+                  <button class="facet-chip"
+                          [class.on]="filterTopic === currentRootId()"
+                          (click)="openTopicById(currentRootId()!)">Alle</button>
+                  @for (c of subTopicsForFilter(); track c.id) {
+                    <button class="facet-chip" [class.on]="filterTopic === c.id"
+                            (click)="openTopicById(c.id)">
+                      {{ c.title }} <small>{{ subtopicCount(c.id) }}</small>
+                    </button>
+                  }
+                </div>
+              }
+            </div>
 
             <ideendb-tile-grid-inner
               [apiBase]="apiBase"
@@ -885,10 +889,17 @@ export class AppShellComponent implements OnInit {
     this.loadFacets();
   }
 
-  onTopicDropdown() {
-    if (this.filterTopic) this.loadTopicContext(this.filterTopic);
-    else this.clearTopicFilter();
-    this.loadFacets();
+  /** Schaut, ob ein aktiver Filter überhaupt noch in den Facet-Counts
+   *  vorkommt. Wenn nicht (0-Treffer-Kombination), wird die aktive Pille
+   *  trotzdem als „on" angezeigt, damit der User sie wegklicken kann. */
+  phaseInAvailable(value: string): boolean {
+    return this.availablePhases().some((p) => p.value === value);
+  }
+  eventInAvailable(value: string): boolean {
+    return this.availableEvents().some((e) => e.value === value);
+  }
+  categoryInAvailable(value: string): boolean {
+    return this.availableCategories().some((c) => c.value === value);
   }
 
   /** Lädt die Facetten-Counts (Phase/Event/Kategorie) — entweder global

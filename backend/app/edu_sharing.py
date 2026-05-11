@@ -109,6 +109,7 @@ class EduSharingClient:
         skip_count: int = 0,
         sort_prop: str | None = None,
         sort_asc: bool = True,
+        auth_header: str | None = None,
     ) -> dict:
         params: dict[str, Any] = {
             "maxItems": max_items,
@@ -122,13 +123,17 @@ class EduSharingClient:
             "GET",
             f"/node/v1/nodes/-home-/{node_id}/children",
             params=params,
+            auth_header=auth_header,
         )
 
     # ---- IAM / Memberships / Group-Mitglieder ----
     async def my_memberships(self, *, auth_header: str) -> dict:
+        # `maxItems` ohne Wert paginiert auf 10 — User in vielen Gruppen
+        # liefen durch das Cap, dann fehlte die Admin-Gruppe in der Antwort.
         return await self._req(
             "GET",
             "/iam/v1/people/-home-/-me-/memberships",
+            params={"maxItems": 200, "skipCount": 0},
             auth_header=auth_header,
         )
 
@@ -181,18 +186,39 @@ class EduSharingClient:
 
     # ---- Comments ----
     async def comments(self, node_id: str, *, auth_header: str | None = None) -> dict:
-        return await self._req(
+        """Liest Kommentare und de-escaped alte Einträge, die durch einen
+        früheren Bug als JSON-stringified Text gespeichert wurden
+        (Format: `"…\\u00f6…"` mit literalen Quotes + Unicode-Escapes).
+        Heuristik: wenn Body in Quotes eingeschlossen ist und gültiges
+        JSON ist, parsen wir's und nutzen den dekodierten String."""
+        result = await self._req(
             "GET", f"/comment/v1/comments/-home-/{node_id}",
             auth_header=auth_header,
         )
+        for c in (result or {}).get("comments") or []:
+            body = c.get("comment")
+            if (isinstance(body, str)
+                    and len(body) >= 2
+                    and body[0] == '"' and body[-1] == '"'):
+                try:
+                    import json as _json
+                    decoded = _json.loads(body)
+                    if isinstance(decoded, str):
+                        c["comment"] = decoded
+                except Exception:
+                    pass
+        return result
 
     async def add_comment(
         self, node_id: str, comment: str, reply_to: str | None = None, *, auth_header: str
     ) -> Any:
-        # edu-sharing expects the raw comment text in the body (Content-Type
-        # application/json) but does NOT JSON-decode it — so we must not wrap
-        # it in quotes. Empirically verified against redaktion.openeduhub.net.
-        # Reply-to a parent comment uses the query parameter `commentReference`.
+        """edu-sharing speichert den Request-Body 1:1 als Comment-Text —
+        es findet KEINE JSON-Deserialisierung statt. Aktueller Endpoint
+        (Stand 05/2026) erwartet aber `application/json` als Content-Type
+        (sonst 415 Unsupported Media Type) und liest die rohen UTF-8 Bytes
+        als Comment-Text aus dem Body.
+        Frühere Variante `text/plain;charset=utf-8` wird abgewiesen (415).
+        Reply-to einen Eltern-Kommentar via Query-Param `commentReference`."""
         params: dict[str, str] = {}
         if reply_to:
             params["commentReference"] = reply_to
@@ -201,7 +227,7 @@ class EduSharingClient:
             f"/comment/v1/comments/-home-/{node_id}",
             params=params or None,
             content=comment.encode("utf-8"),
-            content_type="application/json",
+            content_type="application/json;charset=UTF-8",
             auth_header=auth_header,
         )
 
@@ -239,6 +265,103 @@ class EduSharingClient:
             f"/node/v1/nodes/-home-/{node_id}",
             auth_header=auth_header,
         )
+
+    async def set_node_permission(
+        self,
+        node_id: str,
+        *,
+        username: str,
+        permission: str = "Coordinator",
+        auth_header: str | None = None,
+    ) -> Any:
+        """Grants `permission` (default: Coordinator = full rights) to a USER
+        on a node. Used after a guest-created idea so the actual submitter can
+        edit / delete it later. Caller must have ChangePermissions on the node
+        (Owner = guest hat das automatisch)."""
+        body = {
+            "inherited": True,
+            "permissions": [
+                {
+                    "authority": {
+                        "authorityName": username,
+                        "authorityType": "USER",
+                    },
+                    "permissions": [permission],
+                }
+            ],
+        }
+        return await self._req(
+            "POST",
+            f"/node/v1/nodes/-home-/{node_id}/permissions",
+            json=body,
+            params={"sendMail": "false", "sendCopy": "false"},
+            auth_header=auth_header,
+        )
+
+    async def add_child_object(
+        self,
+        parent_id: str,
+        *,
+        filename: str,
+        order: int = 0,
+        auth_header: str | None = None,
+    ) -> dict:
+        """Legt einen Serienobjekt-Child unter einem ccm:io-Hauptknoten an
+        (siehe Skill `wlo-childobjects`).
+
+        Verwendet `assocType=ccm:childio` und `aspects=ccm:io_childobject`.
+        Auth muss Schreibrechte am Eltern-IO haben — sonst 403.
+        Returns das Node-Objekt mit `node.ref.id` für nachgelagerte
+        Content-Uploads.
+        """
+        params = {
+            "type": "ccm:io",
+            "renameIfExists": "true",
+            "assocType": "ccm:childio",
+            "versionComment": "",
+            "aspects": "ccm:io_childobject",
+        }
+        body = {
+            "cm:name": [filename],
+            "ccm:childobject_order": [str(order)],
+        }
+        return await self._req(
+            "POST",
+            f"/node/v1/nodes/-home-/{parent_id}/children/",
+            json=body,
+            params=params,
+            auth_header=auth_header,
+        )
+
+    async def list_child_objects(
+        self,
+        parent_id: str,
+        *,
+        auth_header: str | None = None,
+    ) -> list[dict]:
+        """Liest direkte Children eines ccm:io-Hauptknotens und filtert auf
+        solche mit dem `ccm:io_childobject`-Aspekt. Andere Children
+        (Versionen, etc.) werden ausgeklammert."""
+        result = await self.node_children(
+            parent_id, max_items=200, auth_header=auth_header,
+        )
+        if not isinstance(result, dict):
+            return []
+        out: list[dict] = []
+        for n in result.get("nodes") or []:
+            if "ccm:io_childobject" in (n.get("aspects") or []):
+                out.append(n)
+        # Sortieren nach childobject_order, dann nach createdAt als Tie-Breaker
+        def _sort_key(n: dict) -> tuple:
+            props = n.get("properties") or {}
+            order_str = (props.get("ccm:childobject_order") or ["999"])[0]
+            try:
+                order = int(order_str)
+            except (ValueError, TypeError):
+                order = 999
+            return (order, n.get("createdAt") or "")
+        out.sort(key=_sort_key)
+        return out
 
     async def upload_content(
         self,
@@ -374,17 +497,20 @@ class EduSharingClient:
     ) -> Any:
         """Submit or update a rating (1..5, or 0 to reset).
 
-        The rating endpoint is PUT with an empty-ish JSON-string body. The
-        server currently throws a 500 with `config.values.rating is null`
-        **after** persisting the value (same pattern as the known feedback
-        bug on redaktion.openeduhub.net); the caller in `routes.py` treats
-        that specific error message as a successful write.
+        edu-sharing erwartet den Rating-Wert als **Integer-String** in der
+        URL (z.B. `?rating=4`). Wenn httpx einen `float 4.0` serialisiert,
+        landet `rating=4.0` in der URL, was edu-sharing verwirft → das
+        Rating wird NICHT gespeichert und ein 500 kommt zurück.
+        Daher: bei ganzzahligen Werten als int formatieren.
+        Body ist ein JSON-String (mit Quotes); leeres `" "` reicht
+        edu-sharing.
         """
+        rating_param = str(int(rating)) if float(rating).is_integer() else str(rating)
         body = ('"' + (text or " ") + '"').encode("utf-8")
         return await self._req(
             "PUT",
             f"/rating/v1/ratings/-home-/{node_id}",
-            params={"rating": rating},
+            params={"rating": rating_param},
             content=body,
             content_type="application/json",
             auth_header=auth_header,

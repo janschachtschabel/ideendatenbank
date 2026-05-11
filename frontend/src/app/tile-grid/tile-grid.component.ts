@@ -10,6 +10,7 @@ import {
   inject,
 } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
+import { ThemeService } from '../theme.service';
 import { Idea, SortBy } from '../models';
 
 @Component({
@@ -30,14 +31,19 @@ import { Idea, SortBy } from '../models';
             </div>
           }
           <div class="body">
-            @if (i.phase) {
-              <span class="badge phase">{{ i.phase }}</span>
-            }
             @if (i.highlights?.title) {
               <h3 class="title" [innerHTML]="i.highlights!.title"></h3>
             } @else {
               <h3 class="title">{{ i.title }}</h3>
             }
+            <div class="badges">
+              @if (i.phase) {
+                <span class="badge phase">{{ i.phase }}</span>
+              }
+              @for (ev of i.events; track ev) {
+                <span class="badge event">{{ ev }}</span>
+              }
+            </div>
             @if (i.highlights?.description) {
               <p class="desc" [innerHTML]="i.highlights!.description"></p>
             } @else if (i.description) {
@@ -48,7 +54,14 @@ import { Idea, SortBy } from '../models';
                 ★ {{ i.rating_avg | number: '1.1-1' }}
                 <small>({{ i.rating_count }})</small>
               </span>
-              <span class="kpi" title="Kommentare">💬 {{ i.comment_count }}</span>
+              <span class="kpi" title="Kommentare">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                {{ i.comment_count }}
+              </span>
               @if (i.modified_at) {
                 <span class="date">{{ formatDate(i.modified_at) }}</span>
               }
@@ -102,6 +115,14 @@ import { Idea, SortBy } from '../models';
 })
 export class TileGridComponent implements OnInit, OnChanges {
   private api = inject(ApiService);
+  private themeSvc = inject(ThemeService);
+
+  /** Initiales Theme als Web-Component-Attribut, identisch zum AppShell. */
+  @Input() set theme(value: string) {
+    if (value === 'default' || value === 'hackathoern' || value === 'dark') {
+      this.themeSvc.set(value);
+    }
+  }
 
   @Input() topicId: string | null = null;
   @Input() phase: string | null = null;
@@ -109,9 +130,13 @@ export class TileGridComponent implements OnInit, OnChanges {
   @Input() category: string | null = null;
   @Input() q: string | null = null;
   @Input() sort: SortBy = 'modified';
+  @Input() order: 'asc' | 'desc' = 'desc';
   @Input() limit = 12;
   @Input() apiBase = API_BASE_DEFAULT;
   @Input() hideFooter = false;
+  /** Komma-separierte Idea-IDs für gezielte Auswahl (Embed-Anwendungen):
+   *  `<ideendb-tile-grid ids="abc,def,...">` rendert nur diese Ideen. */
+  @Input() ids: string | null = null;
 
   @Output() ideaSelected = new EventEmitter<Idea>();
   @Output() searchAlt = new EventEmitter<string>();
@@ -129,7 +154,7 @@ export class TileGridComponent implements OnInit, OnChanges {
   ngOnChanges(ch: SimpleChanges) {
     if (ch['apiBase'] && !ch['apiBase'].firstChange) this.api.setBase(this.apiBase);
     if (!ch['apiBase'] || !ch['apiBase'].firstChange) {
-      const changed = ['topicId', 'phase', 'event', 'category', 'q', 'sort', 'limit'].some(
+      const changed = ['topicId', 'phase', 'event', 'category', 'q', 'ids', 'sort', 'order', 'limit'].some(
         (k) => ch[k] && !ch[k].firstChange,
       );
       if (changed) this.reload();
@@ -154,8 +179,9 @@ export class TileGridComponent implements OnInit, OnChanges {
         event: this.event ?? undefined,
         category: this.category ?? undefined,
         q: this.q ?? undefined,
+        ids: this.ids ?? undefined,
         sort: this.sort,
-        order: 'desc',
+        order: this.order,
         limit: this.limit,
         offset,
       })

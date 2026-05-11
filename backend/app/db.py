@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
+from datetime import UTC
 
 from .config import settings
 
@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS idea (
     attachment_name TEXT,             -- filename (for kind='io')
     attachment_url TEXT,              -- direct download URL (for kind='io')
     owner_username TEXT,              -- node.owner.authorityName from edu-sharing
-    attachment_folder_id TEXT,        -- linked ccm:map sibling for additional uploads
+    attachment_folder_id TEXT,        -- LEGACY: alte Geschwister-Sammlung; Anhänge laufen
+                                      -- jetzt als ccm:childio direkt unter der Idee. Spalte
+                                      -- bleibt für historische Rows, neue Submits setzen NULL.
     created_at TEXT,
     modified_at TEXT,
     synced_at TEXT
@@ -131,6 +133,21 @@ CREATE INDEX IF NOT EXISTS idx_ranking_lookup
 CREATE INDEX IF NOT EXISTS idx_ranking_idea
   ON ranking_snapshot (idea_id, event, sort, snapshot_at);
 
+-- Meldungen / Reports: User können Ideen via "⚠ Melden"-Button melden,
+-- Moderatoren erledigen sie im Mod-UI. Tabelle hier zentral angelegt
+-- (vorher lag das verstreut als `CREATE TABLE IF NOT EXISTS` in mehreren
+-- Endpoints, was auf frischer DB zur Race auf bulk-resolve führte).
+CREATE TABLE IF NOT EXISTS idea_report (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id      TEXT NOT NULL,
+    reason       TEXT NOT NULL,
+    reporter     TEXT,           -- Username (falls eingeloggt)
+    created_at   TEXT NOT NULL,
+    resolved_at  TEXT            -- NULL = offen, gesetzt = erledigt
+);
+CREATE INDEX IF NOT EXISTS idx_report_reporter ON idea_report (reporter, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_report_open ON idea_report (resolved_at, created_at DESC);
+
 -- Aktivitäts-Log für Moderatoren: jede relevante Schreib-Aktion in der App
 -- wird hier festgehalten, damit das Mod-Team Vorgänge nachvollziehen kann.
 -- Bewusst NICHT geloggt: Rating-Add, Kommentar-Add (eigene Tabellen),
@@ -179,6 +196,33 @@ def init_db() -> None:
             con.execute("ALTER TABLE topic ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 100")
         except sqlite3.OperationalError:
             pass
+        # `original_id` wird mit-persistiert, damit das Inbox-Listing
+        # erkennt, ob ein in der Inbox liegender Knoten bereits als
+        # Reference in einer Sammlung einsortiert ist (= nicht mehr im
+        # Postfach zeigen).
+        try:
+            con.execute("ALTER TABLE idea ADD COLUMN original_id TEXT")
+        except sqlite3.OperationalError:
+            pass
+        # `hidden`: Mod-gesetzte Sichtbarkeits-Sperre. 1 = nicht in
+        # öffentlichen Listen, aber Daten bleiben erhalten (Soft-Hide).
+        try:
+            con.execute("ALTER TABLE idea ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.execute("ALTER TABLE idea ADD COLUMN hidden_reason TEXT")
+        except sqlite3.OperationalError:
+            pass
+        # User-Notification-Cursor: wann hat der User seinen Feed zuletzt
+        # angesehen? Aktivitäten danach gelten als „neu" und werden im
+        # Profil-Tab "Was ist neu" mit Badge gezählt.
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS user_feed_seen (
+                 user_key TEXT PRIMARY KEY,
+                 last_seen TEXT NOT NULL
+               )"""
+        )
         con.execute(
             "CREATE INDEX IF NOT EXISTS topic_sort_idx "
             "ON topic(parent_id, sort_order, title)"
@@ -186,12 +230,12 @@ def init_db() -> None:
         # seed phases on first start (idempotent)
         existing = con.execute("SELECT COUNT(*) FROM taxonomy_phase").fetchone()[0]
         if existing == 0:
-            from datetime import datetime, timezone
-            now = datetime.now(timezone.utc).isoformat()
+            from datetime import datetime
+            now = datetime.now(UTC).isoformat()
             con.executemany(
                 "INSERT INTO taxonomy_phase (slug,label,sort_order,active,created_at,created_by) "
                 "VALUES (?,?,?,1,?,'system')",
-                [(s, l, o, now) for s, l, o in DEFAULT_PHASES],
+                [(slug, label, order, now) for slug, label, order in DEFAULT_PHASES],
             )
         # Aufräumen: Im neuen Modell sind alle Ideen ccm:io. Falls noch
         # Cache-Reste mit kind='collection' aus älteren Sync-Versionen
@@ -205,10 +249,23 @@ def init_db() -> None:
 
 @contextmanager
 def connect():
+    """Connection-Factory mit WAL-Mode und großzügigem busy_timeout.
+
+    WAL erlaubt einen Writer + mehrere Reader gleichzeitig — verhindert
+    die ständigen `database is locked`-Fehler, wenn der 5-Minuten-Sync
+    parallel zu User-Aktionen (rate, comment, refresh_idea) schreibt.
+
+    `busy_timeout=10000` lässt SQLite bis zu 10 Sekunden auf einen
+    Lock warten, statt sofort mit `database is locked` abzubrechen.
+    Das fängt den verbleibenden Rest-Konflikte zwischen zwei Writern auf.
+    """
     _ensure_dir()
-    con = sqlite3.connect(settings.sqlite_path)
+    con = sqlite3.connect(settings.sqlite_path, timeout=10.0)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous = NORMAL")
+    con.execute("PRAGMA busy_timeout = 10000")
     try:
         yield con
         con.commit()

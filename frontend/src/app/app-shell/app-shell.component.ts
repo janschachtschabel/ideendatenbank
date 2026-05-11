@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, HostListener, Input, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
+import { ThemeService, ThemeKey } from '../theme.service';
 import { Idea, Topic } from '../models';
 import { TileGridComponent } from '../tile-grid/tile-grid.component';
 import { IdeaDetailComponent } from './idea-detail.component';
@@ -9,9 +10,13 @@ import { SubmitIdeaComponent } from './submit-idea.component';
 import { LoginDialogComponent } from './login-dialog.component';
 import { ModerationComponent } from './moderation.component';
 import { ProfileComponent } from './profile.component';
+import { PublicProfileComponent } from './public-profile.component';
 import { RankingComponent } from './ranking.component';
+import { LegalComponent } from './legal.component';
+import { EmbedComponent } from './embed.component';
+import { HelpComponent } from './help.component';
 
-type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 'submit' | 'moderation' | 'profile';
+type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 'submit' | 'moderation' | 'profile' | 'user' | 'imprint' | 'privacy' | 'embed' | 'help';
 
 @Component({
   selector: 'ideendb-app-inner',
@@ -25,23 +30,46 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
     LoginDialogComponent,
     ModerationComponent,
     ProfileComponent,
+    PublicProfileComponent,
     RankingComponent,
+    LegalComponent,
+    EmbedComponent,
+    HelpComponent,
   ],
   styleUrls: ['./app-shell.component.scss'],
   template: `
     <header class="topbar">
       <div class="container bar">
-        <button class="brand" (click)="go('home')">
-          <span class="brand-mark">💡</span>
-          <span class="brand-sub">Ideendatenbank</span>
+        <button class="brand" (click)="go('home')" aria-label="HackathOERn Ideendatenbank — Startseite">
+          <!-- Logo-Variante folgt dem Theme: das hackathoern-Theme hat eine
+               helle Topbar mit dunkler Schrift, dort braucht das Logo eine
+               eigene Variante (dunkler Schriftzug); die anderen Themes
+               (default, dark) nutzen das Standard-Logo auf dunkler Topbar. -->
+          <img [src]="themeSvc.current() === 'hackathoern' ? 'logo-hackathoern.png' : 'logo.png'"
+               alt="HackathOERn Ideendatenbank"
+               class="brand-logo" width="123" height="44" />
         </button>
-        <nav class="nav">
-          <button [class.active]="view()==='home'"    (click)="go('home')">Start</button>
-          <button [class.active]="view()==='browser'" (click)="go('browser')">Ideen</button>
-          <button [class.active]="view()==='topics'"  (click)="go('topics')">Themen</button>
-          <button [class.active]="view()==='events'"  (click)="go('events')">Veranstaltungen</button>
-          <button [class.active]="view()==='ranking'" (click)="go('ranking')">🏆 Rangliste</button>
-          <button class="cta" (click)="go('submit')">+ Idee einreichen</button>
+        <button class="burger"
+                [class.open]="mobileNavOpen"
+                (click)="mobileNavOpen = !mobileNavOpen; $event.stopPropagation()"
+                aria-label="Menü">
+          <span></span><span></span><span></span>
+        </button>
+        <nav class="nav" [class.open]="mobileNavOpen">
+          <button [class.active]="view()==='home'"    (click)="go('home'); mobileNavOpen=false">Start</button>
+          <button [class.active]="view()==='browser'" (click)="go('browser'); mobileNavOpen=false">Ideen</button>
+          <button [class.active]="view()==='topics'"  (click)="go('topics'); mobileNavOpen=false">Herausforderungen</button>
+          <button [class.active]="view()==='events'"  (click)="go('events'); mobileNavOpen=false">Veranstaltungen</button>
+          <button [class.active]="view()==='ranking'" (click)="go('ranking'); mobileNavOpen=false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                 style="vertical-align: -2px; margin-right: 4px">
+              <path d="M8 21h8M12 17v4M7 4h10v6a5 5 0 0 1-10 0V4zM17 4h2a2 2 0 0 1 2 2v2a3 3 0 0 1-3 3M7 4H5a2 2 0 0 0-2 2v2a3 3 0 0 0 3 3"/>
+            </svg>
+            Rangliste
+          </button>
+          <button class="cta" (click)="go('submit'); mobileNavOpen=false">Idee einreichen</button>
 
           @if (api.hasCredentials()) {
             <div class="user-menu" (click)="$event.stopPropagation()">
@@ -50,21 +78,41 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                       (click)="userMenuOpen = !userMenuOpen"
                       [title]="api.currentUser() || ''">
                 ● {{ api.currentUser() || 'Angemeldet' }}
+                @if (unseenCount() > 0) {
+                  <span class="notif-badge" [title]="unseenCount() + ' neue Aktivität(en)'">
+                    {{ unseenCount() > 99 ? '99+' : unseenCount() }}
+                  </span>
+                }
                 <span class="caret">▾</span>
               </button>
               @if (userMenuOpen) {
                 <div class="user-menu-popup">
-                  <button (click)="go('profile'); userMenuOpen=false">
-                    <span class="icon">👤</span>Mein Bereich
+                  <button (click)="go('profile'); userMenuOpen=false; mobileNavOpen=false">
+                    <span class="icon">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                      </svg>
+                    </span>Mein Bereich
                   </button>
                   @if (api.isModerator()) {
-                    <button (click)="go('moderation'); userMenuOpen=false">
-                      <span class="icon">🛠</span>Moderation
+                    <button (click)="go('moderation'); userMenuOpen=false; mobileNavOpen=false">
+                      <span class="icon">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                        </svg>
+                      </span>Moderation
                     </button>
                   }
                   <hr>
-                  <button (click)="logout(); userMenuOpen=false">
-                    <span class="icon">↩</span>Abmelden
+                  <button (click)="logout(); userMenuOpen=false; mobileNavOpen=false">
+                    <span class="icon">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                        <polyline points="16 17 21 12 16 7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                      </svg>
+                    </span>Abmelden
                   </button>
                 </div>
               }
@@ -72,6 +120,31 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
           } @else {
             <button class="user ghost" (click)="showLogin=true">Anmelden</button>
           }
+
+          <!-- Theme-Switcher rechts vom Anmelde/User-Button. Drei Farbquadrate
+               vertikal gestapelt, Höhe matcht "+ Idee einreichen". -->
+          <div class="theme-switch" (click)="$event.stopPropagation()">
+            <button class="theme-toggle"
+                    (click)="themeMenuOpen = !themeMenuOpen"
+                    [title]="'Farbschema wechseln'"
+                    [attr.aria-label]="'Farbschema wechseln'">
+              @for (t of themeSvc.options; track t.key) {
+                <span class="swatch" [style.background]="t.swatch"></span>
+              }
+            </button>
+            @if (themeMenuOpen) {
+              <div class="theme-menu">
+                @for (t of themeSvc.options; track t.key) {
+                  <button [class.active]="themeSvc.current() === t.key"
+                          (click)="setTheme(t.key)">
+                    <span class="swatch" [style.background]="t.swatch"></span>
+                    <span>{{ t.label }}</span>
+                    @if (themeSvc.current() === t.key) { <span class="check">✓</span> }
+                  </button>
+                }
+              </div>
+            }
+          </div>
         </nav>
       </div>
     </header>
@@ -98,24 +171,30 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
             </div>
             <ideendb-tile-grid-inner
               [apiBase]="apiBase"
-              [limit]="6"
+              [limit]="8"
               sort="modified"
-              [hideFooter]="true"
               (ideaSelected)="openIdea($event)">
             </ideendb-tile-grid-inner>
           </section>
 
           <section class="container section">
             <div class="section-head">
-              <h2>Themen durchstöbern</h2>
-              <button class="link" (click)="go('topics')">Zur Themen-Übersicht →</button>
+              <h2>Herausforderungen durchstöbern</h2>
+              <button class="link" (click)="go('topics')">Zur Übersicht →</button>
             </div>
             <div class="topic-grid-compact">
               @for (t of rootTopics(); track t.id; let i = $index) {
                 <button class="topic-card-compact"
-                        [style.--theme-color]="colorFor(t, i)"
                         (click)="openTopic(t)">
-                  <span class="num">{{ (i + 1).toString().padStart(2, '0') }}</span>
+                  <span class="lead-icon" aria-hidden="true">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                         stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"/>
+                      <circle cx="12" cy="12" r="6"/>
+                      <circle cx="12" cy="12" r="2"/>
+                    </svg>
+                  </span>
                   <div class="body">
                     <h3>{{ t.title }}</h3>
                     <span class="count">{{ ideaCountByTopic[t.id] ?? 0 }} {{ ideaCountByTopic[t.id] === 1 ? 'Idee' : 'Ideen' }}</span>
@@ -142,40 +221,32 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               }
             </nav>
 
-            @if (currentTopic(); as t) {
-              <h2>{{ t.title }}</h2>
-              @if (t.description) { <p class="topic-desc" [innerHTML]="t.description"></p> }
-            } @else {
-              <h2>Alle Ideen</h2>
-            }
-
-            <!-- Sub-topic cards (drill down further) -->
-            @if (topicChildren().length) {
-              <div class="sub-topics">
-                @for (c of topicChildren(); track c.id) {
-                  <button class="sub-chip" (click)="openTopicById(c.id)">
-                    {{ c.title }}
-                    <span class="count">{{ subtopicCount(c.id) }}</span>
-                  </button>
-                }
-              </div>
-            }
+            <h2>{{ currentTopic()?.title || 'Alle Ideen' }}</h2>
 
             <div class="controls">
               <input class="search" type="search" placeholder="Suchen…"
                      [(ngModel)]="searchQ" (input)="onSearchInput()" />
-              <select [(ngModel)]="sort" (change)="bump()">
-                <option value="modified">Letzte Änderungen</option>
-                <option value="created">Neueste</option>
-                <option value="rating">Beste Bewertung</option>
-                <option value="comments">Meiste Kommentare</option>
-                <option value="title">Alphabetisch</option>
-              </select>
+              <!-- Sortierung: Feld + Richtungs-Toggle -->
+              <div class="sort-group">
+                <select [(ngModel)]="sort" (change)="bump()" aria-label="Sortierung">
+                  <option value="modified">Datum (geändert)</option>
+                  <option value="created">Datum (erstellt)</option>
+                  <option value="rating">Bewertung</option>
+                  <option value="comments">Kommentare</option>
+                  <option value="title">Name</option>
+                </select>
+                <button type="button" class="sort-dir"
+                        (click)="toggleSortDir()"
+                        [attr.aria-label]="sortOrder === 'desc' ? 'Absteigend' : 'Aufsteigend'"
+                        [title]="sortOrder === 'desc' ? 'Absteigend (oben: höchster Wert)' : 'Aufsteigend (oben: niedrigster Wert)'">
+                  {{ sortOrder === 'desc' ? '↓' : '↑' }}
+                </button>
+              </div>
               @if (!currentTopic()) {
                 <select [(ngModel)]="filterTopic" (change)="onTopicDropdown()">
-                  <option value="">Alle Themen</option>
-                  @for (t of topicsHierarchical(); track t.id) {
-                    <option [value]="t.id">{{ prefixFor(t) }}{{ t.title }}</option>
+                  <option value="">Alle Herausforderungen</option>
+                  @for (t of rootTopics(); track t.id) {
+                    <option [value]="t.id">{{ t.title }}</option>
                   }
                 </select>
               }
@@ -191,7 +262,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                     @for (p of availablePhases(); track p.value) {
                       <button class="facet-chip" [class.on]="filterPhase===p.value"
                               (click)="setPhase(p.value)">
-                        {{ p.value }} <small>{{ p.count }}</small>
+                        {{ phaseLabel(p.value) }} <small>{{ p.count }}</small>
                       </button>
                     }
                   </div>
@@ -204,7 +275,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                     @for (e of availableEvents(); track e.value) {
                       <button class="facet-chip" [class.on]="filterEvent===e.value"
                               (click)="setEvent(e.value)">
-                        {{ e.value }} <small>{{ e.count }}</small>
+                        {{ eventLabel(e.value) }} <small>{{ e.count }}</small>
                       </button>
                     }
                   </div>
@@ -222,6 +293,24 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                     }
                   </div>
                 }
+                <!-- Sub-Bereiche (Untersammlungen) der aktuell gewählten Herausforderung
+                     als dritte Filter-Reihe. Funktioniert auf beiden Drilldown-Ebenen:
+                     auf Level-1 zeigen wir die eigenen Children, auf Level-2 die
+                     Geschwister (= Children des Parents) inkl. der aktuellen Auswahl. -->
+                @if (currentTopic() && subTopicsForFilter().length) {
+                  <div class="facet-group">
+                    <label>Bereich:</label>
+                    <button class="facet-chip"
+                            [class.on]="filterTopic === currentRootId()"
+                            (click)="openTopicById(currentRootId()!)">Alle</button>
+                    @for (c of subTopicsForFilter(); track c.id) {
+                      <button class="facet-chip" [class.on]="filterTopic === c.id"
+                              (click)="openTopicById(c.id)">
+                        {{ c.title }} <small>{{ subtopicCount(c.id) }}</small>
+                      </button>
+                    }
+                  </div>
+                }
               </div>
             }
 
@@ -229,6 +318,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               [apiBase]="apiBase"
               [q]="searchQ || null"
               [sort]="sort"
+              [order]="sortOrder"
               [topicId]="filterTopic || null"
               [phase]="filterPhase"
               [event]="filterEvent"
@@ -242,26 +332,9 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
 
         @case ('topics') {
           <section class="container section">
-            @if (topicDrillChild()) {
-              <button class="back-link" (click)="topicDrillChild.set(null)">
-                ← Zurück zu {{ topicDrillRoot()?.title || 'den Herausforderungen' }}
-              </button>
-              <div class="topics-hero">
-                <h2>{{ topicDrillChild()!.title }}</h2>
-                <p>
-                  Ideen unter „{{ topicDrillRoot()?.title }}" › {{ topicDrillChild()!.title }}.
-                </p>
-              </div>
-              <ideendb-tile-grid-inner
-                [apiBase]="apiBase"
-                [topicId]="topicDrillChild()!.id"
-                [sort]="'modified'"
-                [limit]="48"
-                (ideaSelected)="openIdea($event)">
-              </ideendb-tile-grid-inner>
-            } @else if (topicDrillRoot()) {
-              <button class="back-link" (click)="topicDrillRoot.set(null)">
-                ← Zurück zu allen Themen
+            @if (topicDrillRoot()) {
+              <button class="back-link" (click)="topicDrillRoot.set(null); topicDrillChild.set(null)">
+                ← Zurück zu allen Herausforderungen
               </button>
               <div class="topics-hero">
                 <h2>{{ topicDrillRoot()!.title }}</h2>
@@ -269,43 +342,52 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                   {{ ideaCountByTopic[topicDrillRoot()!.id] ?? 0 }}
                   {{ ideaCountByTopic[topicDrillRoot()!.id] === 1 ? 'Idee' : 'Ideen' }}
                   in {{ childrenOf(topicDrillRoot()!.id).length }}
-                  {{ childrenOf(topicDrillRoot()!.id).length === 1 ? 'Herausforderung' : 'Herausforderungen' }}.
-                  Klick auf eine Herausforderung, um direkt zu den Ideen zu gelangen.
+                  {{ childrenOf(topicDrillRoot()!.id).length === 1 ? 'Bereich' : 'Bereichen' }}.
+                  Wähle oben einen Bereich, um die Liste einzugrenzen.
                 </p>
               </div>
-              <div class="topic-grid-compact">
-                @for (ch of childrenOf(topicDrillRoot()!.id); track ch.id; let i = $index) {
-                  <button class="topic-card-compact"
-                          [style.--theme-color]="colorFor(topicDrillRoot()!, drillRootIndex())"
-                          (click)="enterTopicChildDrill(ch)">
-                    <span class="num">{{ (i + 1).toString().padStart(2, '0') }}</span>
-                    <div class="body">
-                      <h3>{{ ch.title }}</h3>
-                      <span class="count">
-                        {{ subtopicCount(ch.id) }}
-                        {{ subtopicCount(ch.id) === 1 ? 'Idee' : 'Ideen' }}
-                      </span>
-                    </div>
-                    <span class="arrow">→</span>
+              <!-- Bereichs-Filter als Pillen über dem Ideen-Grid -->
+              @if (childrenOf(topicDrillRoot()!.id).length) {
+                <div class="topic-pills">
+                  <button class="facet-chip" [class.on]="!topicDrillChild()"
+                          (click)="topicDrillChild.set(null)">
+                    Alle <small>({{ ideaCountByTopic[topicDrillRoot()!.id] ?? 0 }})</small>
                   </button>
-                } @empty {
-                  <div class="empty-state">
-                    <p>Dieses Thema hat noch keine Herausforderungen.</p>
-                  </div>
-                }
-              </div>
+                  @for (ch of childrenOf(topicDrillRoot()!.id); track ch.id) {
+                    <button class="facet-chip"
+                            [class.on]="topicDrillChild()?.id === ch.id"
+                            (click)="topicDrillChild.set(ch)">
+                      {{ ch.title }} <small>({{ subtopicCount(ch.id) }})</small>
+                    </button>
+                  }
+                </div>
+              }
+              <ideendb-tile-grid-inner
+                [apiBase]="apiBase"
+                [topicId]="topicDrillChild()?.id || topicDrillRoot()!.id"
+                [sort]="'modified'"
+                [limit]="48"
+                (ideaSelected)="openIdea($event)">
+              </ideendb-tile-grid-inner>
             } @else {
               <div class="topics-hero">
-                <h2>Themen durchstöbern</h2>
+                <h2>Herausforderungen durchstöbern</h2>
                 <p>Elf Handlungsfelder rund um bessere OER-Infrastrukturen. Klick
-                   auf eine Karte, um die Herausforderungen des Themas zu sehen.</p>
+                   auf eine Karte, um die Bereiche der Herausforderung zu sehen.</p>
               </div>
               <div class="topic-grid-compact">
                 @for (root of rootTopics(); track root.id; let i = $index) {
                   <button class="topic-card-compact"
-                          [style.--theme-color]="colorFor(root, i)"
                           (click)="enterTopicDrill(root)">
-                    <span class="num">{{ (i + 1).toString().padStart(2, '0') }}</span>
+                    <span class="lead-icon" aria-hidden="true">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                           stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                           stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <circle cx="12" cy="12" r="6"/>
+                        <circle cx="12" cy="12" r="2"/>
+                      </svg>
+                    </span>
                     <div class="body">
                       <h3>{{ root.title }}</h3>
                       <span class="count">
@@ -330,11 +412,27 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               <div class="topics-hero event-hero">
                 <div class="event-hero-head">
                   <div>
-                    <h2>📅 {{ eventLabel(eventDrill()!) }}</h2>
+                    <h2>
+                      <svg class="hdr-ico" width="22" height="22" viewBox="0 0 24 24" fill="none"
+                           stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                           stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/>
+                        <line x1="8" y1="2" x2="8" y2="6"/>
+                        <line x1="3" y1="10" x2="21" y2="10"/>
+                      </svg>
+                      {{ eventLabel(eventDrill()!) }}
+                    </h2>
                     <p>Alle Ideen, die mit dieser Veranstaltung verknüpft sind.</p>
                   </div>
                   <button class="share-btn" (click)="toggleShare()">
-                    🔗 {{ shareOpen() ? 'Schließen' : 'Teilen / QR-Code' }}
+                    <svg class="card-ico" width="16" height="16" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                    </svg>
+                    {{ shareOpen() ? 'Schließen' : 'Teilen / QR-Code' }}
                   </button>
                 </div>
 
@@ -387,19 +485,27 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                    einer Veranstaltung.</p>
               </div>
 
-              @if (!availableEvents().length) {
+              @if (!allAvailableEvents().length) {
                 <div class="empty-state">
                   <p>Noch keine Veranstaltungen mit Ideen verknüpft.</p>
                 </div>
               } @else {
                 <div class="topic-grid-compact">
-                  @for (e of availableEvents(); track e.value; let i = $index) {
+                  @for (e of allAvailableEvents(); track e.value; let i = $index) {
                     <button class="topic-card-compact"
-                            [style.--theme-color]="colorForKey(e.value, i)"
                             (click)="enterEventDrill(e.value)">
-                      <span class="num">{{ (i + 1).toString().padStart(2, '0') }}</span>
+                      <span class="lead-icon" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                             stroke-linejoin="round">
+                          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                          <line x1="16" y1="2" x2="16" y2="6"/>
+                          <line x1="8" y1="2" x2="8" y2="6"/>
+                          <line x1="3" y1="10" x2="21" y2="10"/>
+                        </svg>
+                      </span>
                       <div class="body">
-                        <h3>📅 {{ eventLabel(e.value) }}</h3>
+                        <h3>{{ eventLabel(e.value) }}</h3>
                         <span class="count">{{ e.count }} {{ e.count === 1 ? 'Idee' : 'Ideen' }}</span>
                       </div>
                       <span class="arrow">→</span>
@@ -414,7 +520,15 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
         @case ('ranking') {
           <section class="container section">
             <div class="topics-hero">
-              <h2>🏆 Rangliste &amp; Trends</h2>
+              <h2>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                     style="vertical-align: -3px; margin-right: 6px">
+                  <path d="M8 21h8M12 17v4M7 4h10v6a5 5 0 0 1-10 0V4zM17 4h2a2 2 0 0 1 2 2v2a3 3 0 0 1-3 3M7 4H5a2 2 0 0 0-2 2v2a3 3 0 0 0 3 3"/>
+                </svg>
+                Rangliste &amp; Trends
+              </h2>
               <p>Bewegungs-Pfeile zeigen, wie Ideen sich seit dem vorigen Snapshot
                  verändert haben. Der Verlauf-Chart oben skizziert die Top-5 über
                  die letzten Snapshots — pro Veranstaltung filterbar.</p>
@@ -422,7 +536,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
 
             <ideendb-ranking
               [apiBase]="apiBase"
-              [events]="availableEvents()"
+              [events]="allAvailableEvents()"
               [eventLabels]="eventLabels"
               (ideaSelected)="openIdea($event)">
             </ideendb-ranking>
@@ -449,7 +563,8 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
         @case ('moderation') {
           <ideendb-moderation
             [apiBase]="apiBase"
-            [currentUser]="api.currentUser() || ''">
+            [currentUser]="api.currentUser() || ''"
+            (ideaSelected)="openIdea($any($event))">
           </ideendb-moderation>
         }
 
@@ -460,12 +575,31 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
             (ideaSelected)="openIdea($event)">
           </ideendb-profile>
         }
+
+        @case ('user') {
+          <ideendb-public-profile
+            [apiBase]="apiBase"
+            [username]="profileUsername"
+            (ideaSelected)="openIdea($event)">
+          </ideendb-public-profile>
+        }
+
+        @case ('imprint')  { <ideendb-legal mode="imprint"></ideendb-legal> }
+        @case ('privacy')  { <ideendb-legal mode="privacy"></ideendb-legal> }
+        @case ('embed')    { <ideendb-embed></ideendb-embed> }
+        @case ('help')     { <ideendb-help></ideendb-help> }
       }
     </main>
 
     <footer class="footer">
-      <div class="container">
+      <div class="container footer-inner">
         <span>HackathOERn Ideendatenbank</span>
+        <span class="footer-links">
+          <button type="button" class="footer-link" (click)="go('help')">Hilfe</button>
+          <button type="button" class="footer-link" (click)="go('embed')">Einbinden</button>
+          <button type="button" class="footer-link" (click)="go('imprint')">Impressum</button>
+          <button type="button" class="footer-link" (click)="go('privacy')">Datenschutz</button>
+        </span>
         <span class="muted">Powered by edu-sharing · {{ apiBase }}</span>
       </div>
     </footer>
@@ -477,13 +611,67 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
 })
 export class AppShellComponent implements OnInit {
   api = inject(ApiService);
+  themeSvc = inject(ThemeService);
+  themeMenuOpen = false;
+  setTheme(k: ThemeKey) { this.themeSvc.set(k); this.themeMenuOpen = false; }
+
+  /** Initiales Theme als Web-Component-Attribut.
+   *  Erlaubte Werte: 'default' | 'hackathoern' | 'dark'.
+   *  Bei leerem Wert greift die im LocalStorage gespeicherte Wahl bzw. die
+   *  System-Präferenz (prefers-color-scheme: dark). User-Wahl im Switcher
+   *  überschreibt diesen Wert nach Klick und persistiert. */
+  @Input() set theme(value: string) {
+    if (value === 'default' || value === 'hackathoern' || value === 'dark') {
+      this.themeSvc.set(value);
+    }
+  }
 
   @Input() apiBase = API_BASE_DEFAULT;
+
+  /** Web-Component-Attribute für Embed-Szenarien:
+   *    <ideendb-app view="detail" idea-id="<id>"></ideendb-app>
+   *    <ideendb-app view="user" u="<username>"></ideendb-app>
+   *  Werden bei Init wie URL-Params interpretiert. */
+  @Input('view') initialView: string | null = null;
+  @Input('idea-id') initialIdeaId: string | null = null;
+  @Input('u') initialUser: string | null = null;
 
   view = signal<View>('home');
   currentIdeaId = signal<string | null>(null);
   /** Aus URL-Query gelesener Event-Slug, der ans Submit-Formular durchgereicht wird. */
   presetEventForSubmit: string | null = null;
+  /** Username für `?view=user&u=<name>`-Aufrufe. */
+  profileUsername = '';
+  /** Anzahl ungelesener Feed-Events (Polling alle 60s im Hintergrund). */
+  unseenCount = signal(0);
+  private unseenPollHandle?: number;
+
+  refreshUnseenCount() {
+    if (!this.api.hasCredentials()) { this.unseenCount.set(0); return; }
+    this.api.unseenNotifications().subscribe({
+      next: (r) => this.unseenCount.set(r.count || 0),
+      error: () => {},
+    });
+    // einmaliges Polling alle 60s einrichten
+    if (!this.unseenPollHandle) {
+      this.unseenPollHandle = window.setInterval(() => {
+        if (this.api.hasCredentials()) {
+          this.api.unseenNotifications().subscribe({
+            next: (r) => this.unseenCount.set(r.count || 0),
+            error: () => {},
+          });
+        }
+      }, 60_000);
+    }
+  }
+
+  markFeedSeen() {
+    if (!this.api.hasCredentials()) return;
+    this.api.markNotificationsSeen().subscribe({
+      next: () => this.unseenCount.set(0),
+      error: () => {},
+    });
+  }
   rootTopics = signal<Topic[]>([]);
   allTopics = signal<Topic[]>([]);
   topicDrillRoot = signal<Topic | null>(null);
@@ -491,6 +679,7 @@ export class AppShellComponent implements OnInit {
   eventDrill = signal<string | null>(null);
   /** slug → label aus der kuratierten Event-Taxonomie. */
   eventLabels = new Map<string, string>();
+  phaseLabels = new Map<string, string>();
   currentTopic = signal<Topic | null>(null);
   topicParent = signal<Topic | null>(null);
   topicChildren = signal<Topic[]>([]);
@@ -499,6 +688,12 @@ export class AppShellComponent implements OnInit {
 
   searchQ = '';
   sort: 'modified' | 'created' | 'rating' | 'comments' | 'title' = 'modified';
+  sortOrder: 'asc' | 'desc' = 'desc';
+
+  toggleSortDir() {
+    this.sortOrder = this.sortOrder === 'desc' ? 'asc' : 'desc';
+    this.bump();
+  }
   filterTopic = '';
   filterPhase: string | null = null;
   filterEvent: string | null = null;
@@ -508,33 +703,54 @@ export class AppShellComponent implements OnInit {
   availablePhases = signal<{ value: string; count: number }[]>([]);
   availableEvents = signal<{ value: string; count: number }[]>([]);
   availableCategories = signal<{ value: string; count: number }[]>([]);
+  /** Globale Event-Counts (nie topic-scoped) — für Veranstaltungs-Seite. */
+  allAvailableEvents = signal<{ value: string; count: number }[]>([]);
   showLogin = false;
   userMenuOpen = false;
+  mobileNavOpen = false;
 
   @HostListener('document:click')
-  onDocClick() { this.userMenuOpen = false; }
+  onDocClick() {
+    this.userMenuOpen = false;
+    this.mobileNavOpen = false;
+    this.themeMenuOpen = false;
+  }
 
   private searchDebounce?: number;
 
   ngOnInit() {
     this.api.setBase(this.apiBase);
-    this.parseUrlParams();
+    // Web-Component-Attribute haben Vorrang vor URL-Params, falls gesetzt.
+    if (this.initialView === 'detail' && this.initialIdeaId) {
+      setTimeout(() => {
+        this.api.getIdea(this.initialIdeaId!).subscribe({
+          next: (i) => this.openIdea(i as any),
+          error: () => this.view.set('home'),
+        });
+      }, 0);
+    } else if (this.initialView === 'user' && this.initialUser) {
+      this.profileUsername = this.initialUser;
+      setTimeout(() => this.view.set('user'), 0);
+    } else {
+      this.parseUrlParams();
+    }
     // Falls bereits eingeloggt (sessionStorage): Mod-Status auffrischen
     if (this.api.hasCredentials()) {
       this.api.refreshMe().subscribe({
-        next: () => {},
+        next: () => this.refreshUnseenCount(),
         error: () => {},
       });
     }
-    this.api.meta().subscribe((m) => {
-      this.availablePhases.set(m.phases || []);
-      this.availableEvents.set(m.events || []);
-      this.availableCategories.set(m.categories || []);
-    });
+    this.loadFacets();
     // Event-Slug → Label aus kuratierter Taxonomie für hübschere Anzeige
     this.api.listEvents(true).subscribe((events) => {
       this.eventLabels.clear();
       for (const e of events) this.eventLabels.set(e.slug, e.label);
+    });
+    // Analog Phasen
+    this.api.listPhases().subscribe((phases) => {
+      this.phaseLabels.clear();
+      for (const p of phases) this.phaseLabels.set(p.slug, p.label);
     });
     this.api.topics().subscribe((ts) => {
       this.allTopics.set(ts);
@@ -566,8 +782,26 @@ export class AppShellComponent implements OnInit {
       const params = new URLSearchParams(window.location.search);
       const event = params.get('event');
       const view = params.get('view') as View | null;
+      const userParam = params.get('u');
+      const ideaParam = params.get('id');
       if (event) this.presetEventForSubmit = event;
-      if (view && ['home','browser','topics','events','ranking','submit','profile','moderation'].includes(view)) {
+      // Direkt-Detail per Share-Link: ?view=detail&id=<idea-id>
+      if (view === 'detail' && ideaParam) {
+        setTimeout(() => {
+          this.api.getIdea(ideaParam).subscribe({
+            next: (i) => this.openIdea(i as any),
+            error: () => this.view.set('home'),
+          });
+        }, 0);
+        return;
+      }
+      // Öffentliches Profil: ?view=user&u=<name>
+      if (view === 'user' && userParam) {
+        this.profileUsername = userParam;
+        setTimeout(() => this.view.set('user'), 0);
+        return;
+      }
+      if (view && ['home','browser','topics','events','ranking','submit','profile','moderation','imprint','privacy','embed','help'].includes(view)) {
         // setTimeout, damit ngOnInit zuerst durchläuft
         setTimeout(() => this.view.set(view as View), 0);
       } else if (event) {
@@ -589,6 +823,8 @@ export class AppShellComponent implements OnInit {
     if (v !== 'events') this.eventDrill.set(null);
     this.view.set(v);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    // „Was ist neu"-Badge wird beim Öffnen von Mein Bereich geleert
+    if (v === 'profile') this.markFeedSeen();
   }
 
   openIdea(i: Idea) {
@@ -637,6 +873,7 @@ export class AppShellComponent implements OnInit {
     this.sort = 'modified';
     this.go('browser');
     this.loadTopicContext(id);
+    this.loadFacets();
   }
 
   clearTopicFilter() {
@@ -645,11 +882,32 @@ export class AppShellComponent implements OnInit {
     this.topicParent.set(null);
     this.topicChildren.set([]);
     this.searchQ = '';
+    this.loadFacets();
   }
 
   onTopicDropdown() {
     if (this.filterTopic) this.loadTopicContext(this.filterTopic);
     else this.clearTopicFilter();
+    this.loadFacets();
+  }
+
+  /** Lädt die Facetten-Counts (Phase/Event/Kategorie) — entweder global
+   *  (Browser ohne Topic-Filter) oder auf den Subtree der aktuellen
+   *  Sammlung beschränkt, damit die Counts zur Auswahl passen.
+   *  Zusätzlich werden die GLOBAL-Counts in `allAvailable*`-Signalen
+   *  abgelegt, damit die Veranstaltungs-/Themen-Seite immer alle Optionen
+   *  zeigt — unabhängig vom Browser-Filter. */
+  private loadFacets() {
+    // Global (für Events-Seite, Themen-Übersicht)
+    this.api.meta(null).subscribe((m) => {
+      this.allAvailableEvents.set(m.events || []);
+    });
+    // Scoped (für Browser-Pillen)
+    this.api.meta(this.filterTopic || null).subscribe((m) => {
+      this.availablePhases.set(m.phases || []);
+      this.availableEvents.set(m.events || []);
+      this.availableCategories.set(m.categories || []);
+    });
   }
 
   private loadTopicContext(id: string) {
@@ -670,6 +928,30 @@ export class AppShellComponent implements OnInit {
 
   subtopicCount(id: string): number {
     return this.subtopicCounts[id] ?? 0;
+  }
+
+  /** ID des aktuellen Root-Topics (= Eltern-Sammlung, falls wir in einer
+   *  Untersammlung sind, oder die aktuelle Sammlung selbst). Wird vom
+   *  „Alle"-Bereich-Filter genutzt. */
+  currentRootId(): string | null {
+    const t = this.currentTopic();
+    if (!t) return null;
+    return this.topicParent()?.id || t.id;
+  }
+
+  /** Liste der Schwester-Sammlungen (= Children des Root) für den
+   *  Bereich-Filter. Auf Level-1: eigene Children; auf Level-2:
+   *  Geschwister inkl. der aktuell offenen Sammlung. */
+  subTopicsForFilter(): Topic[] {
+    const t = this.currentTopic();
+    if (!t) return [];
+    const parent = this.topicParent();
+    if (!parent) {
+      // Wir sind auf Level-1 → eigene Children sind die Bereiche
+      return this.topicChildren();
+    }
+    // Wir sind auf Level-2 → die Children des Parents = unsere Geschwister
+    return this.allTopics().filter((x) => x.parent_id === parent.id);
   }
 
   setPhase(v: string | null) { this.filterPhase = v; }
@@ -695,6 +977,13 @@ export class AppShellComponent implements OnInit {
   eventLabel(slug: string): string {
     return this.eventLabels.get(slug) || slug;
   }
+  /** Analog für Phasen — slug → kuratiertes Label. */
+  phaseLabel(slug: string): string {
+    return this.phaseLabels.get(slug) || this._capitalize(slug);
+  }
+  private _capitalize(s: string): string {
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  }
 
   // ===== Share-Link / QR-Code für die aktuell aufgeklappte Veranstaltung =====
   shareOpen = signal(false);
@@ -712,7 +1001,7 @@ export class AppShellComponent implements OnInit {
   }
 
   /** QR-Code via öffentlichem qrserver.com. Keine PII enthalten. */
-  eventQrUrl(slug: string, size: number = 240): string {
+  eventQrUrl(slug: string, size = 240): string {
     const data = encodeURIComponent(this.eventShareUrl(slug));
     return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}`;
   }

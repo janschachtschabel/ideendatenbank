@@ -27,8 +27,12 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
       cursor: pointer; font: inherit;
       font-weight: 600; color: var(--wlo-muted);
       border-bottom: 3px solid transparent; margin-bottom: -2px;
+      display: inline-flex; align-items: center; gap: 6px;
       &:hover { color: var(--wlo-primary); }
       &.active { color: var(--wlo-primary); border-bottom-color: var(--wlo-primary); }
+      .tab-ico { width: 14px; height: 14px; stroke: currentColor;
+                 stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+                 fill: none; flex-shrink: 0; }
       .badge {
         display: inline-block; margin-left: 8px;
         background: var(--wlo-bg); border-radius: 999px;
@@ -39,14 +43,14 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
       }
     }
     .empty {
-      background: #fff; border: 1px solid var(--wlo-border); border-radius: 10px;
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 10px;
       padding: 48px 24px; text-align: center; color: var(--wlo-muted);
     }
     .empty h2 { margin: 0 0 8px; color: var(--wlo-text); font-size: 1.1rem; }
     .empty p { margin: 0; font-size: .95rem; }
     .grid { display: grid; gap: 14px;
             grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
-    .feed { background: #fff; border: 1px solid var(--wlo-border);
+    .feed { background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
             border-radius: 10px; overflow: hidden; }
     .feed-row {
       display: grid;
@@ -58,7 +62,11 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
       &:hover { background: var(--wlo-bg, #f4f6f9); }
       .feed-time { color: var(--wlo-muted); font-size: .82rem;
                    font-variant-numeric: tabular-nums; }
-      .feed-icon { font-size: 1.1rem; text-align: center; }
+      .feed-icon { font-size: 1.1rem; text-align: center;
+                   display: inline-flex; align-items: center; justify-content: center;
+                   svg { width: 16px; height: 16px; stroke: currentColor;
+                         stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+                         fill: none; color: var(--wlo-muted); } }
       .feed-text { color: var(--wlo-text); font-size: .92rem;
                    em { color: var(--wlo-primary); font-style: normal; font-weight: 600; }
                    .loc { color: var(--wlo-primary); font-weight: 600; } }
@@ -68,7 +76,7 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
                   .feed-time { grid-column: 2; font-size: .78rem; } }
     }
     .tile {
-      background: #fff; border: 1px solid var(--wlo-border); border-radius: 10px;
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 10px;
       padding: 16px; cursor: pointer; transition: border-color .12s, transform .12s;
       &:hover { border-color: var(--wlo-primary); transform: translateY(-2px); }
     }
@@ -78,7 +86,7 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
     .tile .meta { display: flex; gap: 12px; font-size: .82rem; color: var(--wlo-muted); }
     .tile .badge {
       display: inline-block; padding: 2px 9px; border-radius: 999px;
-      background: #e6edf7; color: var(--wlo-primary);
+      background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary);
       font-size: .7rem; font-weight: 600; text-transform: uppercase;
       letter-spacing: .04em; margin-bottom: 8px;
     }
@@ -92,16 +100,34 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
 
       <div class="tabs">
         <button [class.active]="tab() === 'feed'" (click)="setTab('feed')">
-          📰 Was ist neu @if (feed().length) { <span class="badge">{{ feed().length }}</span> }
+          <svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/>
+            <path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/>
+          </svg>
+          Was ist neu @if (feed().length) { <span class="badge">{{ feed().length }}</span> }
         </button>
         <button [class.active]="tab() === 'mine'" (click)="setTab('mine')">
-          ✏ Meine Ideen <span class="badge">{{ mine().length }}</span>
+          <svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>
+          </svg>
+          Meine Ideen <span class="badge">{{ mine().length }}</span>
         </button>
         <button [class.active]="tab() === 'follows'" (click)="setTab('follows')">
-          🔔 Gefolgt <span class="badge">{{ follows().length }}</span>
+          <svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          Gefolgt <span class="badge">{{ follows().length }}</span>
         </button>
         <button [class.active]="tab() === 'interest'" (click)="setTab('interest')">
-          🤝 Mitmachen <span class="badge">{{ interest().length }}</span>
+          <svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          Mitmachen <span class="badge">{{ interest().length }}</span>
         </button>
       </div>
 
@@ -119,7 +145,62 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
               @for (e of feed(); track e.id) {
                 <div class="feed-row" (click)="openTarget(e)">
                   <span class="feed-time">{{ formatTime(e.ts) }}</span>
-                  <span class="feed-icon">{{ feedIcon(e.action) }}</span>
+                  <span class="feed-icon">
+                    @switch (e.action) {
+                      @case ('idea_edited') {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 20h9"/>
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>
+                        </svg>
+                      }
+                      @case ('idea_moved') {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <line x1="5" y1="12" x2="19" y2="12"/>
+                          <polyline points="12 5 19 12 12 19"/>
+                        </svg>
+                      }
+                      @case ('idea_duplicated') {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                      }
+                      @case ('attachment_uploaded') {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                      }
+                      @case ('attachment_renamed') {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 20h9"/>
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>
+                        </svg>
+                      }
+                      @case ('attachment_deleted') {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <polyline points="3 6 5 6 21 6"/>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                      }
+                      @case ('attachment_folder_created') {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                      }
+                      @case ('report_submitted') {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                          <line x1="12" y1="9" x2="12" y2="13"/>
+                          <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                      }
+                      @default {
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+                        </svg>
+                      }
+                    }
+                  </span>
                   <span class="feed-text">
                     <strong>{{ e.actor || 'Jemand' }}</strong>
                     {{ feedVerb(e.action) }}

@@ -11,12 +11,12 @@ import { TaxonomyEntry, Topic } from '../models';
   styles: [`
     :host { display: block; }
     .wrap { max-width: 780px; margin: 0 auto; padding: 24px; }
-    .card { background: #fff; border: 1px solid var(--wlo-border); border-radius: 12px; padding: 28px; }
+    .card { background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 12px; padding: 28px; }
     h1 { margin: 0 0 8px; color: var(--wlo-primary); }
     p.intro { color: var(--wlo-muted); margin: 0 0 24px; }
     label { display: block; font-weight: 600; margin-bottom: 4px; color: var(--wlo-text); font-size: .9rem; }
     input, textarea, select { width: 100%; border: 1px solid var(--wlo-border); border-radius: 8px;
-                              padding: 10px 12px; box-sizing: border-box; font: inherit; margin-bottom: 18px; background: #fff; }
+                              padding: 10px 12px; box-sizing: border-box; font: inherit; margin-bottom: 18px; background: var(--wlo-surface, #fff); }
     textarea { min-height: 150px; resize: vertical; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     @media (max-width: 600px) { .row { grid-template-columns: 1fr; } }
@@ -24,9 +24,9 @@ import { TaxonomyEntry, Topic } from '../models';
            border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 1rem;
            &:hover:not(:disabled) { background: #ffc727; }
            &:disabled { opacity: .6; cursor: not-allowed; } }
-    .notice { background: #e6edf7; border-left: 3px solid var(--wlo-primary); padding: 12px 16px;
+    .notice { background: var(--wlo-primary-soft, #e6edf7); border-left: 3px solid var(--wlo-primary); padding: 12px 16px;
               border-radius: 4px; margin-bottom: 20px; font-size: .9rem; color: var(--wlo-text); }
-    .warning { background: #fff8db; border-left: 3px solid var(--wlo-accent); padding: 12px 16px;
+    .warning { background: var(--wlo-accent-soft, #fff8db); border-left: 3px solid var(--wlo-accent); padding: 12px 16px;
                border-radius: 4px; margin-bottom: 20px; font-size: .9rem; color: #5c4a00; }
     .success { background: #e6f4ea; border-left: 3px solid #1a7f37; padding: 14px 18px;
                border-radius: 6px; margin-bottom: 24px; font-size: .95rem; color: #0f5b24;
@@ -52,7 +52,7 @@ import { TaxonomyEntry, Topic } from '../models';
       font-size: inherit; text-decoration: underline;
     }
     .status-line {
-      background: #e6edf7; color: var(--wlo-primary);
+      background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary);
       padding: 8px 14px; border-radius: 6px;
       margin-top: 14px; font-size: .9rem;
     }
@@ -64,7 +64,7 @@ import { TaxonomyEntry, Topic } from '../models';
       display: inline-flex; align-items: center; cursor: pointer;
       padding: 6px 12px; border-radius: 16px;
       border: 1px solid var(--wlo-border, #d8dde6);
-      background: #fff; font-size: .85rem;
+      background: var(--wlo-surface, #fff); font-size: .85rem;
       color: var(--wlo-text, #1a2334);
       user-select: none;
       &:hover { border-color: var(--wlo-primary, #1d3a6e); }
@@ -75,7 +75,7 @@ import { TaxonomyEntry, Topic } from '../models';
       }
     }
     .preset-event {
-      background: #fff8db; border: 1px solid #f5b600; border-radius: 8px;
+      background: var(--wlo-accent-soft, #fff8db); border: 1px solid #f5b600; border-radius: 8px;
       padding: 10px 14px; font-size: .92rem; color: #5c4a00;
       strong { display: inline-block; margin-left: 4px; }
       small { display: block; font-size: .78rem; margin-top: 4px; opacity: .85; }
@@ -103,23 +103,28 @@ import { TaxonomyEntry, Topic } from '../models';
 
         @if (!api.hasCredentials()) {
           <div class="warning">
-            Du bist nicht angemeldet. Deine Idee landet in der Moderationsinbox
-            und wird vom Team geprüft, bevor sie öffentlich erscheint.
+            Du bist nicht angemeldet. Deine Idee landet in der HackathOERn-
+            Inbox und wird vom Moderationsteam geprüft, bevor sie öffentlich
+            erscheint.
             <div style="margin-top: 8px; font-size: .85rem">
               Eigenes Konto gewünscht?
-              <a href="https://wirlernenonline.de/register/" target="_blank" rel="noopener">
+              <a href="https://ideenbank.hackathoern.de/edu-sharing/components/register"
+                 target="_blank" rel="noopener">
                 Hier registrieren →
               </a>
             </div>
           </div>
         } @else {
-          <div class="notice">Angemeldet — deine Idee wird direkt veröffentlicht.</div>
+          <div class="notice">
+            Angemeldet — deine Idee landet zur Sichtung in der Moderationsinbox
+            und wird nach Freigabe in die passende Sammlung verschoben.
+          </div>
         }
 
         <label>Titel *</label>
         <input [(ngModel)]="title" placeholder="Kurzer, einprägsamer Name der Idee" required maxlength="150" />
 
-        <label>Herausforderung / Thema</label>
+        <label>Bereich / Herausforderung</label>
         <select [(ngModel)]="topicId">
           <option value="">— bitte wählen —</option>
           @for (t of challenges; track t.id) {

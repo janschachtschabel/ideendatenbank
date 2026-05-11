@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Literal
-
 import re
+from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 log = logging.getLogger(__name__)
 
@@ -13,7 +12,9 @@ import httpx
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from . import backup as backup_mod, edu_sharing, sync as sync_mod
+from . import backup as backup_mod
+from . import edu_sharing
+from . import sync as sync_mod
 from .config import settings
 from .db import connect
 from .ratelimit import limiter
@@ -204,7 +205,7 @@ async def edit_topic(
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):
-                raise HTTPException(403, "Keine Berechtigung, dieses Thema zu ändern.")
+                raise HTTPException(403, "Keine Berechtigung, diese Herausforderung zu ändern.")
             raise HTTPException(
                 e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
             )
@@ -262,7 +263,7 @@ async def delete_topic(
         await edu_sharing.client.delete_node(topic_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
-            raise HTTPException(403, "Keine Berechtigung, dieses Thema zu löschen.")
+            raise HTTPException(403, "Keine Berechtigung, diese Herausforderung zu löschen.")
         if e.response.status_code != 404:
             raise HTTPException(
                 e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
@@ -304,6 +305,23 @@ async def upload_topic_preview(
         raise HTTPException(
             e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
         )
+    # Topic-Cache refreshen, damit die neue preview.url-URL (mit neuem
+    # `?modified=`-Token) ins Cache wandert und Browser-Caches umgeht.
+    try:
+        meta = await edu_sharing.client.node_metadata(
+            topic_id, auth_header=authorization,
+        )
+        node = (meta or {}).get("node") or {}
+        new_preview = (node.get("preview") or {}).get("url")
+        is_icon = (node.get("preview") or {}).get("isIcon", False)
+        if new_preview and not is_icon:
+            with connect() as con:
+                con.execute(
+                    "UPDATE topic SET preview_url=? WHERE id=?",
+                    (new_preview, topic_id),
+                )
+    except Exception as e:
+        log.debug("upload_topic_preview: Cache-Refresh fehlgeschlagen: %s", e)
     _log_activity(
         action="topic_preview_set", authorization=authorization, is_mod=True,
         target_type="topic", target_id=topic_id,
@@ -336,14 +354,32 @@ async def sort_topics(
 
 
 @router.get("/meta")
-def meta_facets():
-    """Distinct phase/event/category values currently in the cache, with counts."""
+def meta_facets(topic_id: str | None = Query(None)):
+    """Distinct phase/event/category values currently in the cache, with counts.
+
+    Optionaler `topic_id` filtert die Facetten-Counts auf den Subtree
+    dieser Sammlung — wichtig damit die Pillen unter z.B. „Kooperation"
+    nicht globale Counts zeigen, die zur Auswahl 0 Treffer ergeben."""
+    where_sql, params = "", []
+    if topic_id:
+        with connect() as con:
+            ids = _collect_topic_subtree(con, topic_id)
+        placeholders = ",".join("?" * len(ids))
+        where_sql = f"WHERE topic_id IN ({placeholders})"
+        params = list(ids)
+
     with connect() as con:
-        phases = con.execute(
-            "SELECT phase AS value, COUNT(*) AS count FROM idea "
-            "WHERE phase IS NOT NULL AND phase <> '' GROUP BY phase ORDER BY count DESC"
+        phase_sql = (
+            f"SELECT phase AS value, COUNT(*) AS count FROM idea "
+            f"{where_sql} {'AND' if where_sql else 'WHERE'} "
+            f"phase IS NOT NULL AND phase <> '' "
+            f"GROUP BY phase ORDER BY count DESC"
+        )
+        phases = con.execute(phase_sql, params).fetchall()
+        rows = con.execute(
+            f"SELECT events, categories FROM idea {where_sql}", params,
         ).fetchall()
-        rows = con.execute("SELECT events, categories FROM idea").fetchall()
+
     events: dict[str, int] = {}
     categories: dict[str, int] = {}
     for r in rows:
@@ -380,17 +416,27 @@ def list_ideas(
     event: str | None = None,
     category: str | None = None,
     q: str | None = Query(None, description="Full-text search"),
+    # Query-Param heißt `ids` (öffentlicher Vertrag), die Python-Variable
+    # `id_filter` vermeidet die Kollision mit `ids` aus dem topic-subtree-
+    # Pfad weiter unten.
+    id_filter: str | None = Query(
+        None,
+        alias="ids",
+        description="Komma-separierte Idea-IDs für gezielte Auswahl (Embed-Anwendungen)",
+    ),
     sort: SortBy = "modified",
     order: Literal["asc", "desc"] = "desc",
     limit: int = Query(24, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
+    # Spalten qualifizieren wir mit dem `i.`-Prefix, weil beim FTS-Join
+    # (idea_fts) sonst `id` und `title` mehrdeutig wären → SQLite-500.
     sort_cols = {
-        "modified": "modified_at",
-        "created": "created_at",
-        "rating": "rating_avg",
-        "comments": "comment_count",
-        "title": "title",
+        "modified": "i.modified_at",
+        "created": "i.created_at",
+        "rating": "i.rating_avg",
+        "comments": "i.comment_count",
+        "title": "i.title",
     }
     sort_col = sort_cols[sort]
 
@@ -401,21 +447,35 @@ def list_ideas(
             with connect() as con:
                 ids = _collect_topic_subtree(con, topic_id)
             placeholders = ",".join("?" * len(ids))
-            where.append(f"topic_id IN ({placeholders})")
+            where.append(f"i.topic_id IN ({placeholders})")
             params.extend(ids)
         else:
-            where.append("topic_id = ?")
+            where.append("i.topic_id = ?")
             params.append(topic_id)
     if phase:
-        where.append("phase = ?")
+        where.append("i.phase = ?")
         params.append(phase)
     if event:
         # events is a JSON array; LIKE works for simple membership lookup
-        where.append("events LIKE ?")
+        where.append("i.events LIKE ?")
         params.append(f'%"{event}"%')
     if category:
-        where.append("categories LIKE ?")
+        where.append("i.categories LIKE ?")
         params.append(f'%"{category}"%')
+
+    if id_filter:
+        # Komma-separiert, max 200 IDs zur Sicherheit
+        id_list = [x.strip() for x in id_filter.split(",") if x.strip()][:200]
+        if id_list:
+            placeholders = ",".join("?" * len(id_list))
+            where.append(f"i.id IN ({placeholders})")
+            params.extend(id_list)
+        else:
+            where.append("1 = 0")  # leere ids → keine Treffer
+
+    # Versteckte Ideen (vom Mod soft-deleted) generell ausblenden — Mods
+    # haben einen separaten Tab im Mod-UI für die Verwaltung.
+    where.append("COALESCE(i.hidden, 0) = 0")
 
     base_sql = "FROM idea i"
     if q:
@@ -531,9 +591,13 @@ async def get_ranking(
         latest = snaps[0]
         prev = snaps[1] if len(snaps) > 1 else None
 
+        # Defensiv: nur Einträge mit echtem Score zeigen. Falls je 0-Werte
+        # in die Snapshots eingeschlichen sind (alte Daten, künftige Bugs
+        # in der Capture-Logik), würden sie sonst die Liste mit Karteileichen
+        # füllen und das Verlaufs-Chart unnötig stauchen.
         rows = con.execute(
             "SELECT rank, idea_id, score FROM ranking_snapshot "
-            "WHERE event=? AND sort=? AND snapshot_at=? "
+            "WHERE event=? AND sort=? AND snapshot_at=? AND score > 0 "
             "ORDER BY rank ASC LIMIT ?",
             (ev, sort, latest, limit),
         ).fetchall()
@@ -542,7 +606,7 @@ async def get_ranking(
         if prev:
             for r in con.execute(
                 "SELECT idea_id, rank FROM ranking_snapshot "
-                "WHERE event=? AND sort=? AND snapshot_at=?",
+                "WHERE event=? AND sort=? AND snapshot_at=? AND score > 0",
                 (ev, sort, prev),
             ).fetchall():
                 prev_ranks[r["idea_id"]] = r["rank"]
@@ -550,7 +614,7 @@ async def get_ranking(
         # Sparkline-History — alle Snapshots in chronologischer Reihenfolge.
         history_rows = con.execute(
             "SELECT idea_id, snapshot_at, score, rank FROM ranking_snapshot "
-            "WHERE event=? AND sort=? ORDER BY snapshot_at ASC",
+            "WHERE event=? AND sort=? AND score > 0 ORDER BY snapshot_at ASC",
             (ev, sort),
         ).fetchall()
         history_by_idea: dict[str, list[dict]] = {}
@@ -618,26 +682,72 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         if not row:
             raise HTTPException(404, "Idea not found")
 
+    # Versteckte Ideen: für non-mod als 404 behandeln, damit Suchmaschinen
+    # und externe Embeds sie nicht zeigen. Mod sieht den Inhalt + Hinweis.
+    if row["hidden"]:
+        is_mod_caller_early = await _is_moderator(authorization)
+        if not is_mod_caller_early:
+            raise HTTPException(404, "Idea not found")
+
     base = _row_to_idea(row)
+    base["hidden"] = bool(row["hidden"])
+    base["hidden_reason"] = row["hidden_reason"]
     base["interest_count"] = interest_count
 
-    # can_edit / can_delete: aus accessEffective des Caller-Tokens abgeleitet.
-    # Ohne Login false; mit Login wird gegen edu-sharing geprüft.
+    # Node-Metadata einmalig holen — wir brauchen sie für can_edit/Rating.
+    # Wenn keine Auth da ist, holen wir trotzdem (anonym), weil Rating-Werte
+    # auch ohne Auth lesbar sind. So bekommt jeder User die Live-Werte.
+    target_id = row["main_content_id"] or row["id"]
+    live_meta_node: dict = {}
+    try:
+        meta = await edu_sharing.client.node_metadata(
+            target_id, auth_header=authorization,
+        )
+        live_meta_node = (meta or {}).get("node") or {}
+    except Exception as e:
+        log.debug("get_idea: node_metadata fehlgeschlagen: %s", e)
+
+    # can_edit / can_delete: NICHT aus ES-accessEffective ableiten — die
+    # HackathOERn-Gruppe hat dort durch Vererbung pauschal Write-Rechte und
+    # das wäre ein Free-for-all. App-seitiges Owner-Gating greift stattdessen.
     can_edit = False
     can_delete = False
     if authorization:
-        try:
-            meta = await edu_sharing.client.node_metadata(
-                row["main_content_id"] or row["id"],
-                auth_header=authorization,
-            )
-            access = (meta.get("node") or {}).get("access") or []
-            can_edit = "Write" in access or "ChangePermissions" in access
-            can_delete = "Delete" in access
-        except Exception:
-            pass
+        allowed, _user, _is_mod = await _is_owner_or_mod(row["id"], authorization)
+        can_edit = allowed
+        can_delete = allowed
     base["can_edit"] = can_edit
     base["can_delete"] = can_delete
+
+    # Display-Name des Erstellers/Owners — konsistent mit Kommentaren, die
+    # `firstName + lastName` aus dem ES-Profil zeigen. Frontend nutzt das
+    # statt des reinen Login-Usernamens.
+    owner_display_name: str | None = None
+    if live_meta_node:
+        for src in ("createdBy", "owner"):
+            obj = live_meta_node.get(src) or {}
+            fn = (obj.get("firstName") or "").strip()
+            ln = (obj.get("lastName") or "").strip()
+            full = f"{fn} {ln}".strip()
+            if full:
+                owner_display_name = full
+                break
+    base["owner_display_name"] = owner_display_name
+
+    # Live-Rating aus den Node-Metadaten — der Cache-Wert kann durch
+    # Schein-500-Fehler hinterherhinken, bis der nächste Sync läuft.
+    # Auf der Detail-Seite ist es vertretbar, einen aktuellen Wert zu zeigen.
+    base["my_rating"] = 0.0
+    if live_meta_node:
+        live_rating = live_meta_node.get("rating") or {}
+        overall = live_rating.get("overall") or {}
+        live_avg = float(overall.get("rating") or 0.0)
+        live_count = int(overall.get("count") or 0)
+        if live_count > 0 or live_avg > 0:
+            base["rating_avg"] = live_avg
+            base["rating_count"] = live_count
+        if authorization:
+            base["my_rating"] = float(live_rating.get("user") or 0.0)
 
     # Phase-Workflow: dem Frontend mitteilen, welche Phasen der Caller setzen
     # darf. Mod sieht alle, Owner nur „aktuelle + 1 vorwärts" (ohne Archive).
@@ -675,20 +785,31 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         base["comments"] = []
 
     # Live attachments — documents the user can download / preview.
+    def _has_real_content(att: dict) -> bool:
+        """Eine Idee als ccm:io darf nur dann als Anhang gelistet werden,
+        wenn sie tatsächlich Datei-Bytes oder einen externen Link mitbringt.
+        Reine Brainstorm-Karten (Titel, ggf. textContent vom Crawler) ohne
+        echten Datei-Inhalt führen sonst zu einer leeren `Dokumente (1)`-
+        Anzeige mit unbenutzbarem „Öffnen"-Button."""
+        sz = att.get("size") or 0
+        try: sz = int(sz)
+        except (TypeError, ValueError): sz = 0
+        return bool(att.get("download_url")) or sz > 0
+
     attachments: list[dict] = []
     if row["kind"] == "io":
         # The node itself IS the attachment; use cached fields, top it up
         # with a fresh probe to get render_url + preview_url.
+        att: dict | None = None
         try:
             meta = await edu_sharing.client.node_metadata(
                 row["id"], auth_header=authorization,
             )
-            attachments.append(_attachment_from_node(meta.get("node") or {}))
+            att = _attachment_from_node(meta.get("node") or {})
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):
                 is_private = True
-            # Fall back to cached row values so the UI is never empty
-            attachments.append({
+            att = {
                 "id": row["id"],
                 "name": _safe_get(row, "attachment_name"),
                 "title": row["title"],
@@ -697,9 +818,9 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
                 "download_url": _safe_get(row, "attachment_url"),
                 "render_url": None,
                 "preview_url": row["preview_url"],
-            })
+            }
         except Exception:
-            attachments.append({
+            att = {
                 "id": row["id"],
                 "name": _safe_get(row, "attachment_name"),
                 "title": row["title"],
@@ -708,7 +829,9 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
                 "download_url": _safe_get(row, "attachment_url"),
                 "render_url": None,
                 "preview_url": row["preview_url"],
-            })
+            }
+        if att and _has_real_content(att):
+            attachments.append(att)
     else:
         # Collection idea — list every referenced ccm:io as an attachment.
         try:
@@ -723,30 +846,22 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         except Exception:
             pass
 
-    # Anhänge-Sammlung: wenn die Idee eine verknüpfte ccm:map-Geschwister-
-    # Sammlung hat, alle ccm:io darin als zusätzliche Dokumente anhängen.
-    folder_id = _safe_get(row, "attachment_folder_id")
-    if folder_id:
-        try:
-            folder_meta = await edu_sharing.client.get_collection(
-                folder_id, auth_header=authorization,
-            )
-            base["attachment_folder"] = {
-                "id": folder_id,
-                "name": (folder_meta.get("collection") or {}).get("title")
-                or folder_meta.get("collection", {}).get("name"),
-            }
-            files = await edu_sharing.client.collection_references(
-                folder_id, max_items=50, auth_header=authorization,
-            )
-            for n in files.get("references") or []:
-                a = _attachment_from_node(n)
-                a["from_folder"] = True
-                attachments.append(a)
-        except Exception:
-            pass
-    else:
-        base["attachment_folder"] = None
+    # Serienobjekt-Anhänge: Child-IOs unter der Idee (ccm:io_childobject-
+    # Aspekt). Ersetzt die alte Geschwister-Sammlungs-Lösung.
+    base["attachment_folder"] = None  # Legacy-Feld — Frontend ignoriert es jetzt
+    try:
+        # Bei kind="io" hängen Children am Knoten selbst; bei kind="collection"
+        # hängen sie ebenfalls am Idee-Knoten (= ccm:map). Funktioniert für beide.
+        children = await edu_sharing.client.list_child_objects(
+            row["id"], auth_header=authorization,
+        )
+        for n in children:
+            a = _attachment_from_node(n)
+            a["from_folder"] = True  # Backwards-compat-Flag fürs Frontend
+            a["is_child_object"] = True
+            attachments.append(a)
+    except Exception:
+        pass
 
     base["attachments"] = attachments
     # Hinweis für die UI, falls der Reader keinen Zugriff auf Live-Daten hat.
@@ -765,6 +880,8 @@ async def rate_idea(
     text: str = "",
     authorization: str | None = Header(None),
 ):
+    user = _user_key_from_auth(authorization)
+    log.info("rate_idea: user=%s idea=%s rating=%s", user, idea_id, rating)
     if not authorization:
         raise HTTPException(401, "Authorization header required for rating")
     with connect() as con:
@@ -776,49 +893,89 @@ async def rate_idea(
     target = row["main_content_id"] or row["id"]
     if not target:
         raise HTTPException(409, "Idea has no ccm:io target for rating")
+    # Strategie: Write versuchen, dann Read-Back als Wahrheits-Check.
+    # edu-sharing wirft bei diesem Endpoint regelmäßig 500er, die je nach
+    # Variante entweder Schein-Fehler (Rating IST drin) oder echte
+    # Permission-Verweigerungen (Rating NICHT drin) sind:
+    #   - `config.values.rating is null` → Schein, drin
+    #   - `DAOSecurityException` → echt, nicht drin
+    # Wir lassen das Write durchlaufen, schlucken den Fehler erstmal still
+    # und vergleichen anschließend Read-Back-Wert mit dem gewünschten Rating.
+    write_status: int | None = None
+    write_error_text: str | None = None
     try:
         await edu_sharing.client.add_rating(
             target, rating=rating, text=text, auth_header=authorization
         )
     except httpx.HTTPStatusError as e:
-        # Known edu-sharing bug: the rating DOES persist even though the
-        # server returns 500 'config.values.rating is null'. Treat only that
-        # specific failure as a soft success.
-        if (
-            e.response.status_code == 500
-            and "config.values.rating" in e.response.text
-        ):
-            pass
-        elif e.response.status_code in (401, 403):
+        if e.response.status_code in (401, 403):
             raise HTTPException(e.response.status_code, "Anmeldung erforderlich")
-        else:
-            raise HTTPException(
-                e.response.status_code,
-                f"edu-sharing Fehler: {e.response.text[:200]}",
-            )
+        write_status = e.response.status_code
+        write_error_text = e.response.text[:200]
+    except Exception as e:
+        log.info("rate_idea: ES-Write Netzwerkfehler: %s", e)
 
-    # Read back the current rating from node metadata so the UI can update.
-    # Cache wird im selben Aufruf via refresh_idea aktualisiert, damit
-    # rating_avg/rating_count in Listen + Karten sofort frisch sind.
+    # Read-Back mit User-Auth — wahrer Stand
+    avg = 0.0
+    count = 0
+    mine = 0.0
     try:
-        meta = await edu_sharing.client.node_metadata(target)
+        meta = await edu_sharing.client.node_metadata(
+            target, auth_header=authorization,
+        )
         r = (meta.get("node") or {}).get("rating") or {}
         overall = r.get("overall") or {}
-        # Cache update — best-effort
-        try:
-            await sync_mod.refresh_idea(idea_id, auth_header=authorization)
-        except Exception:
-            pass
-        return {
-            "ok": True,
-            "rating": {
-                "avg": float(overall.get("rating") or 0.0),
-                "count": int(overall.get("count") or 0),
-                "mine": float(r.get("user") or 0.0),
-            },
-        }
+        avg = float(overall.get("rating") or 0.0)
+        count = int(overall.get("count") or 0)
+        mine = float(r.get("user") or 0.0)
+    except Exception as e:
+        log.warning("rate_idea: Read-Back fehlgeschlagen: %s", e)
+
+    persisted = abs(mine - rating) < 0.01
+
+    if write_status and write_status >= 400 and not persisted:
+        # Echter Fehler — der Write ging schief und der Read-Back bestätigt
+        # dass nichts persistiert wurde. Das ist meistens eine Permission-
+        # Verweigerung (DAOSecurityException) — der User darf die Idee nicht
+        # bewerten, z.B. weil sie einer anderen Person gehört und keine
+        # Tool-Permission gesetzt ist.
+        log.warning(
+            "rate_idea: Rating nicht persistiert (HTTP %s): %s",
+            write_status, write_error_text,
+        )
+        if "DAOSecurityException" in (write_error_text or "") or write_status == 403:
+            raise HTTPException(
+                403,
+                "Du darfst diese Idee nicht bewerten. Wende dich an die "
+                "Moderation, falls das ein Fehler ist.",
+            )
+        raise HTTPException(
+            502,
+            "edu-sharing konnte das Rating nicht speichern. "
+            "Bitte später nochmal probieren.",
+        )
+
+    # Erfolg (entweder Write 200 oder Schein-500 mit persistiertem Rating)
+    if write_status:
+        log.info(
+            "rate_idea: ES-Write %s ignoriert (Read-Back zeigt mine=%s)",
+            write_status, mine,
+        )
+
+    # Cache update — best-effort
+    try:
+        await sync_mod.refresh_idea(idea_id, auth_header=authorization)
     except Exception:
-        return {"ok": True}
+        pass
+
+    return {
+        "ok": True,
+        "rating": {
+            "avg": avg,
+            "count": count,
+            "mine": mine,
+        },
+    }
 
 
 @router.post("/ideas/{idea_id}/comments")
@@ -899,6 +1056,14 @@ async def submit_idea(
         # remember the intended target so moderator/UI can pick it up later
         kws.append(f"target-topic:{body.topic_id}")
 
+    # Submitter-Tracking: bei eingeloggter Einreichung den Caller-Username
+    # als Keyword anhängen, damit "Meine Ideen" und Edit-Gating zuordnen können.
+    submitter = _user_key_from_auth(authorization) if authorization else None
+    if submitter and not any(
+        k.lower().startswith("submitter:") for k in kws
+    ):
+        kws.append(f"submitter:{submitter}")
+
     props: dict[str, list[str]] = {
         "cm:name": [_slugify(body.title)],
         "cm:title": [body.title],
@@ -913,15 +1078,43 @@ async def submit_idea(
         props["ccm:author_freetext"] = [body.author]
     if body.project_url:
         props["ccm:wwwurl"] = [body.project_url]
+    # Pflicht-Metadaten für die WLO-Freischaltung. Ohne diese Felder flaggt
+    # die Redaktionsmaske die Idee als "unvollständig". Wir setzen WLO-übliche
+    # Defaults, damit die Idee out-of-the-box freischaltbar ist:
+    #   - Lizenz: CC BY 4.0 (WLO-Standard für OER-Beiträge)
+    #   - Sprache: Deutsch
+    #   - Replikations-Quelle: kennzeichnet den App-Ursprung
+    # Diese Defaults können später im Repo geändert werden.
+    props.setdefault("ccm:commonlicense_key", ["CC_BY"])
+    props.setdefault("ccm:commonlicense_cc_version", ["4.0"])
+    props.setdefault("cclom:general_language", ["de"])
+    props.setdefault("ccm:replicationsource", ["hackathoern-ideendatenbank"])
 
+    # Strategie:
+    # - Eingeloggte User schreiben mit IHRER Auth direkt in die Community-Inbox
+    #   (sie sind Mitglied der HackathOERn-Gruppe, die dort Collaborator-Rechte
+    #   geerbt hat). Dadurch werden sie selbst der ES-Creator und können ihre
+    #   Idee auch nach einem Move durch Mods weiter bearbeiten/löschen.
+    # - Anonyme Submits laufen über den Guest (WLO-Upload), der direkt
+    #   Collaborator auf der Inbox hat.
+    # Kein Fallback eingeloggt → Guest, weil das den Owner-Tausch maskieren
+    # würde. Fehler bleibt Fehler — der User merkt, dass etwas mit seinem
+    # Account-Setup nicht stimmt.
     try:
         result = await edu_sharing.client.create_node(
             parent_id=settings.edu_guest_inbox_id,
             node_type="ccm:io",
             properties=props,
-            auth_header=None,  # always use guest creds for v1 submit flow
+            auth_header=authorization,  # None bei Anonym → Guest-Fallback im Client
         )
     except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 403):
+            raise HTTPException(
+                403,
+                "Keine Berechtigung, eine Idee anzulegen. Vermutlich fehlt "
+                "die Mitgliedschaft in der HackathOERn-Gruppe — bitte beim "
+                "Moderationsteam melden.",
+            )
         raise HTTPException(
             502,
             f"edu-sharing Fehler beim Anlegen: {e.response.status_code} "
@@ -955,7 +1148,7 @@ async def submit_idea(
         "node_id": new_id,
         "message": (
             "Danke! Deine Idee liegt jetzt im Moderations-Postfach. "
-            "Das Team prüft sie und sortiert sie in den passenden Themenbereich ein."
+            "Das Team prüft sie und sortiert sie in den passenden Bereich ein."
         ),
     }
 
@@ -1201,9 +1394,26 @@ async def list_inbox(
     except httpx.HTTPStatusError as e:
         raise HTTPException(502, f"edu-sharing Fehler: {e.response.status_code}")
 
+    # Originals, die bereits als Reference in einer Sammlung referenziert
+    # werden, raus aus dem Postfach: ihre IDs stehen in idea.original_id.
+    # Sonst tauchen alte Ideen-Originale (mit phase:/event:-Marker, weil
+    # sie über den Reference-Knoten gepflegt wurden) im Postfach auf.
+    with connect() as con:
+        cataloged = {
+            r["original_id"]
+            for r in con.execute(
+                "SELECT original_id FROM idea WHERE original_id IS NOT NULL"
+            ).fetchall()
+            if r["original_id"]
+        }
+
     items = []
     for n in raw_nodes:
         if n.get("type") != "ccm:io":
+            continue
+        node_id = (n.get("ref") or {}).get("id")
+        if node_id and node_id in cataloged:
+            # Schon einsortiert — gehört nicht ins Postfach
             continue
         props = n.get("properties") or {}
         kws = props.get("cclom:general_keyword") or []
@@ -1336,6 +1546,34 @@ async def upload_idea_preview(
         raise HTTPException(
             e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
         )
+    # Cache aktualisieren: edu-sharing setzt einen neuen `?modified=`-Param
+    # in preview.url. Ohne Refresh würde das Frontend weiter die alte URL
+    # (alter Zeitstempel) anfragen und den Browser-Cache treffen.
+    try:
+        await sync_mod.refresh_idea(idea_id, auth_header=authorization)
+    except Exception as e:
+        log.debug("upload_idea_preview: Cache-Refresh fehlgeschlagen: %s", e)
+    # Falls preview.url im Sync NICHT direkt aufgefrischt wurde (z.B. weil
+    # der Knoten als Reference im Postfach liegt), hängen wir manuell einen
+    # Cache-Buster an, damit der Browser das neue Bild lädt.
+    try:
+        with connect() as con:
+            row = con.execute(
+                "SELECT preview_url FROM idea WHERE id=?", (idea_id,),
+            ).fetchone()
+            if row and row["preview_url"]:
+                from datetime import datetime
+                bust = int(datetime.now(UTC).timestamp())
+                sep = '&' if '?' in row["preview_url"] else '?'
+                new_url = f"{row['preview_url']}{sep}cb={bust}"
+                # Cache-Buster nur, wenn nicht bereits via Sync gesetzt
+                if "modified=" not in row["preview_url"]:
+                    con.execute(
+                        "UPDATE idea SET preview_url=? WHERE id=?",
+                        (new_url, idea_id),
+                    )
+    except Exception as e:
+        log.debug("upload_idea_preview: Cache-Buster fehlgeschlagen: %s", e)
     return {"ok": True}
 
 
@@ -1516,13 +1754,13 @@ def _upsert_taxonomy(table: str, body: TaxonomyEntry, user: str | None) -> dict:
                  1 if body.active else 0, body.slug),
             )
         else:
-            from datetime import datetime, timezone
+            from datetime import datetime
             con.execute(
                 f"INSERT INTO {table} (slug,label,description,sort_order,active,"
                 f"created_at,created_by) VALUES (?,?,?,?,?,?,?)",
                 (body.slug, body.label, body.description, body.sort_order,
                  1 if body.active else 0,
-                 datetime.now(timezone.utc).isoformat(), user or "anonymous"),
+                 datetime.now(UTC).isoformat(), user or "anonymous"),
             )
     return {"ok": True, "slug": body.slug}
 
@@ -1601,11 +1839,19 @@ async def edit_idea(
     body: IdeaPatch,
     authorization: str | None = Header(None),
 ):
-    """Updates the metadata on the underlying ccm:io. Auth is passed through
-    to edu-sharing — that decides whether the caller has Write permission on
-    the node (owner or moderator)."""
+    """Updates the metadata on the underlying ccm:io. App-seitig wird
+    geprüft, ob der Caller Owner (Submitter) oder Mod ist — die ES-
+    Group-Vererbung gibt sonst jedem HackathOERn-Mitglied Write-Rechte."""
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
+
+    allowed, user, is_mod = await _is_owner_or_mod(idea_id, authorization)
+    if not allowed:
+        raise HTTPException(
+            403,
+            "Diese Idee gehört nicht dir. Nur der Einreicher oder die "
+            "Moderation kann sie bearbeiten.",
+        )
 
     with connect() as con:
         row = con.execute(
@@ -1648,29 +1894,74 @@ async def edit_idea(
         props["ccm:author_freetext"] = [body.author]
     if body.project_url is not None:
         props["ccm:wwwurl"] = [body.project_url]
-    # Keywords-Merge: bestehende phase:/event:/target-topic:/sonstiges + neue Werte
+    # Keywords-Merge: bestehende Keywords aus edu-sharing erhalten,
+    # nur phase: und event: gezielt austauschen.
+    #
+    # Wichtig: edu-sharing's PUT /metadata ÜBERSCHREIBT cclom:general_keyword
+    # komplett — wir müssen also die alten Keywords mit-senden, damit z.B.
+    # fachliche Tags ("OER", "schule") nicht beim Quick-Edit verloren gehen.
+    #
+    # Strategie:
+    #  - body.keywords explizit mitgeschickt (Edit-Modal): das ist die neue
+    #    User-Liste. Wir filtern phase:/event: heraus und tauschen frisch.
+    #  - body.keywords NICHT mitgeschickt (Quick-Edit): wir holen die alten
+    #    Keywords live aus edu-sharing, behalten alle Nicht-phase/event-Werte
+    #    und überschreiben nur phase:/event:-Einträge.
     if (body.keywords is not None or body.phase is not None
             or body.event is not None or body.events is not None):
-        kws = list(body.keywords or [])
-        # Drop existing phase:/event: prefixes from supplied keywords (caller may
-        # have included them; we re-derive to keep things consistent).
+
+        if body.keywords is not None:
+            base_kws = list(body.keywords)
+        else:
+            # Quick-Edit: alte Liste live holen, damit Bestand erhalten bleibt
+            try:
+                cur_meta = await edu_sharing.client.node_metadata(
+                    target_node, auth_header=authorization,
+                )
+                cur_props = (cur_meta.get("node") or {}).get("properties") or {}
+                base_kws = list(cur_props.get("cclom:general_keyword") or [])
+            except Exception as e:
+                log.warning(
+                    "edit_idea: alte Keywords nicht lesbar, Bestand könnte verloren gehen: %s",
+                    e,
+                )
+                base_kws = []
+
+        # phase:- und event:-Einträge entfernen, die wir gleich neu setzen
         kws = [
-            k for k in kws
+            k for k in base_kws
             if not k.lower().startswith(("phase:", "event:"))
         ]
         if body.phase:
             kws.append(f"phase:{body.phase}")
         # Events: events[] hat Vorrang, sonst legacy event-Feld.
-        evs = body.events if body.events is not None else (
-            [body.event] if body.event else []
-        )
-        seen: set[str] = set()
-        for ev in evs:
-            ev = (ev or "").strip()
-            if not ev or ev.lower() in seen:
-                continue
-            seen.add(ev.lower())
-            kws.append(f"event:{ev}")
+        # Wenn weder events noch event mit-geschickt wurden, bleiben die
+        # alten Event-Keywords aus base_kws erhalten — wir müssen sie also
+        # zurück-mergen, sonst gehen sie verloren beim Phase-Quick-Edit.
+        if body.events is not None or body.event is not None:
+            evs = body.events if body.events is not None else (
+                [body.event] if body.event else []
+            )
+            seen: set[str] = set()
+            for ev in evs:
+                ev = (ev or "").strip()
+                if not ev or ev.lower() in seen:
+                    continue
+                seen.add(ev.lower())
+                kws.append(f"event:{ev}")
+        else:
+            # Alte event:-Einträge behalten
+            for k in base_kws:
+                if k.lower().startswith("event:"):
+                    kws.append(k)
+
+        # Wenn keine Phase im Patch war, alten Phase-Wert behalten
+        if body.phase is None:
+            for k in base_kws:
+                if k.lower().startswith("phase:"):
+                    kws.append(k)
+                    break
+
         props["cclom:general_keyword"] = kws
 
     if not props:
@@ -1688,6 +1979,48 @@ async def edit_idea(
         raise HTTPException(
             e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
         )
+
+    # Read-Back: edu-sharing antwortet bei fehlenden Schreibrechten
+    # gelegentlich mit 200 OK, persistiert die Änderungen aber stillschweigend
+    # NICHT (silent permission denial). Wir prüfen daher kurz, ob die
+    # Properties wirklich angekommen sind. Wenn nicht: harten 403 mit
+    # klarer Meldung an den User.
+    try:
+        verify = await edu_sharing.client.node_metadata(
+            target_node, auth_header=authorization,
+        )
+        live_props = (verify.get("node") or {}).get("properties") or {}
+        # Wir prüfen exemplarisch das aussagekräftigste Feld, das die UI ändert:
+        if "cclom:general_keyword" in props:
+            expected = set(props["cclom:general_keyword"])
+            actual = set(live_props.get("cclom:general_keyword") or [])
+            if expected and not expected.issubset(actual):
+                log.warning(
+                    "edit_idea: Properties nicht persistiert für %s "
+                    "(Permission?): expected %s, got %s",
+                    idea_id, expected, actual,
+                )
+                raise HTTPException(
+                    403,
+                    "Du hast keine Schreibrechte für diese Idee. "
+                    "Sie gehört einer anderen Person und kann nur von "
+                    "ihr oder einem Moderator bearbeitet werden.",
+                )
+        elif "cm:title" in props and body.title:
+            if (live_props.get("cm:title") or [None])[0] != body.title:
+                log.warning(
+                    "edit_idea: Title nicht persistiert für %s — Permission?",
+                    idea_id,
+                )
+                raise HTTPException(
+                    403,
+                    "Du hast keine Schreibrechte für diese Idee.",
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Read-Back kaputt → nicht blockieren, der Sync zieht später nach
+        log.info("edit_idea: Read-Back fehlgeschlagen, trotzdem OK: %s", e)
 
     # Single-Node-Refresh statt Voll-Sync: nur diese eine Idee neu cachen.
     try:
@@ -1717,13 +2050,20 @@ async def delete_idea(
     idea_id: str,
     authorization: str | None = Header(None),
 ):
-    """Löscht eine Idee. Auth wird durchgereicht — edu-sharing prüft, ob der
-    Caller Owner oder Moderator ist (sonst 403). Eine eventuell verknüpfte
-    Anhänge-Sammlung wird NICHT automatisch mitgelöscht — dafür gibt es einen
-    eigenen Endpoint, damit das Verschwindenlassen von Material immer eine
-    bewusste Aktion ist."""
+    """Löscht eine Idee. App-seitig wird geprüft, ob der Caller Owner
+    (Submitter) oder Mod ist (ES-Group-Vererbung würde sonst jedem
+    HackathOERn-Mitglied Delete-Rechte geben)."""
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
+
+    allowed, user, is_mod = await _is_owner_or_mod(idea_id, authorization)
+    if not allowed:
+        raise HTTPException(
+            403,
+            "Diese Idee gehört nicht dir. Nur der Einreicher oder die "
+            "Moderation kann sie löschen.",
+        )
+
     try:
         await edu_sharing.client.delete_node(idea_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
@@ -1831,49 +2171,46 @@ async def duplicate_idea(
     return {"ok": True, "node_id": new_id}
 
 
-@router.delete("/ideas/{idea_id}/attachments/folder", tags=["ideas"])
-async def delete_attachment_folder(
-    idea_id: str,
-    authorization: str | None = Header(None),
-):
-    """Löscht die mit einer Idee verknüpfte Anhänge-Sammlung samt aller
-    enthaltenen Dateien. Bewusst getrennt vom Idee-Löschen, damit der User
-    aktiv entscheiden muss, das Material wegzuwerfen."""
-    if not authorization:
-        raise HTTPException(401, "Anmeldung erforderlich")
-    with connect() as con:
-        row = con.execute(
-            "SELECT attachment_folder_id FROM idea WHERE id=?", (idea_id,)
-        ).fetchone()
-    folder_id = row["attachment_folder_id"] if row else None
-    if not folder_id:
-        raise HTTPException(404, "Keine Anhänge-Sammlung verknüpft")
-    try:
-        await edu_sharing.client.delete_node(folder_id, auth_header=authorization)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code in (401, 403):
-            raise HTTPException(
-                403, "Keine Berechtigung, die Anhänge-Sammlung zu löschen."
-            )
-        if e.response.status_code != 404:
-            raise HTTPException(
-                e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-            )
-    with connect() as con:
-        con.execute(
-            "UPDATE idea SET attachment_folder_id=NULL WHERE id=?", (idea_id,)
-        )
-    _log_activity(
-        action="attachment_folder_deleted",
-        authorization=authorization,
-        target_type="folder", target_id=folder_id,
-        detail={"idea_id": idea_id},
-    )
-    return {"ok": True}
+# =====================================================================
+# Anhänge an Ideen — Serienobjekte (`ccm:io_childobject`).
+#
+# Statt einer Geschwister-Sammlung legen wir das Anhang-IO direkt UNTER
+# die Idee als Child. Vorteile:
+#   - keine separate Sammlungs-Schreibrechte nötig (Owner der Idee reicht)
+#   - native Eltern-Kind-Beziehung über `ccm:childio`-Assoziation
+#   - kein Hilfs-Keyword `attachment-of:<id>` mehr
+#   - Children werden bei Idee-Löschung automatisch mit-gelöscht
+# Siehe Skill `wlo-childobjects` für API-Details.
+# =====================================================================
 
 
 class AttachmentRename(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
+
+
+async def _verify_child_of(
+    *, child_id: str, parent_id: str, authorization: str,
+) -> dict:
+    """Sicherheits-Check: das Child muss tatsächlich unter dem angegebenen
+    Eltern-IO hängen. Verhindert versehentliche Operationen auf fremden
+    Knoten. Gibt die Node-Metadaten zurück (für nachfolgenden Code reusable)."""
+    try:
+        meta = await edu_sharing.client.node_metadata(
+            child_id, auth_header=authorization,
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
+        )
+    parent = (meta.get("node") or {}).get("parent") or {}
+    actual_parent = parent.get("id") or (parent.get("ref") or {}).get("id")
+    if actual_parent != parent_id:
+        raise HTTPException(
+            409,
+            "Dieser Anhang gehört nicht zu dieser Idee. "
+            "Aus Sicherheitsgründen abgelehnt.",
+        )
+    return meta
 
 
 @router.patch("/ideas/{idea_id}/attachments/{attachment_id}", tags=["ideas"])
@@ -1883,31 +2220,13 @@ async def rename_attachment(
     body: AttachmentRename,
     authorization: str | None = Header(None),
 ):
-    """Benennt eine Datei in der Anhänge-Sammlung der Idee um. Sicherheits-
-    Check wie beim Löschen: Datei muss Kind der verknüpften Sammlung sein."""
+    """Benennt einen Anhang um. Sicherheits-Check: Anhang muss Child der
+    Idee sein."""
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
-    try:
-        meta = await edu_sharing.client.node_metadata(
-            attachment_id, auth_header=authorization,
-        )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
-    parent = (meta.get("node") or {}).get("parent") or {}
-    parent_id = parent.get("id") or (parent.get("ref") or {}).get("id")
-    with connect() as con:
-        row = con.execute(
-            "SELECT attachment_folder_id FROM idea WHERE id=?", (idea_id,),
-        ).fetchone()
-    folder_id = row["attachment_folder_id"] if row else None
-    if not folder_id or parent_id != folder_id:
-        raise HTTPException(
-            409,
-            "Diese Datei gehört nicht zur Anhänge-Sammlung dieser Idee. "
-            "Aus Sicherheitsgründen abgelehnt.",
-        )
+    await _verify_child_of(
+        child_id=attachment_id, parent_id=idea_id, authorization=authorization,
+    )
     new_name = body.name.strip()
     try:
         await edu_sharing.client.update_metadata(
@@ -1917,14 +2236,14 @@ async def rename_attachment(
         )
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
-            raise HTTPException(403, "Keine Berechtigung, diese Datei umzubenennen.")
+            raise HTTPException(403, "Keine Berechtigung, diesen Anhang umzubenennen.")
         raise HTTPException(
             e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
         )
     _log_activity(
         action="attachment_renamed", authorization=authorization,
         target_type="attachment", target_id=attachment_id, target_label=new_name,
-        detail={"idea_id": idea_id, "folder_id": folder_id},
+        detail={"idea_id": idea_id},
     )
     return {"ok": True, "name": new_name}
 
@@ -1935,35 +2254,13 @@ async def delete_attachment(
     attachment_id: str,
     authorization: str | None = Header(None),
 ):
-    """Löscht eine einzelne Datei aus der Anhänge-Sammlung der Idee.
-    Sicherheits-Check: wir prüfen, dass die Datei tatsächlich Kind der
-    verknüpften Anhänge-Sammlung ist — sonst lehnen wir ab, damit hier nicht
-    versehentlich fremde Knoten geleert werden."""
+    """Löscht einen einzelnen Anhang. Sicherheits-Check: Anhang muss Child
+    der Idee sein, damit nicht versehentlich fremde Knoten gelöscht werden."""
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
-    # idea_id ist nur Kontext-Pfad; primärer Schutz ist die Folder-Membership-Prüfung.
-    try:
-        meta = await edu_sharing.client.node_metadata(
-            attachment_id, auth_header=authorization
-        )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
-    parent = (meta.get("node") or {}).get("parent") or {}
-    parent_id = parent.get("id") or (parent.get("ref") or {}).get("id")
-    with connect() as con:
-        row = con.execute(
-            "SELECT attachment_folder_id FROM idea WHERE id=?", (idea_id,)
-        ).fetchone()
-    folder_id = row["attachment_folder_id"] if row else None
-    if not folder_id or parent_id != folder_id:
-        raise HTTPException(
-            409,
-            "Diese Datei gehört nicht zur Anhänge-Sammlung dieser Idee. "
-            "Aus Sicherheitsgründen abgelehnt.",
-        )
-    # Filename für Log retten BEVOR wir löschen
+    meta = await _verify_child_of(
+        child_id=attachment_id, parent_id=idea_id, authorization=authorization,
+    )
     att_props = (meta.get("node") or {}).get("properties") or {}
     att_name = (
         (att_props.get("cm:name") or att_props.get("cclom:title") or [None])[0]
@@ -1973,7 +2270,7 @@ async def delete_attachment(
         await edu_sharing.client.delete_node(attachment_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
-            raise HTTPException(403, "Keine Berechtigung, diese Datei zu löschen.")
+            raise HTTPException(403, "Keine Berechtigung, diesen Anhang zu löschen.")
         if e.response.status_code != 404:
             raise HTTPException(
                 e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
@@ -1982,7 +2279,7 @@ async def delete_attachment(
         action="attachment_deleted",
         authorization=authorization,
         target_type="attachment", target_id=attachment_id, target_label=att_name,
-        detail={"idea_id": idea_id, "folder_id": folder_id},
+        detail={"idea_id": idea_id},
     )
     return {"ok": True}
 
@@ -2003,16 +2300,6 @@ async def report_idea(
     Meldungen in ihrem Bereich. Kein automatischer Mailversand — bewusst
     minimal, weil ES-eigener SMTP-Hook auf prod hängt."""
     with connect() as con:
-        con.execute(
-            """CREATE TABLE IF NOT EXISTS idea_report (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 idea_id TEXT NOT NULL,
-                 reason TEXT NOT NULL,
-                 reporter TEXT,
-                 created_at TEXT NOT NULL,
-                 resolved_at TEXT
-               )"""
-        )
         # Reporter ggf. aus auth-User ableiten (Cache greift nicht für anon).
         reporter = None
         if authorization:
@@ -2047,16 +2334,6 @@ async def list_reports(authorization: str | None = Header(None)):
     """Mod-Liste offener Meldungen (resolved_at IS NULL)."""
     await _require_moderator(authorization)
     with connect() as con:
-        con.execute(
-            """CREATE TABLE IF NOT EXISTS idea_report (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 idea_id TEXT NOT NULL,
-                 reason TEXT NOT NULL,
-                 reporter TEXT,
-                 created_at TEXT NOT NULL,
-                 resolved_at TEXT
-               )"""
-        )
         rows = con.execute(
             """SELECT r.*, i.title FROM idea_report r
                  LEFT JOIN idea i ON i.id = r.idea_id
@@ -2135,7 +2412,7 @@ async def admin_stats(authorization: str | None = Header(None)):
 
         # Top-Aktive User aus activity_log (letzte 30 Tage)
         cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=30)
+            datetime.now(UTC) - timedelta(days=30)
         ).isoformat()
         top_actors = [
             {"actor": r["actor"], "count": r["c"]}
@@ -2290,10 +2567,10 @@ async def resolve_report(report_id: int, authorization: str | None = Header(None
 async def _is_moderator(authorization: str | None) -> bool:
     """Bestätigt, ob der eingeloggte User Mod-Rechte hat.
 
-    Drei Wege, in Reihenfolge:
+    Zwei Wege, in Reihenfolge:
     1. Username steht in der Bootstrap-Whitelist (env)
-    2. User ist Mitglied der konfigurierten Moderations-Gruppe
-    3. User ist Mitglied einer Fallback-Gruppe (z.B. ALFRESCO_ADMINISTRATORS)
+    2. User ist Mitglied einer der konfigurierten Mod-Gruppen
+       (Default: GROUP_ALFRESCO_ADMINISTRATORS)
     """
     if not authorization:
         return False
@@ -2305,11 +2582,68 @@ async def _is_moderator(authorization: str | None) -> bool:
         groups = {(g.get("authorityName") or "") for g in (m.get("groups") or [])}
     except Exception:
         return False
-    if settings.moderation_group in groups:
-        return True
-    if any(g in groups for g in settings.fallback_mod_groups):
-        return True
-    return False
+    return any(g in groups for g in settings.fallback_mod_groups)
+
+
+async def _is_owner_or_mod(
+    idea_id: str, authorization: str | None
+) -> tuple[bool, str | None, bool]:
+    """Owner-Gating für Idee-Editieren / -Löschen.
+
+    edu-sharing's accessEffective ist hier *nicht* ausreichend: alle
+    Mitglieder der HackathOERn-Gruppe haben durch Gruppen-Vererbung Write-
+    Rechte auf jeder Idee — und das wäre ein Free-for-all. Stattdessen
+    prüfen wir App-seitig:
+      1. ist Mod/Admin → ja, alles erlaubt
+      2. ist der Caller der originale Submitter (cm:creator oder
+         submitter:<user>-Keyword) → ja, eigene Idee
+      3. sonst → nein
+
+    Return: (allowed, username, is_mod). username ist None bei fehlender Auth.
+    """
+    if not authorization:
+        return False, None, False
+    user = _user_key_from_auth(authorization)
+    if not user:
+        return False, None, False
+    is_mod = await _is_moderator(authorization)
+    if is_mod:
+        return True, user, True
+
+    # 1. Cache-Check (billig)
+    try:
+        with connect() as con:
+            row = con.execute(
+                "SELECT owner_username FROM idea WHERE id=?", (idea_id,),
+            ).fetchone()
+        if row and row["owner_username"] and row["owner_username"] == user:
+            return True, user, False
+    except Exception:
+        pass
+
+    # 2. Live-Fallback: ES-Metadaten lesen (cm:creator / submitter:-Keyword)
+    try:
+        meta = await edu_sharing.client.node_metadata(
+            idea_id, auth_header=authorization,
+        )
+        node = (meta or {}).get("node") or {}
+        props = node.get("properties") or {}
+        creator_field = props.get("cm:creator") or []
+        creator = (
+            creator_field[0] if isinstance(creator_field, list) and creator_field
+            else creator_field if isinstance(creator_field, str) else None
+        )
+        if creator and creator == user:
+            return True, user, False
+        kws = props.get("cclom:general_keyword") or []
+        if isinstance(kws, str): kws = [kws]
+        target = f"submitter:{user}".lower()
+        if any(str(k).lower() == target for k in kws):
+            return True, user, False
+    except Exception as e:
+        log.debug("_is_owner_or_mod: ES-fallback failed for %s: %s", idea_id, e)
+
+    return False, user, False
 
 
 async def _require_moderator(authorization: str | None) -> str:
@@ -2344,7 +2678,41 @@ async def whoami(authorization: str | None = Header(None)):
         "authenticated": bool(user),
         "username": user,
         "is_moderator": is_mod,
-        "moderation_group": settings.moderation_group,
+        "moderation_groups": settings.fallback_mod_groups,
+    }
+
+
+@router.get("/me/memberships", tags=["me"])
+async def my_memberships_debug(authorization: str | None = Header(None)):
+    """Diagnose-Endpoint: liefert die rohen Memberships des Callers + die
+    konfigurierten Mod-Gruppen, um Mismatch-Probleme aufzudecken."""
+    if not authorization:
+        raise HTTPException(401, "Anmeldung erforderlich")
+    try:
+        m = await edu_sharing.client.my_memberships(auth_header=authorization)
+    except Exception as e:
+        raise HTTPException(502, f"edu-sharing memberships-Fehler: {e}")
+    groups = [
+        {
+            "authorityName": g.get("authorityName"),
+            "displayName": (g.get("profile") or {}).get("displayName"),
+            "groupType":   (g.get("profile") or {}).get("groupType"),
+        }
+        for g in (m.get("groups") or [])
+    ]
+    user_groups = {g["authorityName"] for g in groups}
+    matched = user_groups & set(settings.fallback_mod_groups)
+    user = _user_key_from_auth(authorization)
+    bootstrap_match = bool(user and user in settings.bootstrap_mod_users)
+    return {
+        "username": user,
+        "is_moderator": bool(matched) or bootstrap_match,
+        "matched_groups": sorted(matched),
+        "matched_bootstrap": bootstrap_match,
+        "expected_groups": settings.fallback_mod_groups,
+        "expected_bootstrap_users": settings.bootstrap_mod_users,
+        "groups_count": len(groups),
+        "groups": groups,
     }
 
 
@@ -2448,39 +2816,21 @@ async def my_activity(
     return {"count": len(items), "items": items}
 
 
-# ===== Anhänge-Sammlung anlegen ==================================
+# ===== Anhänge als Child-IO (Serienobjekt-Pattern) ==============
+# Frühere Lösung mit Geschwister-Sammlung + `attachment-of:<id>`-Keyword
+# wurde abgelöst — siehe ~/.claude/skills/wlo-childobjects/SKILL.md.
 
 @router.post("/ideas/{idea_id}/attachments/upload", tags=["ideas"])
-async def upload_to_attachment_folder(
+async def upload_attachment(
     idea_id: str,
     file: UploadFile = File(...),
-    folder_id: str | None = None,
     authorization: str | None = Header(None),
 ):
-    """Lädt eine Datei in die Anhänge-Sammlung der Idee.
-    Falls keine Anhänge-Sammlung existiert, wird ein 409 zurückgegeben — vorher
-    POST /ideas/{id}/attachments/folder rufen.
-    Erzeugt einen ccm:io-Child mit dem Datei-Namen, lädt die Bytes als content.
-
-    Optionaler Query-Param `folder_id` umgeht den Cache-Lookup — nötig für
-    frisch eingereichte Ideen, die noch nicht synchronisiert wurden."""
+    """Lädt einen Anhang direkt als Child-IO (`ccm:childio` +
+    `ccm:io_childobject`-Aspekt) unter die Idee. Erfordert nur Schreibrecht
+    am Idee-Knoten — kein separater Sammlungs-Schritt mehr."""
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
-
-    if not folder_id:
-        with connect() as con:
-            row = con.execute(
-                "SELECT attachment_folder_id FROM idea WHERE id = ?", (idea_id,),
-            ).fetchone()
-        if row and row["attachment_folder_id"]:
-            folder_id = row["attachment_folder_id"]
-    if not folder_id:
-        raise HTTPException(
-            409,
-            "Keine Anhänge-Sammlung verknüpft. Erst über "
-            "POST /ideas/{id}/attachments/folder anlegen, dann "
-            "folder_id als Query-Param mitgeben oder Sync abwarten.",
-        )
 
     data = await file.read()
     if not data:
@@ -2488,30 +2838,37 @@ async def upload_to_attachment_folder(
     filename = file.filename or "upload.bin"
     mimetype = file.content_type or "application/octet-stream"
 
-    # Step 1: ccm:io-Child in der Anhänge-Sammlung anlegen
+    # Step 1: Child-IO als Serienobjekt unter der Idee anlegen.
+    # Order = aktuelle Anzahl bestehender Children, damit Reihenfolge stabil bleibt.
     try:
-        result = await edu_sharing.client.create_node(
-            parent_id=folder_id,
-            node_type="ccm:io",
-            properties={
-                "cm:name": [filename],
-                "cm:title": [filename],
-                "cclom:title": [filename],
-            },
+        existing = await edu_sharing.client.list_child_objects(
+            idea_id, auth_header=authorization,
+        )
+    except Exception:
+        existing = []
+    order = len(existing)
+
+    try:
+        result = await edu_sharing.client.add_child_object(
+            parent_id=idea_id,
+            filename=filename,
+            order=order,
             auth_header=authorization,
         )
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             raise HTTPException(
-                403, "Keine Berechtigung, hier Inhalte zu speichern."
+                403, "Keine Berechtigung, an diese Idee Anhänge zu hängen."
             )
+        if e.response.status_code == 404:
+            raise HTTPException(404, "Idee nicht gefunden")
         raise HTTPException(
             e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
         )
 
     new_id = ((result or {}).get("node") or {}).get("ref", {}).get("id")
     if not new_id:
-        raise HTTPException(502, "edu-sharing lieferte keine ID für die neue Datei")
+        raise HTTPException(502, "edu-sharing lieferte keine ID für den neuen Anhang")
 
     # Step 2: Bytes als content uploaden
     try:
@@ -2532,8 +2889,7 @@ async def upload_to_attachment_folder(
             e.response.status_code,
             f"edu-sharing Upload-Fehler: {e.response.text[:200]}",
         )
-    # Idee-Cache anstoßen — Anhang-Liste wird live aus collection_references
-    # geholt, aber so bleiben Idee-Felder (modified_at) aktuell.
+    # Idee-Cache anstoßen — modified_at aktuell halten.
     try:
         await sync_mod.refresh_idea(idea_id, auth_header=authorization)
     except Exception:
@@ -2547,245 +2903,109 @@ async def upload_to_attachment_folder(
     return {"ok": True, "node_id": new_id, "name": filename, "size": len(data)}
 
 
-@router.post("/ideas/{idea_id}/attachments/folder", tags=["ideas"])
-async def create_attachment_folder(
+@router.get("/ideas/{idea_id}/attachments", tags=["ideas"])
+async def list_attachments(
     idea_id: str,
     authorization: str | None = Header(None),
 ):
-    """Erstellt eine Geschwister-Sammlung zur Idee als Ablage für weitere
-    Dateien. Der Name ist „<idea-title> — Anhänge"; Keyword
-    `attachment-of:<idea-id>` verknüpft sie eindeutig.
-    Erfordert Schreibrechte am Eltern-Container (Herausforderung)."""
-    if not authorization:
-        raise HTTPException(401, "Anmeldung erforderlich")
-
-    with connect() as con:
-        row = con.execute(
-            "SELECT id, topic_id, title, attachment_folder_id FROM idea WHERE id = ?",
-            (idea_id,),
-        ).fetchone()
-
-    topic_id: str | None = None
-    title: str | None = None
-    fresh_node: dict | None = None
-    if row:
-        if row["attachment_folder_id"]:
-            return {
-                "ok": True,
-                "already_exists": True,
-                "folder_id": row["attachment_folder_id"],
-            }
-        topic_id = row["topic_id"]
-        title = row["title"]
-
-    # Fallback für frisch eingereichte Ideen, die noch nicht im SQLite-Cache
-    # liegen: Metadaten direkt aus edu-sharing holen (Parent + Titel).
-    if not row or not topic_id or not title:
-        try:
-            md = await edu_sharing.client.node_metadata(idea_id)
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                raise HTTPException(404, "Idee nicht gefunden")
-            raise HTTPException(
-                e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-            )
-        fresh_node = (md or {}).get("node") or md or {}
-        props = fresh_node.get("properties") or {}
-        if not title:
-            title = (
-                (props.get("cclom:title") or props.get("cm:title") or [None])[0]
-                or fresh_node.get("title")
-                or (props.get("cm:name") or [None])[0]
-                or "Idee"
-            )
-        if not topic_id:
-            parent = fresh_node.get("parent") or {}
-            topic_id = parent.get("id") or (parent.get("ref") or {}).get("id")
-
-    if not topic_id:
-        raise HTTPException(409, "Idee hat keinen zugeordneten Sammlungs-Container")
-
-    folder_name = f"{title} — Anhänge"
+    """Listet alle Child-IO-Anhänge unter einer Idee, sortiert nach
+    `ccm:childobject_order`."""
     try:
-        result = await edu_sharing.client.create_collection(
-            parent_id=topic_id,
-            title=folder_name,
-            description=f"Zusatzmaterial zur Idee „{title}"".",
-            auth_header=authorization,
+        children = await edu_sharing.client.list_child_objects(
+            idea_id, auth_header=authorization,
         )
     except httpx.HTTPStatusError as e:
-        if e.response.status_code in (401, 403):
-            raise HTTPException(
-                403, "Keine Berechtigung, eine Sammlung in diesem Bereich anzulegen."
-            )
+        if e.response.status_code == 404:
+            raise HTTPException(404, "Idee nicht gefunden")
         raise HTTPException(
             e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
         )
 
-    folder_id = (
-        ((result or {}).get("collection") or result or {}).get("ref") or {}
-    ).get("id")
-    if not folder_id:
-        raise HTTPException(502, "edu-sharing lieferte keine ID für die neue Sammlung")
-
-    # Keyword `attachment-of:<idea-id>` ans Folder-Node anhängen, damit der
-    # Sync die Verknüpfung beim nächsten Lauf wiederfindet.
-    try:
-        await edu_sharing.client.update_metadata(
-            folder_id,
-            {"cclom:general_keyword": [f"attachment-of:{idea_id}"]},
-            auth_header=authorization,
-        )
-    except Exception:
-        pass  # nicht kritisch — Cache-Eintrag unten reicht für Sofortanzeige
-
-    # Cache schreiben — wenn die Idee noch nicht im Cache war, legen wir einen
-    # Stub-Row an, damit GET /ideas/{id} bis zum nächsten Sync funktioniert
-    # und die Anhänge-Sammlung sofort persistent sichtbar bleibt.
-    with connect() as con:
-        if row is None and fresh_node is not None:
-            try:
-                from .sync import _upsert_idea
-                # ccm:io ⇒ kind="io"; main_content_id = idea selbst
-                ntype = fresh_node.get("type") or ""
-                kind_local = "collection" if ntype == "ccm:map" else "io"
-                main_id = idea_id if kind_local == "io" else None
-                await _upsert_idea(
-                    con,
-                    fresh_node,
-                    kind=kind_local,
-                    topic_id=topic_id,
-                    main_content_id=main_id,
-                )
-            except Exception as e:
-                log.warning("stub upsert failed for %s: %s", idea_id, e)
-        con.execute(
-            "UPDATE idea SET attachment_folder_id = ? WHERE id = ?",
-            (folder_id, idea_id),
-        )
-    _log_activity(
-        action="attachment_folder_created",
-        authorization=authorization,
-        target_type="folder", target_id=folder_id, target_label=folder_name,
-        detail={"idea_id": idea_id},
-    )
-    return {"ok": True, "folder_id": folder_id, "name": folder_name}
+    items = []
+    for n in children:
+        ref = n.get("ref") or {}
+        props = n.get("properties") or {}
+        items.append({
+            "node_id": ref.get("id"),
+            "name": (props.get("cm:name") or [n.get("name")])[0],
+            "mimetype": (props.get("ccm:content-type") or [None])[0]
+                        or n.get("mimetype"),
+            "size": n.get("size"),
+            "created_at": n.get("createdAt"),
+            "order": (props.get("ccm:childobject_order") or [None])[0],
+            "preview_url": (n.get("preview") or {}).get("url"),
+            "render_url": f"{settings.es_render_base}/{ref.get('id')}"
+                          if ref.get("id") and getattr(settings, "es_render_base", None)
+                          else None,
+        })
+    return {"items": items, "count": len(items)}
 
 
-# ===== Moderator-Verwaltung (Mitglieder der Mod-Gruppe) ===========
+# ===== Moderatoren-Übersicht (read-only) ==========================
+# Mitgliedschaften in den Mod-Gruppen werden ausschließlich im
+# edu-sharing-Repository selbst verwaltet — diese App liest sie nur
+# zur Anzeige aus, um nicht versehentlich globale Admin-Rechte zu
+# erteilen oder zu entziehen.
 
 @router.get("/admin/moderators", tags=["moderation"])
 async def list_moderators(authorization: str | None = Header(None)):
-    """Liste der Mitglieder der konfigurierten Moderations-Gruppe + bootstrap."""
+    """Mitglieder aller konfigurierten Mod-Gruppen + Bootstrap-User."""
     await _require_moderator(authorization)
     members: list[dict] = []
-    try:
-        m = await edu_sharing.client.group_members(
-            settings.moderation_group, auth_header=authorization
-        )
+    seen: set[str] = set()
+    group_results: list[dict] = []
+    for group_name in settings.fallback_mod_groups:
+        ok = True
+        error: str | None = None
+        try:
+            m = await edu_sharing.client.group_members(
+                group_name, auth_header=authorization
+            )
+        except httpx.HTTPStatusError as e:
+            ok = False
+            if e.response.status_code == 404:
+                error = "Gruppe nicht gefunden"
+                m = {}
+            else:
+                error = f"HTTP {e.response.status_code}"
+                m = {}
+        except Exception as e:
+            ok = False
+            error = str(e)
+            m = {}
+
+        added = 0
         for p in (m.get("persons") or m.get("authorities") or m.get("members") or []):
+            uname = p.get("authorityName") or p.get("userName")
+            key = (uname or "").lower()
+            if not uname or key in seen:
+                continue
+            seen.add(key)
             profile = p.get("profile") or {}
             members.append({
-                "username": p.get("authorityName") or p.get("userName"),
+                "username": uname,
                 "first_name": profile.get("firstName"),
                 "last_name": profile.get("lastName"),
                 "email": profile.get("email") or p.get("mailbox"),
-                "source": "group",
+                "source": group_name,
             })
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code != 404:
-            raise HTTPException(
-                e.response.status_code,
-                f"edu-sharing: {e.response.text[:200]}",
-            )
-        # 404 = Gruppe existiert noch nicht — leere Liste, Bootstrap zeigen
+            added += 1
+        group_results.append({
+            "group": group_name, "ok": ok, "error": error, "count": added,
+        })
 
-    # Bootstrap-User aus ENV anhängen (sofern nicht bereits in der Gruppe)
-    seen = {(m.get("username") or "").lower() for m in members}
+    # Bootstrap-User aus ENV anhängen (sofern nicht bereits in einer Gruppe)
     for u in settings.bootstrap_mod_users:
         if u.lower() not in seen:
             members.append({"username": u, "source": "bootstrap"})
 
     return {
-        "group": settings.moderation_group,
-        "fallback_groups": settings.fallback_mod_groups,
+        "groups": settings.fallback_mod_groups,
+        "group_status": group_results,
         "count": len(members),
         "members": members,
+        "managed_externally": True,
     }
-
-
-@router.put("/admin/moderators/{username}", tags=["moderation"])
-async def add_moderator(
-    username: str,
-    authorization: str | None = Header(None),
-):
-    await _require_moderator(authorization)
-    try:
-        await edu_sharing.client.add_group_member(
-            settings.moderation_group, username, auth_header=authorization
-        )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            e.response.status_code,
-            f"edu-sharing: {e.response.text[:200]}",
-        )
-    _log_activity(
-        action="mod_added",
-        authorization=authorization, is_mod=True,
-        target_type="mod", target_id=username, target_label=username,
-    )
-    return {"ok": True, "username": username}
-
-
-@router.delete("/admin/moderators/{username}", tags=["moderation"])
-async def remove_moderator(
-    username: str,
-    authorization: str | None = Header(None),
-):
-    await _require_moderator(authorization)
-    try:
-        await edu_sharing.client.remove_group_member(
-            settings.moderation_group, username, auth_header=authorization
-        )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            e.response.status_code,
-            f"edu-sharing: {e.response.text[:200]}",
-        )
-    _log_activity(
-        action="mod_removed",
-        authorization=authorization, is_mod=True,
-        target_type="mod", target_id=username, target_label=username,
-    )
-    return {"ok": True}
-
-
-@router.get("/admin/users/search", tags=["moderation"])
-async def search_users(
-    q: str = Query(..., min_length=2),
-    authorization: str | None = Header(None),
-):
-    """Suche edu-sharing User für die Moderator-Auswahl."""
-    await _require_moderator(authorization)
-    try:
-        d = await edu_sharing.client.search_people(
-            q, max_items=15, auth_header=authorization
-        )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            e.response.status_code,
-            f"edu-sharing: {e.response.text[:200]}",
-        )
-    out = []
-    for p in (d.get("persons") or d.get("authorities") or []):
-        profile = p.get("profile") or {}
-        out.append({
-            "username": p.get("authorityName") or p.get("userName"),
-            "first_name": profile.get("firstName"),
-            "last_name": profile.get("lastName"),
-            "email": profile.get("email") or p.get("mailbox"),
-        })
-    return {"results": out}
 
 
 @router.post("/admin/sync", tags=["admin"])
@@ -2900,6 +3120,605 @@ async def admin_backup_restore(
                 "restored_metadata": result.get("restored_metadata")},
     )
     return result
+
+
+# ===== Kommentar löschen (Owner + Mod) ============================
+
+@router.delete("/comments/{comment_id}", tags=["ideas"])
+async def delete_comment(
+    comment_id: str,
+    idea_id: str | None = Query(None),
+    authorization: str | None = Header(None),
+):
+    """Löscht einen Kommentar. Erlaubt für (a) Kommentar-Autor selbst,
+    (b) Moderator. edu-sharing prüft Schreibrecht auf dem Kommentar-Knoten,
+    aber wir gating das auch app-seitig: ohne Auth direkt 401."""
+    if not authorization:
+        raise HTTPException(401, "Anmeldung erforderlich")
+    me = _user_key_from_auth(authorization)
+    is_mod = await _is_moderator(authorization)
+
+    # Owner-Check: edu-sharing-Comment-API hat creator-Authority. Wir lesen
+    # die Kommentar-Liste der Idee (sofern idea_id mit) und matchen den
+    # ref.id. Bei is_mod überspringen wir die Owner-Prüfung.
+    author_match = is_mod
+    if not is_mod and idea_id:
+        try:
+            with connect() as con:
+                row = con.execute(
+                    "SELECT main_content_id,id FROM idea WHERE id=?", (idea_id,),
+                ).fetchone()
+            if row:
+                target = row["main_content_id"] or row["id"]
+                cm = await edu_sharing.client.comments(target, auth_header=authorization)
+                for c in (cm or {}).get("comments") or []:
+                    ref_id = ((c.get("ref") or {}).get("id"))
+                    if ref_id == comment_id:
+                        creator = ((c.get("creator") or {}).get("authorityName") or "").lower()
+                        if creator and me and creator == me.lower():
+                            author_match = True
+                        break
+        except Exception as e:
+            log.debug("delete_comment: Owner-Check fehlgeschlagen: %s", e)
+
+    if not author_match:
+        raise HTTPException(403, "Nur Autor:in oder Moderation kann Kommentare löschen.")
+
+    try:
+        await edu_sharing.client.delete_comment(comment_id, auth_header=authorization)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
+
+    # comment_count refreshen
+    if idea_id:
+        try:
+            await sync_mod.refresh_idea(idea_id, auth_header=authorization)
+        except Exception:
+            pass
+    _log_activity(
+        action="comment_deleted",
+        authorization=authorization, is_mod=is_mod,
+        target_type="idea", target_id=idea_id or "",
+        detail={"comment_id": comment_id},
+    )
+    return {"ok": True}
+
+
+# ===== Phasen-Historie einer Idee =================================
+
+@router.get("/ideas/{idea_id}/phase-history", tags=["ideas"])
+async def idea_phase_history(
+    idea_id: str,
+    authorization: str | None = Header(None),
+):
+    """Liefert die Liste aller Phase-Wechsel zu einer Idee aus dem
+    Activity-Log. Für versteckte Ideen wird non-mod ein 404 geliefert,
+    damit die Phase-Wechsel nicht über die Hintertür sichtbar werden."""
+    with connect() as con:
+        idea_row = con.execute(
+            "SELECT hidden FROM idea WHERE id=?", (idea_id,),
+        ).fetchone()
+    if idea_row and idea_row["hidden"] and not await _is_moderator(authorization):
+        raise HTTPException(404, "Idea not found")
+    with connect() as con:
+        rows = con.execute(
+            """SELECT ts, actor, detail FROM activity_log
+                WHERE target_id = ? AND action = 'phase_changed'
+                ORDER BY ts ASC""",
+            (idea_id,),
+        ).fetchall()
+    items = []
+    for r in rows:
+        d = {"ts": r["ts"], "actor": r["actor"], "from": None, "to": None}
+        if r["detail"]:
+            try:
+                dd = json.loads(r["detail"])
+                d["from"] = dd.get("from")
+                d["to"] = dd.get("to")
+            except Exception:
+                pass
+        items.append(d)
+    return {"count": len(items), "items": items}
+
+
+# ===== Reports — Status für den Reporter ==========================
+
+@router.get("/me/reports", tags=["me"])
+def my_reports(authorization: str | None = Header(None)):
+    """Liste der eigenen Meldungen + Status (offen/erledigt)."""
+    if not authorization:
+        raise HTTPException(401, "Anmeldung erforderlich")
+    me = _user_key_from_auth(authorization)
+    if not me:
+        raise HTTPException(401, "Username konnte nicht ermittelt werden")
+    with connect() as con:
+        # Versteckte Ideen sollen nicht über die User-Reports-Liste
+        # leaken — sobald eine Idee durch Moderation entfernt wurde,
+        # blenden wir den Titel aus und geben nur den Idee-Status zurück.
+        rows = con.execute(
+            """SELECT r.id, r.idea_id, r.reason, r.created_at, r.resolved_at,
+                       CASE WHEN i.hidden = 1 THEN NULL ELSE i.title END AS idea_title,
+                       COALESCE(i.hidden, 0) AS idea_hidden
+                  FROM idea_report r
+                  LEFT JOIN idea i ON i.id = r.idea_id
+                 WHERE r.reporter = ?
+                 ORDER BY r.created_at DESC LIMIT 200""",
+            (me,),
+        ).fetchall()
+    return {"count": len(rows), "items": [dict(r) for r in rows]}
+
+
+@router.get("/ideas/{idea_id}/report-status", tags=["ideas"])
+def idea_report_status(idea_id: str, authorization: str | None = Header(None)):
+    """Zeigt dem eingeloggten User, ob er die Idee bereits gemeldet hat
+    (verhindert Doppel-Meldungen, zeigt Status im UI)."""
+    if not authorization:
+        return {"reported": False}
+    me = _user_key_from_auth(authorization)
+    if not me:
+        return {"reported": False}
+    with connect() as con:
+        row = con.execute(
+            """SELECT id, created_at, resolved_at FROM idea_report
+                WHERE idea_id = ? AND reporter = ?
+                ORDER BY created_at DESC LIMIT 1""",
+            (idea_id, me),
+        ).fetchone()
+    if not row:
+        return {"reported": False}
+    return {
+        "reported": True,
+        "created_at": row["created_at"],
+        "resolved_at": row["resolved_at"],
+        "status": "resolved" if row["resolved_at"] else "open",
+    }
+
+
+@router.post("/admin/reports/bulk-resolve", tags=["moderation"])
+async def bulk_resolve_reports(
+    body: dict,
+    authorization: str | None = Header(None),
+):
+    """Mehrere Reports auf einmal erledigen. Body: { ids: [int,...] }"""
+    await _require_moderator(authorization)
+    raw = body.get("ids") or []
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "Liste 'ids' erforderlich")
+    # Strikte Validierung: nur Integers ≥1. Schützt gegen Strings,
+    # Floats, gemischte Arrays oder Manipulationsversuche.
+    safe_ids: list[int] = []
+    for x in raw:
+        try:
+            n = int(x)
+            if n >= 1:
+                safe_ids.append(n)
+        except (TypeError, ValueError):
+            continue
+    if not safe_ids:
+        raise HTTPException(400, "Keine validen Integer-IDs in 'ids'")
+    now = sync_mod._iso_now()
+    with connect() as con:
+        placeholders = ",".join("?" * len(safe_ids))
+        con.execute(
+            f"UPDATE idea_report SET resolved_at = ? WHERE id IN ({placeholders}) "
+            f"AND resolved_at IS NULL",
+            (now, *safe_ids),
+        )
+    _log_activity(
+        action="reports_bulk_resolved",
+        authorization=authorization, is_mod=True,
+        target_type="report",
+        detail={"count": len(safe_ids), "ids": safe_ids[:50]},
+    )
+    return {"ok": True, "count": len(safe_ids)}
+
+
+# ===== Ranking-Trend: Top-Steiger der letzten 7 Tage ==============
+
+@router.get("/ranking/risers", tags=["ranking"])
+def ranking_risers(
+    sort: Literal["rating", "comments", "interest"] = "rating",
+    event: str | None = None,
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(5, ge=1, le=20),
+):
+    """Vergleicht den jüngsten Snapshot mit einem ~N-Tage-alten Snapshot
+    und liefert die Ideen mit der größten Rangverbesserung (kleinerer
+    Rang = besser). Für die Ranking-Seite als „Top-Steiger"-Sektion."""
+    ev = event or ""
+    with connect() as con:
+        # Jüngsten Snapshot bestimmen
+        latest = con.execute(
+            "SELECT MAX(snapshot_at) FROM ranking_snapshot WHERE event=? AND sort=?",
+            (ev, sort),
+        ).fetchone()[0]
+        if not latest:
+            return {"count": 0, "items": []}
+        # Snapshot N Tage zuvor (oder den ältesten verfügbaren)
+        cutoff_target = con.execute(
+            "SELECT datetime(?, ?)", (latest, f"-{days} days"),
+        ).fetchone()[0]
+        prev = con.execute(
+            """SELECT snapshot_at FROM ranking_snapshot
+                WHERE event=? AND sort=? AND snapshot_at <= ?
+                ORDER BY snapshot_at DESC LIMIT 1""",
+            (ev, sort, cutoff_target),
+        ).fetchone()
+        if not prev:
+            # Fallback: ältester Snapshot überhaupt
+            prev = con.execute(
+                """SELECT snapshot_at FROM ranking_snapshot
+                    WHERE event=? AND sort=? AND snapshot_at < ?
+                    ORDER BY snapshot_at ASC LIMIT 1""",
+                (ev, sort, latest),
+            ).fetchone()
+        if not prev or prev["snapshot_at"] == latest:
+            return {"count": 0, "items": [], "latest": latest, "previous": None}
+
+        prev_at = prev["snapshot_at"]
+        rows = con.execute(
+            """SELECT cur.idea_id,
+                      cur.rank AS rank,
+                      prev.rank AS prev_rank,
+                      (prev.rank - cur.rank) AS delta,
+                      cur.score AS score,
+                      i.title, i.description, i.preview_url, i.author,
+                      i.phase, i.events, i.hidden
+                 FROM ranking_snapshot cur
+                 JOIN ranking_snapshot prev
+                   ON prev.idea_id = cur.idea_id
+                  AND prev.event = cur.event AND prev.sort = cur.sort
+                  AND prev.snapshot_at = ?
+                 LEFT JOIN idea i ON i.id = cur.idea_id
+                WHERE cur.event = ? AND cur.sort = ?
+                  AND cur.snapshot_at = ?
+                  AND (i.hidden IS NULL OR i.hidden = 0)
+                ORDER BY (prev.rank - cur.rank) DESC, cur.rank ASC
+                LIMIT ?""",
+            (prev_at, ev, sort, latest, limit),
+        ).fetchall()
+
+    items = []
+    for r in rows:
+        if (r["delta"] or 0) <= 0:
+            continue
+        items.append({
+            "idea_id": r["idea_id"],
+            "title": r["title"],
+            "description": r["description"],
+            "preview_url": r["preview_url"],
+            "author": r["author"],
+            "phase": r["phase"],
+            "events": json.loads(r["events"] or "[]"),
+            "rank": r["rank"],
+            "prev_rank": r["prev_rank"],
+            "delta": r["delta"],
+            "score": r["score"],
+        })
+    return {
+        "count": len(items),
+        "items": items,
+        "latest": latest,
+        "previous": prev_at,
+        "sort": sort,
+        "event": event,
+    }
+
+
+# ===== Öffentliches User-Profil ====================================
+
+@router.get("/users/{username}", tags=["users"])
+def public_user_profile(username: str):
+    """Öffentliches Profil — listet die Ideen eines Users + Aggregat-Stats.
+    Keine private Information (Mitmachen/Folgen anderer Ideen, eigene
+    Meldungen) — die liegen unter /me/*."""
+    uname = (username or "").strip()
+    if not uname:
+        raise HTTPException(400, "Username erforderlich")
+    with connect() as con:
+        rows = con.execute(
+            """SELECT * FROM idea
+                WHERE owner_username = ?
+                  AND COALESCE(hidden,0) = 0
+                ORDER BY modified_at DESC""",
+            (uname,),
+        ).fetchall()
+        # Aggregat: Anzahl Kommentare + Bewertungen gesamt
+        agg = con.execute(
+            """SELECT
+                 COUNT(*) AS ideas,
+                 COALESCE(SUM(comment_count),0) AS comments,
+                 COALESCE(SUM(rating_count),0) AS ratings,
+                 COALESCE(AVG(NULLIF(rating_avg,0)),0) AS avg_rating
+                FROM idea WHERE owner_username = ?
+                  AND COALESCE(hidden,0) = 0""",
+            (uname,),
+        ).fetchone()
+        # Letzte Aktivität
+        last_act = con.execute(
+            "SELECT MAX(modified_at) FROM idea WHERE owner_username = ?",
+            (uname,),
+        ).fetchone()[0]
+    if not rows and not last_act:
+        raise HTTPException(404, "Kein öffentliches Profil vorhanden")
+    return {
+        "username": uname,
+        "stats": {
+            "ideas": agg["ideas"],
+            "comments": agg["comments"],
+            "ratings": agg["ratings"],
+            "avg_rating": round(float(agg["avg_rating"] or 0.0), 2),
+        },
+        "last_activity": last_act,
+        "ideas": [_row_to_idea(r) for r in rows],
+    }
+
+
+# ===== Hidden-Verwaltung (Mod-only) ===============================
+
+@router.get("/admin/hidden-ideas", tags=["moderation"])
+async def list_hidden_ideas(authorization: str | None = Header(None)):
+    """Liste der versteckten Ideen — für den Mod-Tab „Versteckt"."""
+    await _require_moderator(authorization)
+    with connect() as con:
+        rows = con.execute(
+            """SELECT id, title, owner_username, hidden_reason, modified_at
+                 FROM idea WHERE hidden = 1
+                ORDER BY modified_at DESC LIMIT 500"""
+        ).fetchall()
+    return {"count": len(rows), "items": [dict(r) for r in rows]}
+
+
+@router.post("/admin/ideas/{idea_id}/hide", tags=["moderation"])
+async def hide_idea(
+    idea_id: str,
+    body: dict | None = None,
+    authorization: str | None = Header(None),
+):
+    """Idee soft-deleten: bleibt in der DB, ist aber für öffentliche Listen
+    und Detail-Seiten unsichtbar. Reversibel via /unhide."""
+    await _require_moderator(authorization)
+    reason = (body or {}).get("reason") if isinstance(body, dict) else None
+    with connect() as con:
+        row = con.execute(
+            "SELECT title FROM idea WHERE id=?", (idea_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Idee nicht gefunden")
+        con.execute(
+            "UPDATE idea SET hidden = 1, hidden_reason = ? WHERE id=?",
+            (reason, idea_id),
+        )
+    _log_activity(
+        action="idea_hidden",
+        authorization=authorization, is_mod=True,
+        target_type="idea", target_id=idea_id, target_label=row["title"],
+        detail={"reason": reason} if reason else None,
+    )
+    return {"ok": True}
+
+
+@router.post("/admin/ideas/{idea_id}/unhide", tags=["moderation"])
+async def unhide_idea(
+    idea_id: str,
+    authorization: str | None = Header(None),
+):
+    """Idee wieder sichtbar machen."""
+    await _require_moderator(authorization)
+    with connect() as con:
+        row = con.execute(
+            "SELECT title FROM idea WHERE id=?", (idea_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Idee nicht gefunden")
+        con.execute(
+            "UPDATE idea SET hidden = 0, hidden_reason = NULL WHERE id=?",
+            (idea_id,),
+        )
+    _log_activity(
+        action="idea_unhidden",
+        authorization=authorization, is_mod=True,
+        target_type="idea", target_id=idea_id, target_label=row["title"],
+    )
+    return {"ok": True}
+
+
+# ===== Notification-Cursor — "neu seit letztem Besuch" =============
+
+@router.get("/me/notifications/unseen", tags=["me"])
+def my_notifications_unseen(authorization: str | None = Header(None)):
+    """Anzahl der Feed-Items, die seit dem letzten /me/notifications/seen-
+    Call aufgetreten sind. Für die Badge im User-Menü / Profil-Tab."""
+    if not authorization:
+        return {"count": 0}
+    me = _user_key_from_auth(authorization)
+    if not me:
+        return {"count": 0}
+    with connect() as con:
+        seen_row = con.execute(
+            "SELECT last_seen FROM user_feed_seen WHERE user_key=?", (me,),
+        ).fetchone()
+        last_seen = seen_row["last_seen"] if seen_row else "1970-01-01T00:00:00Z"
+
+        # Relevante Idea-IDs (gefolgt + mitmachen + eigene)
+        idea_ids = {
+            r["idea_id"] for r in con.execute(
+                "SELECT idea_id FROM idea_interaction "
+                "WHERE user_key=? AND kind IN ('follow','interest')", (me,),
+            ).fetchall()
+        }
+        for r in con.execute(
+            "SELECT id FROM idea WHERE owner_username=?", (me,),
+        ).fetchall():
+            idea_ids.add(r["id"])
+        if not idea_ids:
+            return {"count": 0, "last_seen": last_seen}
+
+        # SQLites Default-Parameter-Limit liegt bei 999. Wer >900 Ideen
+        # gefolgt/eigen hat, würde sonst eine `too many SQL variables`-
+        # Exception bekommen. Wir chunken auf 800er-Blöcke und summieren.
+        idea_list = list(idea_ids)
+        CHUNK = 800
+        count = 0
+        for start in range(0, len(idea_list), CHUNK):
+            chunk = idea_list[start : start + CHUNK]
+            placeholders = ",".join("?" * len(chunk))
+            count += con.execute(
+                f"SELECT COUNT(*) FROM activity_log "
+                f"WHERE target_id IN ({placeholders}) "
+                f"  AND ts > ? AND COALESCE(actor,'') <> ?",
+                (*chunk, last_seen, me),
+            ).fetchone()[0]
+    return {"count": count, "last_seen": last_seen}
+
+
+@router.post("/me/notifications/seen", tags=["me"])
+def mark_notifications_seen(authorization: str | None = Header(None)):
+    """Setzt den Notification-Cursor auf jetzt — alle weiter zurückliegenden
+    Feed-Items gelten als „gelesen"."""
+    if not authorization:
+        raise HTTPException(401, "Anmeldung erforderlich")
+    me = _user_key_from_auth(authorization)
+    if not me:
+        raise HTTPException(401, "Username unbekannt")
+    now = sync_mod._iso_now()
+    with connect() as con:
+        con.execute(
+            "INSERT OR REPLACE INTO user_feed_seen (user_key, last_seen) "
+            "VALUES (?, ?)", (me, now),
+        )
+    return {"ok": True, "last_seen": now}
+
+
+# ===== Idee aus edu-sharing nachladen ============================
+
+@router.post("/ideas/{idea_id}/refresh", tags=["ideas"])
+async def manual_refresh_idea(
+    idea_id: str,
+    authorization: str | None = Header(None),
+):
+    """Holt die Idee live aus edu-sharing und aktualisiert den App-Cache.
+    Wird gebraucht, wenn ein User im Repo direkt etwas geändert hat
+    (z.B. neues Vorschaubild) und nicht auf den 5-Minuten-Sync warten will.
+    Owner + Mod dürfen refreshen — für anonyme Besucher ist's gesperrt,
+    um Spam-Refresh-Last vom Repo abzuhalten."""
+    if not authorization:
+        raise HTTPException(401, "Anmeldung erforderlich")
+    allowed, _user, _is_mod = await _is_owner_or_mod(idea_id, authorization)
+    if not allowed:
+        raise HTTPException(403, "Nur Eigentümer oder Mod dürfen refreshen.")
+    ok = await sync_mod.refresh_idea(idea_id, auth_header=authorization)
+    if not ok:
+        raise HTTPException(502, "Refresh fehlgeschlagen — Knoten unbekannt oder edu-sharing nicht erreichbar.")
+    return {"ok": True}
+
+
+# ===== Bestehende Ideen nachpflegen: Pflicht-Metadaten für Freischaltung ====
+
+def _missing_publication_fields(cur_props: dict) -> dict[str, list[str]]:
+    """Welche der WLO-Freischaltungs-Pflichtfelder fehlen am Knoten?
+    Liefert ein dict mit Defaults nur für die fehlenden Felder — wird
+    von Single- und Bulk-Backfill verwendet."""
+    add: dict[str, list[str]] = {}
+    if not cur_props.get("ccm:commonlicense_key"):
+        add["ccm:commonlicense_key"] = ["CC_BY"]
+    if not cur_props.get("ccm:commonlicense_cc_version"):
+        add["ccm:commonlicense_cc_version"] = ["4.0"]
+    if not cur_props.get("cclom:general_language"):
+        add["cclom:general_language"] = ["de"]
+    if not cur_props.get("ccm:replicationsource"):
+        add["ccm:replicationsource"] = ["hackathoern-ideendatenbank"]
+    return add
+
+
+@router.post("/admin/ideas/{idea_id}/backfill-publication-meta", tags=["moderation"])
+async def backfill_publication_meta(
+    idea_id: str,
+    authorization: str | None = Header(None),
+):
+    """Setzt Lizenz/Sprache/Replikations-Quelle nach, falls fehlend.
+    Pro Idee einzeln aufrufbar; ändert nur fehlende Felder."""
+    await _require_moderator(authorization)
+    with connect() as con:
+        row = con.execute(
+            "SELECT main_content_id, id, title FROM idea WHERE id=?", (idea_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Idee nicht gefunden")
+    target = row["main_content_id"] or row["id"]
+    try:
+        meta = await edu_sharing.client.node_metadata(target, auth_header=authorization)
+        cur = (meta.get("node") or {}).get("properties") or {}
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
+
+    add = _missing_publication_fields(cur)
+    if not add:
+        return {"ok": True, "changed": False, "fields": []}
+
+    try:
+        await edu_sharing.client.update_metadata(
+            target, add, auth_header=authorization,
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
+
+    _log_activity(
+        action="publication_meta_backfilled",
+        authorization=authorization, is_mod=True,
+        target_type="idea", target_id=idea_id, target_label=row["title"],
+        detail={"fields": list(add.keys())},
+    )
+    return {"ok": True, "changed": True, "fields": list(add.keys())}
+
+
+@router.post("/admin/ideas/backfill-publication-meta", tags=["moderation"])
+async def backfill_publication_meta_all(
+    limit: int = Query(50, ge=1, le=500),
+    authorization: str | None = Header(None),
+):
+    """Bulk-Variante: läuft über alle Ideen und ergänzt fehlende Pflicht-
+    Metadaten. Per-Item-Fehler werden gesammelt; der Lauf bricht nicht ab."""
+    await _require_moderator(authorization)
+    with connect() as con:
+        rows = con.execute(
+            "SELECT id, main_content_id, title FROM idea "
+            "WHERE COALESCE(hidden,0)=0 ORDER BY modified_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    processed = 0
+    updated = 0
+    errors: list[dict] = []
+    for r in rows:
+        target = r["main_content_id"] or r["id"]
+        try:
+            meta = await edu_sharing.client.node_metadata(
+                target, auth_header=authorization,
+            )
+            cur = (meta.get("node") or {}).get("properties") or {}
+            add = _missing_publication_fields(cur)
+            if add:
+                await edu_sharing.client.update_metadata(
+                    target, add, auth_header=authorization,
+                )
+                updated += 1
+                try:
+                    await sync_mod.refresh_idea(r["id"], auth_header=authorization)
+                except Exception:
+                    pass
+            processed += 1
+        except Exception as e:
+            errors.append({"id": r["id"], "title": r["title"], "error": str(e)[:200]})
+    _log_activity(
+        action="publication_meta_bulk_backfilled",
+        authorization=authorization, is_mod=True,
+        target_type="idea",
+        detail={"processed": processed, "updated": updated,
+                "error_count": len(errors)},
+    )
+    return {"ok": True, "processed": processed, "updated": updated,
+            "errors": errors[:20]}
 
 
 @router.get("/health")

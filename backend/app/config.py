@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,8 +16,11 @@ class Settings(BaseSettings):
     # edu-sharing
     edu_repo_base_url: str = "https://redaktion.openeduhub.net"
     edu_repo_api: str = "https://redaktion.openeduhub.net/edu-sharing/rest"
-    edu_guest_user: str = "WLO-Upload"
-    edu_guest_pass: str = "wlo#upload!20"
+    # Gast-Account ohne Default — Pflicht über .env / ENV-Variable.
+    # Lieber harter Fehler beim Start als unbeabsichtigt mit
+    # hard-coded Test-Credentials gegen Prod laufen.
+    edu_guest_user: str = ""
+    edu_guest_pass: str = ""
     edu_guest_inbox_id: str = "21144164-30c0-4c01-ae16-264452197063"
 
     # Ideendatenbank-Root
@@ -42,11 +46,10 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://b-api.prod.openeduhub.net/api/v1/llm/openai"
     llm_model: str = "gpt-4.1-mini"
 
-    # Moderation — Mitglieder dieser edu-sharing-Gruppe haben Zugriff auf
-    # Taxonomie-Verwaltung, Inbox-Postfach, Verschieben, fremde Ideen
-    # bearbeiten. Default-Gruppen-Name kann im Repo angelegt werden;
-    # ALFRESCO_ADMINISTRATORS ist Fallback für Super-User.
-    moderation_group: str = "GROUP_HackathOERn_Moderation"
+    # Moderation — Mitglieder einer dieser edu-sharing-Gruppen haben Zugriff
+    # auf Taxonomie-Verwaltung, Inbox-Postfach, Verschieben, fremde Ideen
+    # bearbeiten. Default ist GROUP_ALFRESCO_ADMINISTRATORS (Repo-Admins);
+    # weitere Gruppen können kommasepariert angehängt werden.
     moderation_fallback_groups: str = "GROUP_ALFRESCO_ADMINISTRATORS"
     # Komma-Liste von Usernamen, die unabhängig von der Gruppe immer
     # Moderator-Status haben (Bootstrap, bevor die Gruppe existiert).

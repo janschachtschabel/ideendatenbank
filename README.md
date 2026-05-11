@@ -23,9 +23,10 @@ edu-sharing REST-API (Source of Truth: Ideen, Rating, Kommentare, User)
 ```
 Themengebiet (ccm:map)              ← 11×, Top-Level-Sammlungen
 └── Herausforderung (ccm:map)
-    ├── Idee (ccm:io)               ← Idee = ein ccm:io
-    └── Idee — Anhänge (ccm:map)    ← optional, Geschwister mit Keyword
-                                       `attachment-of:<idea-id>`
+    └── Idee (ccm:io)               ← Idee = ein ccm:io
+        ├── anhang.pdf              ← optional 0..n Child-IOs
+        └── ...                       (Aspekt ccm:io_childobject,
+                                       Assoc ccm:childio)
 ```
 
 - **Idee = ein ccm:io** (kein eigenes MDS, nutzt Standard-Felder)
@@ -33,58 +34,80 @@ Themengebiet (ccm:map)              ← 11×, Top-Level-Sammlungen
 - **Phase / Event / Kategorie** werden als Präfix-Keywords abgebildet
   (`phase:*`, `event:*`, `target-topic:*`)
 - **Mehrfach-Event** pro Idee unterstützt
-- **Anhänge-Sammlung** als optionale Geschwister-`ccm:map`, eindeutig
-  per `attachment-of:<idea-id>`-Keyword verknüpft
+- **Anhänge** als Child-IOs direkt unter der Idee (Aspekt
+  `ccm:io_childobject`, Assoc `ccm:childio`, Sortierung über
+  `ccm:childobject_order`) — Cascading-Delete mit der Idee.
+  Migration April 2026 vom alten Sammlungs-Pattern. Skill:
+  `~/.claude/skills/wlo-childobjects/SKILL.md`
 - **Mitmachen / Folgen** liegen in der App-SQLite (edu-sharing kennt sie nicht)
 
 ---
 
-## Features (Stand April 2026)
+## Features (Stand Mai 2026)
 
 ### Für alle Besucher:innen
 
 - **Themen-Drilldown** (Themen → Herausforderungen → Ideen, mit Breadcrumbs)
 - **Veranstaltungs-Drilldown** mit QR-Code + Share-Link je Event
-- **Trend-Rangliste** mit ▲▼-Pfeilen, Sparklines pro Idee und Top-5-
-  Verlaufs-Chart (Snapshots werden stündlich getrottelt geschrieben,
-  letzten 60 behalten)
-- **Volltext-Suche** mit `<mark>`-Highlights und 0-Treffer-Vorschlägen
-  („Vielleicht meintest du…" + zuletzt aktualisierte Ideen)
+- **Trend-Rangliste** mit ▲▼-Pfeilen, Sparklines pro Idee, Top-5-
+  Verlaufs-Chart + **„Top-Steiger der letzten 7 Tage"**-Sektion
+  (Snapshots werden stündlich getrottelt geschrieben, letzten 60 behalten)
+- **Volltext-Suche** mit `<mark>`-Highlights im Tile-Grid und 0-Treffer-
+  Vorschlägen („Vielleicht meintest du…" + zuletzt aktualisierte Ideen)
 - **Filter**: Phase, Veranstaltung, Kategorie, Topic
 - **Detail-Ansicht** mit Rating, Kommentaren (mit Reply-to), Anhängen als
   Karten-Grid mit prominenten Download-Buttons
+- **Öffentliches Profil** (`?view=user&u=<name>`) zeigt alle Ideen einer
+  Person + Stats — verlinkt aus jeder Idee per Klick auf den Autor-Namen,
+  mit Share-Link und Webkomponenten-Embed-Snippet
+- **Drei Farbschemata** (default · hackathoern · dark), in der Topbar
+  jederzeit umschaltbar; Logo passt sich automatisch an
+- **Hilfe + Einbinden-Doku** über Footer-Links (Endnutzer-Anleitung +
+  Entwickler-Doku mit allen Embed-Snippets)
 - **Restricted-Banner** für nicht-öffentliche Ideen mit Login-Anzeige
 
 ### Für eingeloggte User
 
 - **Eigene Ideen einreichen** mit Datei-Upload, Vorschaubild,
-  Mehrfach-Event-Auswahl
-- **Eigene Ideen** bearbeiten / duplizieren / löschen (Owner-Edit-Gating
-  via `accessEffective` aus edu-sharing)
+  Mehrfach-Event-Auswahl. Defaults für die WLO-Freischaltung
+  (CC BY 4.0, Sprache `de`, Replikations-Quelle) werden automatisch
+  gesetzt
+- **Eigene Ideen** bearbeiten / duplizieren / löschen (App-seitiges
+  Owner-Gating via `cm:creator` + `submitter:<user>`-Keyword)
+- **„Aus Repo aktualisieren"-Button** auf der Idee-Detailseite zieht
+  frische Daten (Titel, Beschreibung, Vorschaubild, …) ohne 5-Min-
+  Sync abzuwarten
 - **Phase-Status-Workflow** (Variante A): Owner darf nur eine Stufe
   vorwärts, „Archiviert" und Sprünge nur für Mods
-- **Anhänge-Sammlung** anlegen, Dateien hochladen / umbenennen / löschen
+- **Anhänge** direkt an die Idee hängen, umbenennen, löschen (Child-IO-Pattern)
 - **Mitmachen** und **Folgen** je Idee
-- **Mein Bereich** mit Aktivitäts-Feed („Was ist neu" zu gefolgten/
-  eigenen/Mitmach-Ideen), eigenen Ideen, Followed, Mitmachen-Liste
-- **Problem melden** über Modal — landet in der Mod-Meldungsliste
+- **Eigene Kommentare löschen** (Verfasser:in selbst oder Mod)
+- **Mein Bereich** mit:
+  - „Was ist neu"-Feed (gefolgte/eigene/Mitmach-Ideen)
+  - **Notification-Badge** am Username-Button mit Counter ungelesener
+    Aktivitäten (Polling 60 s, Reset beim Öffnen)
+  - Eigene Ideen, Followed, Mitmachen-Liste
+- **Problem melden** über Modal — mit Status-Anzeige beim erneuten Öffnen
+  („bereits gemeldet — wird geprüft" bzw. „bearbeitet")
 - **Idee teilen** (Mail, WhatsApp, X, LinkedIn, Mastodon, Bluesky,
-  Telegram, URL kopieren, im Repo öffnen)
+  Telegram, URL kopieren, im Repo öffnen) + **Embed-Snippet** als
+  Web-Komponente
 
 ### Für Moderator:innen
 
-Moderations-UI mit 9 Tabs:
+Moderations-UI mit 10 Tabs:
 
 | Tab | Funktion |
 |---|---|
-| 📊 **Statistik** | KPI-Karten + Wochen-Chart + Phasen-/Event-Verteilung + Top-Aktive User + Top-Engagement-Ideen + Action-Verteilung |
+| 📊 **Statistik** | KPI-Karten + Wochen-Chart + Phasen-/Event-Verteilung + Top-Aktive User + Top-Engagement-Ideen + Action-Verteilung + Button „Pflicht-Metadaten nachpflegen" für Bulk-Backfill |
 | 📥 **Postfach** | Anonyme Einreichungen verschieben (mit **Bulk-Move** über Checkboxen) oder löschen |
-| ⚠ **Meldungen** | User-Meldungen prüfen, Idee öffnen, als erledigt markieren |
+| ⚠ **Meldungen** | User-Meldungen prüfen, Idee öffnen, als erledigt markieren (Single + Bulk-Resolve via API) |
 | 📝 **Aktivität** | Audit-Log aller App-Schreibvorgänge, filterbar nach Action / Akteur / Zeitraum, CSV-Export |
-| 🗂 **Themen** | Themen + Herausforderungen anlegen, umbenennen, beschreiben, Vorschaubild setzen, sortieren (▲▼), löschen (nur leere) |
+| 🗂 **Herausforderungen** | Themen + Herausforderungen anlegen, umbenennen, beschreiben, Vorschaubild setzen, sortieren (▲▼), löschen (nur leere) |
 | 📅 **Veranstaltungen** | Event-Taxonomie verwalten + Share-Link/QR-Code je Event |
 | 🎯 **Phasen** | Phasen-Taxonomie verwalten (sort_order steuert den Workflow) |
-| 👥 **Moderator:innen** | Mitglieder der Mod-Gruppe verwalten (über edu-sharing-IAM) |
+| 👥 **Moderatoren** | Lesende Anzeige aller Mod-Gruppen-Mitglieder. Verwaltung erfolgt direkt in edu-sharing (kein Add/Remove über die App, um globale Admin-Gruppen-Manipulation zu vermeiden) |
+| 🚫 **Versteckt** | Soft-gelöschte Ideen einsehen + wieder anzeigen. Verstecken/Anzeigen-Aktion liegt in der Aktionen-Sidebar der Idee-Detailseite |
 | 💾 **Backup** | DB-Sicherungen erstellen, herunterladen, hochladen, restaurieren |
 
 ### Backup / Restore
@@ -95,26 +118,98 @@ Moderations-UI mit 9 Tabs:
 - **Auto-Backup** alle 24h, behält die letzten 3 (konfigurierbar)
 - **Pre-Restore-Backup** wird vor jedem Restore automatisch angelegt
 - **Restore aus dem Mod-UI** mit Confirm-Dialog und Magic-Bytes-Validierung
+- **Auto-Restore beim Erststart**: Wenn die App auf einem Volume mit
+  Backup-ZIPs aber ohne SQLite-DB hochfährt, lädt sie automatisch das
+  jüngste Backup vor der Schema-Migration. Damit ist Disaster-Recovery
+  reine Volume-Wiederherstellung — nichts an der App muss angefasst werden.
+  Eine bestehende DB wird **nie** überschrieben.
 - edu-sharing-Daten werden NIE gesichert/restored — die liegen im edu-sharing-Repo
 - **Konfiguration / Secrets sind NICHT im Backup** — die müssen in
   System-/Docker-Umgebungsvariablen liegen (siehe Sicherheit unten)
+- Optionale **Off-Site-Spiegelung via rclone** in einen Google-Drive-Ordner —
+  siehe [`scripts/BACKUP-GDRIVE.md`](scripts/BACKUP-GDRIVE.md)
 
 ---
 
 ## Web Components
 
+> Die laufende App hat unter **Footer → „Einbinden"** alle Embed-Szenarien
+> mit Live-Snippets zum Kopieren. Diese Sektion ist die Kurzfassung für
+> den Einstieg.
+
 ```html
-<!-- Voll-App -->
+<!-- 0. Setup-Snippet (einmal pro Seite) -->
+<script type="module" src="https://ideen.example.de/main.js"></script>
+
+<!-- 1. Voll-App -->
 <ideendb-app api-base="/api/v1"></ideendb-app>
 
-<!-- Kachelansicht für Drittseiten -->
+<!-- 2. Direkt eine bestimmte Idee öffnen -->
+<ideendb-app api-base="/api/v1" view="detail" idea-id="<UUID>"></ideendb-app>
+
+<!-- 3. Öffentliches Profil einer Person -->
+<ideendb-app api-base="/api/v1" view="user" u="<username>"></ideendb-app>
+
+<!-- 4. Rangliste, Herausforderungen, Veranstaltungen, Submit-Form, Browser -->
+<ideendb-app api-base="/api/v1" view="ranking"></ideendb-app>
+<ideendb-app api-base="/api/v1" view="topics"></ideendb-app>
+<ideendb-app api-base="/api/v1" view="events"></ideendb-app>
+<ideendb-app api-base="/api/v1" view="browser"></ideendb-app>
+<ideendb-app api-base="/api/v1" view="submit"></ideendb-app>
+
+<!-- 5. Kachelansicht für Drittseiten -->
 <ideendb-tile-grid
   api-base="https://ideen.example.de/api/v1"
-  event="hackathoern-2"
+  event="hackathoern-3"
   sort="rating"
-  limit="6">
-</ideendb-tile-grid>
+  limit="6"
+  theme="dark"></ideendb-tile-grid>
+
+<!-- 6. Einzelne Ideen als Kachel(n) via Komma-Liste -->
+<ideendb-tile-grid
+  api-base="/api/v1"
+  ids="<UUID-1>,<UUID-2>,<UUID-3>"
+  hide-footer></ideendb-tile-grid>
 ```
+
+### `<ideendb-app>` Attribute
+
+| Attribut | Werte | Bedeutung |
+|---|---|---|
+| `api-base` | URL | Basis-URL des FastAPI-Backends, default `/api/v1` |
+| `theme` | `default` ⋅ `hackathoern` ⋅ `dark` | initiales Farbschema. Leer = LocalStorage / `prefers-color-scheme` |
+| `view` | `home` ⋅ `detail` ⋅ `user` ⋅ `browser` ⋅ `ranking` ⋅ `topics` ⋅ `events` ⋅ `submit` ⋅ `profile` ⋅ `imprint` ⋅ `privacy` ⋅ `embed` ⋅ `help` | Initiale Seite |
+| `idea-id` | UUID | nur bei `view="detail"`: ID der direkt geöffneten Idee |
+| `u` | Username | nur bei `view="user"`: Profil-Username |
+
+### `<ideendb-tile-grid>` Attribute
+
+| Attribut | Werte | Bedeutung |
+|---|---|---|
+| `api-base` | URL | siehe oben |
+| `theme` | siehe oben | Farbschema |
+| `topic-id` | UUID | nur Ideen unter dieser Sammlung |
+| `phase` | Slug | Filter (z.B. `pitch-bereit`) |
+| `event` | Slug | Filter (z.B. `hackathoern-3`) |
+| `category` | Slug | Filter |
+| `q` | Text | Volltextsuche |
+| `ids` | Komma-UUIDs | Gezielte Auswahl einer oder mehrerer Ideen (Embed-Use-Case) |
+| `sort` | `modified` ⋅ `created` ⋅ `rating` ⋅ `comments` ⋅ `title` | |
+| `order` | `asc` ⋅ `desc` | Sortier-Richtung |
+| `limit` | Zahl 1–200 | max. Anzahl Kacheln |
+| `hide-footer` | boolean | „Mehr laden"-Button verstecken |
+
+### Farbschemata
+
+| Theme | Verwendung | Look |
+|---|---|---|
+| `default` | klassisches WLO-Branding | dunkelblauer Header, blau-gelbe Akzente |
+| `hackathoern` | helles HackathOERn-Branding | weißer Header mit Logo-Farben (Cyan #27ABE2, Coral #ED8F65, Olive #B7B764, Charcoal #383838) |
+| `dark` | Dark Mode | rein neutrale Grauabstufungen, keine Blautöne, dezenter Gold-Akzent |
+
+Der User kann das Theme in der Topbar (3 Farb-Quadrate rechts) jederzeit wechseln. Wenn `theme=...` als Attribut gesetzt ist, gilt dieser Wert beim Mount; spätere User-Wechsel werden in `localStorage` (`ideendb-theme`) gespeichert und beim nächsten Aufruf übernommen.
+
+Eingebettete Komponenten ohne sichtbare Topbar (z.B. `<ideendb-tile-grid>` auf einer Drittseite) übernehmen das Theme ebenfalls — gehört zum gleichen DOM-`<html>`-Scope, sodass alle CSS-Custom-Properties wirken.
 
 ---
 
@@ -139,34 +234,43 @@ npm start -- --port 4201            # http://127.0.0.1:4201
 
 ### Konfiguration via `.env`
 
-```ini
-# edu-sharing
-EDU_REPO_BASE_URL=https://redaktion.openeduhub.net
-EDU_GUEST_USER=WLO-Upload
-EDU_GUEST_PASS=…
-EDU_GUEST_INBOX_ID=21144164-30c0-4c01-ae16-264452197063
-IDEENDB_ROOT_COLLECTION_ID=4197d4d2-c700-400c-97d4-d2c700900c68
+Vorlage: `cp .env.example .env` und Platzhalter ersetzen.
 
-# FastAPI
-APP_HOST=127.0.0.1
-APP_PORT=8000
-APP_CORS_ORIGINS=http://localhost:4200,https://wp-test.wirlernenonline.de
+#### Pflicht
 
-# SQLite
-SQLITE_PATH=./data/ideendb.sqlite
-SYNC_INTERVAL_SECONDS=300
+| Variable | Was | Woher |
+|---|---|---|
+| `EDU_GUEST_USER` | Username des edu-sharing-Service-Accounts (anonymes Submit-Routing) | WLO-Redaktion |
+| `EDU_GUEST_PASS` | Passwort dazu | WLO-Redaktion |
+| `APP_CORS_ORIGINS` | Komma-Liste erlaubter Browser-Origins | eigene Domain(en) |
 
-# Backup
-BACKUP_ENABLED=true
-BACKUP_DIR=./data/backups
-BACKUP_INTERVAL_HOURS=24
-BACKUP_KEEP=3
+> Die App startet zwar auch ohne diese Werte, aber jeder edu-sharing-
+> Call (Sync, anonyme Einreichung) bekommt dann 401. Mit
+> `docker compose up` schlägt das Hochfahren dank `${VAR:?…}`-Pattern
+> hart fehl, wenn die Pflichtfelder leer sind — bei `docker run`
+> müssen sie als `-e EDU_GUEST_USER=…` ans Command angehängt werden.
 
-# Moderation
-MODERATION_GROUP=GROUP_HackathOERn_Moderation
-MODERATION_FALLBACK_GROUPS=GROUP_ALFRESCO_ADMINISTRATORS
-MODERATION_BOOTSTRAP_USERS=admin,jan
-```
+#### Optional (sinnvolle Defaults vorhanden)
+
+| Variable | Default | Bedeutung |
+|---|---|---|
+| `EDU_REPO_BASE_URL` | `https://redaktion.openeduhub.net` | Repo-Host |
+| `EDU_REPO_API` | `…/edu-sharing/rest` | API-Pfad |
+| `EDU_GUEST_INBOX_ID` | UUID der HackathOERn-Inbox | nur ändern bei eigener Inbox |
+| `IDEENDB_ROOT_COLLECTION_ID` | UUID der HackathOERn-Wurzel-Sammlung | nur ändern bei eigenem Root |
+| `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8000` | Uvicorn-Bind |
+| `SQLITE_PATH` | `./data/ideendb.sqlite` | im Docker: `/data/ideendb.sqlite` |
+| `SYNC_INTERVAL_SECONDS` | `300` | edu-sharing-Sync-Intervall |
+| `BACKUP_ENABLED` | `true` | Auto-Backup-Loop |
+| `BACKUP_DIR` | `./data/backups` | im Docker: `/data/backups` |
+| `BACKUP_INTERVAL_HOURS` | `24` | wie oft Auto-Backup |
+| `BACKUP_KEEP` | `3` | Retention der ZIPs |
+| `MODERATION_FALLBACK_GROUPS` | `GROUP_ALFRESCO_ADMINISTRATORS` | Mod-Gruppen (Komma-Liste) |
+| `MODERATION_BOOTSTRAP_USERS` | _leer_ | Username-Liste mit Mod-Rechten unabhängig von der Gruppe |
+
+> **Secrets NIEMALS** ins Git-Repo. `.env` ist in `.gitignore`. Auch
+> Backups enthalten bewusst keine Konfig — die liegt ausschließlich in
+> System-/Docker-Umgebungsvariablen.
 
 ---
 
@@ -195,6 +299,27 @@ Reset:
 docker compose down -v           # ACHTUNG: löscht das Volume
 ```
 
+#### Disaster-Recovery / Neuinstallation mit Backup-Wiederherstellung
+
+Auf eine frische Installation/Volume legst du einfach ein Backup-ZIP ins
+`backups/`-Unterverzeichnis und startest die App — sie zieht beim Boot
+automatisch das jüngste vorhandene Backup, **bevor** die Schema-Migration
+läuft.
+
+```bash
+# Beispiel: vorhandenes Backup ins frische Volume kopieren
+docker volume create ideendb-data
+docker run --rm -v ideendb-data:/data -v "$PWD":/host alpine \
+  sh -c "mkdir -p /data/backups && cp /host/ideendb-backup-*.zip /data/backups/"
+
+docker compose up -d
+docker compose logs ideendb | grep auto-restore
+# → auto-restore: stelle ideendb-backup-20260511-...zip wieder her
+```
+
+Eine bereits vorhandene DB wird dabei **nie** überschrieben — der
+Auto-Restore springt nur an, wenn `SQLITE_PATH` fehlt oder leer ist.
+
 ### Aus GHCR ziehen (ohne lokalen Build)
 
 ```bash
@@ -204,7 +329,7 @@ docker run -d --name ideendb \
   -p 127.0.0.1:8000:8000 \
   -v ideendb-data:/data \
   -e EDU_GUEST_USER=WLO-Upload \
-  -e EDU_GUEST_PASS='wlo#upload!20' \
+  -e EDU_GUEST_PASS='<von-WLO-erhalten>' \
   -e MODERATION_BOOTSTRAP_USERS=dein-username \
   -e APP_CORS_ORIGINS=https://ideen.example.de \
   ghcr.io/janschachtschabel/ideendatenbank:main
@@ -312,7 +437,11 @@ systemctl start ideendb
 ## Live-Beispiele
 
 - `http://127.0.0.1:8000/` — Voll-App
-- `http://127.0.0.1:8000/embed-demo.html` — Einbettungs-Szenarien
+- `http://127.0.0.1:8000/?view=help` — Endnutzer-Hilfeseite
+- `http://127.0.0.1:8000/?view=embed` — Entwickler-Doku mit allen Embed-Snippets
+- `http://127.0.0.1:8000/?view=detail&id=<uuid>` — Direkt-Link Idee
+- `http://127.0.0.1:8000/?view=user&u=<username>` — Öffentliches Profil
+- `http://127.0.0.1:8000/embed-demo.html` — Statische Einbettungs-Demo
 - `http://127.0.0.1:8000/docs` — OpenAPI/Swagger
 
 ---
@@ -320,21 +449,72 @@ systemctl start ideendb
 ## Verzeichnis
 
 - `backend/app/`
-  - `main.py` — FastAPI-App + Lifespan (Sync-Loop + Auto-Backup)
-  - `routes.py` — alle API-Endpoints
-  - `db.py` — SQLite-Schema + idempotente Migrationen
+  - `main.py` — FastAPI-App + Lifespan (Auto-Restore vor `init_db`, Sync-Loop, Auto-Backup)
+  - `routes.py` — alle API-Endpoints (Ideen, Topics, Ranking, Moderation, Backup, Users, Notifications, …)
+  - `db.py` — SQLite-Schema + idempotente Migrationen (inkl. `idea.hidden`, `user_feed_seen`, `idea_report`)
   - `sync.py` — edu-sharing-Sync, Single-Node-Refresh, Trend-Snapshots
-  - `backup.py` — Backup/Restore-Logik
+  - `backup.py` — Backup/Restore-Logik + Auto-Restore beim Erststart
   - `edu_sharing.py` — REST-Client für edu-sharing
   - `config.py` — pydantic-settings
 - `frontend/src/app/`
   - `app-shell/` — Voll-App-Komponente + Mod-UI + Detail + Submit
-  - `tile-grid/` — Standalone-Kachelansicht
+    - `app-shell.component.ts` — Shell, Routing, Topbar, Theme-Switcher
+    - `idea-detail.component.ts` — Detail mit Kommentaren, Rating, Anhängen, Aktionen-Sidebar
+    - `moderation.component.ts` — Mod-UI mit 10 Tabs
+    - `profile.component.ts` — Mein Bereich (eigener Feed/Ideen/Follows)
+    - `public-profile.component.ts` — öffentliches Profil
+    - `ranking.component.ts` — Trend-Rangliste + Top-Steiger
+    - `submit-idea.component.ts` — Einreiche-Formular
+    - `embed.component.ts` — Entwickler-Doku: Embed-Snippets aller Web-Components
+    - `help.component.ts` — Endnutzer-Hilfeseite
+    - `legal.component.ts` — Impressum + Datenschutz
+  - `tile-grid/` — Standalone-Kachelansicht (Web-Component `<ideendb-tile-grid>`)
   - `api.service.ts` — HttpClient-Wrapper
   - `models.ts` — TypeScript-Typen
-- `scripts/` — Explorations- und Probe-Skripte gegen edu-sharing
+  - `theme.service.ts` — Theme-State (Signal-basiert, in LocalStorage)
+- `scripts/`
+  - `backup-to-gdrive.sh` / `.ps1` — rclone-basierte Off-Site-Spiegelung
+  - `BACKUP-GDRIVE.md` — Setup-Anleitung
+  - `explore_api.py` u.a. — Explorations- und Probe-Skripte gegen
+    edu-sharing. Erwarten die Credentials als Umgebungsvariablen:
+    ```bash
+    EDU_GUEST_USER=… EDU_GUEST_PASS=… python scripts/explore_api.py
+    ```
 - `.env.example` — Konfig-Vorlage
 - `CLAUDE.md` — Detail-Spec + Architektur-Entscheidungen
+
+---
+
+## Code-Qualität / Linter
+
+Beide Stacks haben einen Linter eingerichtet, der bei jedem Commit lokal
+laufen sollte:
+
+### Backend — `ruff`
+
+```bash
+cd backend
+pip install ruff
+ruff check app/                       # Lint
+ruff check app/ --fix                 # sichere Auto-Fixes (Imports, etc.)
+ruff format app/                      # Black-kompatible Formatierung (optional)
+```
+
+Konfiguration in `backend/pyproject.toml`. Aktivierte Regelgruppen: `E F I B UP C4 SIM`.
+Bewusst deaktiviert: `E501` (Line-Länge), `B904` (raise-from), `SIM105`
+(suppressible-exception), `E701/E702` — jede Entscheidung kommentiert.
+
+### Frontend — `@angular-eslint`
+
+```bash
+cd frontend
+npx ng lint                           # Lint
+npx ng lint --fix                     # Auto-Fix
+```
+
+Konfiguration in `frontend/eslint.config.js`. Projekt-Prefix `ideendb-`,
+A11y-Regeln auf `warn` (iterative Verbesserung), Web-Component-Inputs
+mit Bindestrich-Attributen erlaubt (`no-input-rename: off`).
 
 ---
 

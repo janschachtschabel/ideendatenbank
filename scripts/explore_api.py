@@ -11,11 +11,20 @@ from base64 import b64encode
 from urllib import request as urlrequest
 from urllib.error import HTTPError
 
+import os
+
 BASE = "https://redaktion.openeduhub.net/edu-sharing/rest"
-USER = "WLO-Upload"
-PASS = "wlo#upload!20"
+USER = os.environ.get("EDU_GUEST_USER", "")
+PASS = os.environ.get("EDU_GUEST_PASS", "")
 INBOX = "21144164-30c0-4c01-ae16-264452197063"
 ROOT_COLLECTION = "4197d4d2-c700-400c-97d4-d2c700900c68"  # HackathOERn-Ideensammlung
+
+if not USER or not PASS:
+    sys.stderr.write(
+        "Setze EDU_GUEST_USER und EDU_GUEST_PASS als Umgebungsvariablen,\n"
+        "bevor du dieses Probe-Skript aufrufst.\n"
+    )
+    sys.exit(2)
 
 AUTH_HEADER = "Basic " + b64encode(f"{USER}:{PASS}".encode()).decode()
 

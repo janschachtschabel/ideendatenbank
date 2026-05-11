@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Component, Input, OnInit, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnInit, Output, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
@@ -10,7 +10,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
   imports: [CommonModule, FormsModule],
   styles: [`
     :host { display: block; }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
     .head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
     h1 { margin: 0; color: var(--wlo-primary); }
     .meta { color: var(--wlo-muted); font-size: .9rem; }
@@ -23,21 +23,21 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       font: inherit;
       font-weight: 600;
       color: var(--wlo-text);
-      &:hover { background: #e6edf7; border-color: var(--wlo-primary); color: var(--wlo-primary); }
+      &:hover { background: var(--wlo-primary-soft, #e6edf7); border-color: var(--wlo-primary); color: var(--wlo-primary); }
       &:disabled { opacity: .5; cursor: not-allowed; }
     }
-    .btn.danger { background: #fff; border-color: #e1a5ac; color: #b00020;
+    .btn.danger { background: var(--wlo-surface, #fff); border-color: #e1a5ac; color: #b00020;
                   &:hover { background: #b00020; border-color: #b00020; color: #fff; } }
     .btn.primary-move {
       background: var(--wlo-primary); color: #fff; border-color: var(--wlo-primary);
       &:hover:not(:disabled) { background: var(--wlo-primary-600); color: #fff; }
     }
     select {
-      background: #fff; border: 1px solid var(--wlo-border); border-radius: 8px;
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 8px;
       padding: 8px 10px; font: inherit; width: 100%; box-sizing: border-box;
     }
     .intro {
-      background: #fff;
+      background: var(--wlo-surface, #fff);
       border: 1px solid var(--wlo-border);
       border-left: 4px solid var(--wlo-primary);
       padding: 16px 20px;
@@ -48,17 +48,19 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       line-height: 1.55;
     }
     .item {
-      background: #fff;
+      background: var(--wlo-surface, #fff);
       border: 1px solid var(--wlo-border);
       border-radius: 12px;
-      padding: 20px;
+      padding: 18px 20px;
       margin-bottom: 14px;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 16px;
+      display: flex; flex-direction: column; gap: 12px;
+      transition: border-color .15s ease, box-shadow .15s ease;
     }
-    .item h3 { margin: 0 0 6px; color: var(--wlo-text); font-size: 1.05rem; }
-    .tags { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+    .item:hover { border-color: #c9d2e3; box-shadow: 0 1px 4px rgba(0,0,0,.04); }
+    .item .head { display: flex; align-items: flex-start; gap: 12px; }
+    .item .head .titlewrap { flex: 1; min-width: 0; }
+    .item h3 { margin: 0 0 6px; color: var(--wlo-text); font-size: 1.1rem; line-height: 1.3; }
+    .tags { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 0; }
     .tag {
       background: var(--wlo-bg);
       border: 1px solid var(--wlo-border);
@@ -67,17 +69,90 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       font-size: .75rem;
       color: var(--wlo-muted);
     }
-    .tag.phase { background: #e6edf7; color: var(--wlo-primary); border-color: transparent; font-weight: 600; }
-    .tag.event { background: #fff8db; color: #5c4a00; border-color: transparent; }
+    .tag.phase { background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary); border-color: transparent; font-weight: 600; }
+    .tag.event { background: var(--wlo-accent-soft, #fff8db); color: #5c4a00; border-color: transparent; }
     .tag.target { background: #e6f4ea; color: #0f5b24; border-color: transparent; }
-    .desc { color: var(--wlo-muted); font-size: .88rem; line-height: 1.5;
-            display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-            overflow: hidden; margin: 6px 0; }
-    .meta-row { color: var(--wlo-muted); font-size: .8rem; display: flex; gap: 12px; flex-wrap: wrap; }
-    .actions { display: flex; flex-direction: column; gap: 8px; min-width: 160px; }
+    .desc { color: var(--wlo-text); font-size: .92rem; line-height: 1.55;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+            overflow: hidden; margin: 0; }
+    .desc.expanded {
+      display: block; -webkit-line-clamp: unset; overflow: visible;
+      white-space: pre-wrap;
+    }
+    .meta-row { color: var(--wlo-muted); font-size: .82rem;
+                display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+    .meta-row .id { font-family: monospace; font-size: .72rem; opacity: .7; }
+    .preview-toggle {
+      background: none; border: none; padding: 0; cursor: pointer;
+      color: var(--wlo-primary); font: inherit; font-size: .85rem;
+      text-decoration: underline; align-self: flex-start;
+    }
+    .preview-toggle:hover { filter: brightness(1.2); }
+    .preview-card {
+      border: 1px solid var(--wlo-border); border-radius: 8px;
+      background: #fafbfd; padding: 16px 18px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .preview-row { display: flex; gap: 16px; align-items: flex-start; }
+    .preview-row .thumb {
+      width: 160px; height: 100px; flex-shrink: 0;
+      border: 1px solid var(--wlo-border); border-radius: 6px;
+      background: var(--wlo-surface, #fff) center / cover no-repeat;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--wlo-muted); font-size: 1.8rem;
+    }
+    .preview-row .body { flex: 1; min-width: 0; }
+    .preview-card h4 {
+      margin: 0 0 6px; font-size: .8rem; color: var(--wlo-muted);
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    .preview-card .full-desc {
+      white-space: pre-wrap; line-height: 1.55; color: var(--wlo-text);
+      font-size: .92rem; margin: 0;
+    }
+    .meta-grid {
+      display: grid; grid-template-columns: max-content 1fr;
+      gap: 6px 14px; font-size: .85rem; align-items: baseline;
+    }
+    .meta-grid dt { color: var(--wlo-muted); font-weight: 500; }
+    .meta-grid dd { margin: 0; color: var(--wlo-text); word-break: break-word; }
+    .meta-grid dd a { color: var(--wlo-primary); }
+    .kw-list { display: flex; flex-wrap: wrap; gap: 5px; }
+    .kw-list .kw {
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
+      padding: 2px 8px; border-radius: 999px;
+      font-size: .76rem; color: var(--wlo-muted);
+    }
+    .preview-attachments { margin-top: 4px; }
+    .preview-attachments h4 { margin-bottom: 8px; }
+    .preview-attachments .att {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 12px; margin: 0 8px 6px 0;
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
+      border-radius: 8px; font-size: .88rem;
+    }
+    .preview-attachments .att .filename { font-weight: 600; color: var(--wlo-text); }
+    .preview-attachments .att .att-actions {
+      display: inline-flex; gap: 6px; margin-left: 6px;
+    }
+    .preview-attachments .att a {
+      color: var(--wlo-primary); text-decoration: none;
+      padding: 3px 8px; border-radius: 4px;
+      background: var(--wlo-primary-soft, #e6edf7); font-size: .82rem;
+    }
+    .preview-attachments .att a:hover { background: var(--wlo-primary); color: #fff; }
+    .preview-loading { color: var(--wlo-muted); font-size: .9rem; padding: 8px 0; }
+    .actions {
+      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+      padding-top: 10px; border-top: 1px dashed var(--wlo-border);
+    }
+    .actions select { flex: 1; min-width: 220px; max-width: 360px;
+                      padding: 7px 10px; border: 1px solid var(--wlo-border);
+                      border-radius: 6px; background: var(--wlo-surface, #fff); font: inherit; }
+    .actions .spacer { flex: 1; }
     .empty { text-align: center; color: var(--wlo-muted); padding: 60px 20px;
-             background: #fff; border: 1px solid var(--wlo-border); border-radius: 12px; }
-    .confirm { background: #fff8db; border: 1px solid #f5b600; padding: 10px 14px;
+             background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 12px; }
+    .confirm { background: var(--wlo-accent-soft, #fff8db); border: 1px solid #f5b600; padding: 10px 14px;
                border-radius: 6px; display: flex; gap: 10px; align-items: center; font-size: .88rem; }
     .loading { padding: 40px; text-align: center; color: var(--wlo-muted); }
 
@@ -89,7 +164,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       .backup-msg { font-size: .9rem; color: var(--wlo-muted); }
     }
     .backup-list {
-      background: #fff; border: 1px solid var(--wlo-border);
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
       border-radius: 8px; overflow: hidden;
     }
     .backup-row {
@@ -112,7 +187,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       gap: 12px; margin-bottom: 24px;
     }
     .stat-card {
-      background: #fff; border: 1px solid var(--wlo-border);
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
       border-radius: 10px; padding: 16px;
       display: flex; flex-direction: column; gap: 4px;
       color: var(--wlo-muted); font-size: .82rem;
@@ -122,13 +197,21 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       &.alert { border-color: #d97706; background: #fff8eb;
                 .num { color: #d97706; } }
     }
+    /* Flache Outline-Icons in der Statistik (statt Emoji) */
+    .stat-ico {
+      width: 14px; height: 14px;
+      vertical-align: -2px; margin-right: 4px; flex-shrink: 0;
+      stroke: currentColor; stroke-width: 2;
+      stroke-linecap: round; stroke-linejoin: round; fill: none;
+    }
+    .stat-ico.lg { width: 16px; height: 16px; }
     .stats-cols {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
       gap: 16px; margin-bottom: 16px;
     }
     .stats-section {
-      background: #fff; border: 1px solid var(--wlo-border);
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
       border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;
       h3 { margin: 0 0 12px; font-size: .95rem; color: var(--wlo-text); }
       .empty-hint { color: var(--wlo-muted); font-size: .85rem; margin: 0; }
@@ -170,12 +253,12 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       margin-bottom: 16px;
       select, input[type=text] {
         padding: 8px 10px; border: 1px solid var(--wlo-border);
-        border-radius: 6px; font: inherit; background: #fff;
+        border-radius: 6px; font: inherit; background: var(--wlo-surface, #fff);
       }
       input[type=text] { flex: 1 1 240px; }
     }
     .topic-tree {
-      background: #fff; border: 1px solid var(--wlo-border);
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
       border-radius: 8px; overflow: hidden;
     }
     .topic-root {
@@ -241,9 +324,10 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                font: inherit; min-width: 180px; }
       .bulk-msg { font-size: .85rem; opacity: .9; }
     }
-    .item.selected { background: #e6edf7; border-color: var(--wlo-primary); }
-    .bulk-check { width: 18px; height: 18px; cursor: pointer; align-self: flex-start;
-                  margin-top: 4px; margin-right: 4px; }
+    .item.selected { background: #f0f5ff; border-color: var(--wlo-primary);
+                     box-shadow: 0 0 0 1px var(--wlo-primary); }
+    .bulk-check { width: 18px; height: 18px; cursor: pointer;
+                  margin-top: 4px; flex-shrink: 0; }
 
     /* Aktivitäts-Log */
     .activity-controls {
@@ -251,13 +335,13 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       margin-bottom: 14px;
       select, input[type=text] {
         padding: 7px 10px; border: 1px solid var(--wlo-border);
-        border-radius: 6px; font: inherit; background: #fff;
+        border-radius: 6px; font: inherit; background: var(--wlo-surface, #fff);
       }
       input[type=text] { min-width: 180px; }
     }
     .activity-list {
       display: flex; flex-direction: column; gap: 4px;
-      background: #fff; border: 1px solid var(--wlo-border);
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
       border-radius: 8px; overflow: hidden;
     }
     .activity-row {
@@ -294,7 +378,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
     /* Meldungen */
     .report-list { display: flex; flex-direction: column; gap: 10px; }
     .report-row {
-      background: #fff; border: 1px solid var(--wlo-border);
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
       border-left: 4px solid #d97706;
       border-radius: 8px; padding: 12px 16px;
       display: grid; gap: 6px;
@@ -318,6 +402,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
     /* Tabs */
     .tabs {
       display: flex;
+      flex-wrap: wrap;
       gap: 2px;
       border-bottom: 2px solid var(--wlo-border);
       margin-bottom: 24px;
@@ -325,13 +410,16 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
     .tabs button {
       background: none;
       border: none;
-      padding: 12px 18px;
+      padding: 10px 10px;
       cursor: pointer;
       font: inherit;
+      font-size: .92rem;
       font-weight: 600;
       color: var(--wlo-muted);
       border-bottom: 3px solid transparent;
       margin-bottom: -2px;
+      display: inline-flex; align-items: center; gap: 5px;
+      white-space: nowrap;
       &:hover { color: var(--wlo-primary); }
       &.active {
         color: var(--wlo-primary);
@@ -348,7 +436,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       flex-wrap: wrap; gap: 12px;
     }
     .tax-list {
-      background: #fff;
+      background: var(--wlo-surface, #fff);
       border: 1px solid var(--wlo-border);
       border-radius: 10px;
       overflow: hidden;
@@ -364,7 +452,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       &.header { background: var(--wlo-bg); font-weight: 600;
                  font-size: .82rem; text-transform: uppercase;
                  letter-spacing: .05em; color: var(--wlo-muted); }
-      &.editing { background: #fff8db; }
+      &.editing { background: var(--wlo-accent-soft, #fff8db); }
     }
     .tax-row .slug {
       font-family: monospace; font-size: .85rem; color: var(--wlo-muted);
@@ -372,7 +460,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
     }
     .tax-row input[type="text"], .tax-row input[type="number"] {
       width: 100%; box-sizing: border-box;
-      background: #fff; border: 1px solid var(--wlo-border);
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
       border-radius: 6px; padding: 5px 8px; font: inherit;
     }
     .tax-row .row-actions {
@@ -386,7 +474,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       &.off { background: var(--wlo-bg); color: var(--wlo-muted); }
     }
     .tax-empty { padding: 30px; text-align: center; color: var(--wlo-muted);
-                 background: #fff; border: 1px dashed var(--wlo-border);
+                 background: var(--wlo-surface, #fff); border: 1px dashed var(--wlo-border);
                  border-radius: 10px; }
     .tax-add {
       background: var(--wlo-bg); border: 1px dashed var(--wlo-border);
@@ -395,7 +483,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       grid-template-columns: 1fr 1fr 80px auto;
       gap: 10px; align-items: center;
     }
-    .tax-add input { background:#fff; border:1px solid var(--wlo-border);
+    .tax-add input { background: var(--wlo-surface, #fff); border:1px solid var(--wlo-border);
                      border-radius:6px; padding:8px; font:inherit;
                      box-sizing:border-box; width:100%; }
 
@@ -407,7 +495,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       padding: 20px;
     }
     .share-box {
-      background: #fff; border-radius: 12px;
+      background: var(--wlo-surface, #fff); border-radius: 12px;
       padding: 24px 28px;
       width: 100%; max-width: 540px;
       max-height: 90vh; overflow-y: auto;
@@ -440,7 +528,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       border-radius: 10px;
       padding: 16px;
       img {
-        background: #fff;
+        background: var(--wlo-surface, #fff);
         padding: 12px;
         border-radius: 8px;
         max-width: 240px; width: 100%;
@@ -467,18 +555,115 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       </div>
 
       <div class="tabs">
-        <button [class.active]="tab==='stats'" (click)="tab='stats'; loadStats()">📊 Statistik</button>
-        <button [class.active]="tab==='inbox'" (click)="tab='inbox'">📥 Postfach ({{ items().length }})</button>
-        <button [class.active]="tab==='reports'" (click)="tab='reports'; loadReports()">
-          ⚠ Meldungen @if (reports().length) { ({{ reports().length }}) }
+        <button [class.active]="tab==='stats'" (click)="tab='stats'; loadStats()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <line x1="12" y1="20" x2="12" y2="10"/>
+            <line x1="18" y1="20" x2="18" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="16"/>
+          </svg>
+          Statistik
         </button>
-        <button [class.active]="tab==='activity'" (click)="tab='activity'; loadActivity()">📝 Aktivität</button>
-        <button [class.active]="tab==='topics'" (click)="tab='topics'; loadTopics()">🗂 Themen</button>
-        <button [class.active]="tab==='events'" (click)="tab='events'; loadEvents()">📅 Veranstaltungen</button>
-        <button [class.active]="tab==='phases'" (click)="tab='phases'; loadPhases()">🎯 Phasen</button>
-        <button [class.active]="tab==='mods'" (click)="tab='mods'; loadMods()">👥 Moderator:innen</button>
-        <button [class.active]="tab==='backup'" (click)="tab='backup'; loadBackups()">💾 Backup</button>
+        <button [class.active]="tab==='inbox'" (click)="tab='inbox'">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
+            <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+          </svg>
+          Postfach ({{ items().length }})
+        </button>
+        <button [class.active]="tab==='reports'" (click)="tab='reports'; loadReports()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          Meldungen @if (reports().length) { ({{ reports().length }}) }
+        </button>
+        <button [class.active]="tab==='activity'" (click)="tab='activity'; loadActivity()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          Aktivität
+        </button>
+        <button [class.active]="tab==='topics'" (click)="tab='topics'; loadTopics()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          Herausforderungen
+        </button>
+        <button [class.active]="tab==='events'" (click)="tab='events'; loadEvents()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          Veranstaltungen
+        </button>
+        <button [class.active]="tab==='phases'" (click)="tab='phases'; loadPhases()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+          </svg>
+          Phasen
+        </button>
+        <button [class.active]="tab==='mods'" (click)="tab='mods'; loadMods()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          Moderatoren
+        </button>
+        <button [class.active]="tab==='hidden'" (click)="tab='hidden'; loadHidden()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+          Versteckt @if (hidden().length) { ({{ hidden().length }}) }
+        </button>
+        <button [class.active]="tab==='backup'" (click)="tab='backup'; loadBackups()">
+          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          Backup
+        </button>
       </div>
+
+      @if (tab === 'hidden') {
+        <div class="intro">
+          Ideen, die ein Moderator versteckt hat. Sie bleiben in der Datenbank,
+          tauchen aber nicht mehr in öffentlichen Listen oder Detail-Seiten auf.
+          Verstecken/Anzeigen geschieht auf der Idee-Detailseite.
+        </div>
+        @if (hidden().length === 0) {
+          <div class="empty"><p>Keine versteckten Ideen.</p></div>
+        } @else {
+          <div class="tax-list">
+            <div class="tax-row header" style="grid-template-columns: 2fr 1fr 1.4fr 100px">
+              <span>Titel</span><span>Owner</span><span>Grund</span><span></span>
+            </div>
+            @for (h of hidden(); track h.id) {
+              <div class="tax-row" style="grid-template-columns: 2fr 1fr 1.4fr 100px">
+                <span><strong>{{ h.title }}</strong></span>
+                <span style="color: var(--wlo-muted)">{{ h.owner_username || '—' }}</span>
+                <span style="color: var(--wlo-muted)">{{ h.hidden_reason || '—' }}</span>
+                <span class="row-actions">
+                  <button class="btn" (click)="openIdeaFromHidden(h)">
+                    Öffnen
+                  </button>
+                </span>
+              </div>
+            }
+          </div>
+        }
+      }
 
       @if (tab === 'backup') {
         <div class="intro">
@@ -495,12 +680,22 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         <div class="backup-actions">
           <button class="btn primary-move" (click)="createBackup()"
                   [disabled]="backupBusy">
-            {{ backupBusy ? 'Erstellt…' : '💾 Backup jetzt erstellen' }}
+            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+            {{ backupBusy ? 'Erstellt…' : 'Backup jetzt erstellen' }}
           </button>
           <label class="btn">
             <input type="file" accept=".zip" hidden
                    (change)="onRestorePick($event)" />
-            ↶ Backup hochladen + wiederherstellen
+            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Backup hochladen + wiederherstellen
           </label>
           @if (backupMsg()) { <span class="backup-msg">{{ backupMsg() }}</span> }
         </div>
@@ -525,10 +720,21 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                 </div>
                 <div class="backup-actions-row">
                   <button class="btn" (click)="downloadBackup(b.filename)">
-                    ⬇ Download
+                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download
                   </button>
-                  <button class="btn danger" (click)="deleteBackup(b.filename)">
-                    🗑
+                  <button class="btn danger" (click)="deleteBackup(b.filename)"
+                          aria-label="Löschen">
+                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      <line x1="10" y1="11" x2="10" y2="17"/>
+                      <line x1="14" y1="11" x2="14" y2="17"/>
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -544,24 +750,64 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         @if (stats(); as s) {
           <div class="stats-grid">
             <div class="stat-card"><span class="num">{{ s.totals.ideas }}</span>Ideen</div>
-            <div class="stat-card"><span class="num">{{ s.totals.themes }}</span>Themen</div>
+            <div class="stat-card"><span class="num">{{ s.totals.themes }}</span>Herausforderungen</div>
             <div class="stat-card"><span class="num">{{ s.totals.challenges }}</span>Herausforderungen</div>
             <div class="stat-card"><span class="num">{{ s.totals.comments }}</span>Kommentare</div>
             <div class="stat-card">
               <span class="num">{{ s.totals.avg_rating | number: '1.1-2' }}</span>
-              ⭐ Schnitt <small>({{ s.totals.ratings }} Bewertungen)</small>
+              <span>
+                <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
+                </svg>
+                Schnitt
+              </span>
+              <small>({{ s.totals.ratings }} Bewertungen)</small>
             </div>
-            <div class="stat-card"><span class="num">{{ s.totals.interest }}</span>🤝 Mitmachen</div>
-            <div class="stat-card"><span class="num">{{ s.totals.follow }}</span>🔔 Folgen</div>
+            <div class="stat-card">
+              <span class="num">{{ s.totals.interest }}</span>
+              <span>
+                <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+                Mitmachen
+              </span>
+            </div>
+            <div class="stat-card">
+              <span class="num">{{ s.totals.follow }}</span>
+              <span>
+                <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                Folgen
+              </span>
+            </div>
             <div class="stat-card"
                  [class.alert]="s.reports.open > 0">
-              <span class="num">{{ s.reports.open }}</span>⚠ Offene Meldungen
+              <span class="num">{{ s.reports.open }}</span>
+              <span>
+                <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                Offene Meldungen
+              </span>
               <small>({{ s.reports.resolved }} erledigt)</small>
             </div>
           </div>
 
           <div class="stats-section">
-            <h3>📈 Neue Ideen pro Woche (letzte 12)</h3>
+            <h3>
+              <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="3 17 9 11 13 15 21 7"/>
+                <polyline points="14 7 21 7 21 14"/>
+              </svg>
+              Neue Ideen pro Woche (letzte 12)
+            </h3>
             @if (!s.weekly.length) { <p class="empty-hint">Noch keine Daten.</p> }
             @else {
               <svg class="weekly-chart" [attr.viewBox]="'0 0 ' + (s.weekly.length * 50 + 30) + ' 130'">
@@ -583,7 +829,14 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
           <div class="stats-cols">
             <div class="stats-section">
-              <h3>🎯 Phasen-Verteilung</h3>
+              <h3>
+                <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10"/>
+                  <circle cx="12" cy="12" r="6"/>
+                  <circle cx="12" cy="12" r="2"/>
+                </svg>
+                Phasen-Verteilung
+              </h3>
               @for (p of s.phases; track p.phase) {
                 <div class="bar-row">
                   <span class="bar-label">{{ p.phase }}</span>
@@ -596,7 +849,15 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
             </div>
 
             <div class="stats-section">
-              <h3>📅 Veranstaltungen</h3>
+              <h3>
+                <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/>
+                  <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                Veranstaltungen
+              </h3>
               @for (e of s.events; track e.event) {
                 <div class="bar-row">
                   <span class="bar-label">{{ e.event }}</span>
@@ -611,7 +872,13 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
           <div class="stats-cols">
             <div class="stats-section">
-              <h3>🏆 Aktivste User (30 Tage)</h3>
+              <h3>
+                <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="8" r="7"/>
+                  <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
+                </svg>
+                Aktivste User (30 Tage)
+              </h3>
               @if (!s.top_actors.length) {
                 <p class="empty-hint">Noch keine Aktivität.</p>
               }
@@ -628,13 +895,33 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
             </div>
 
             <div class="stats-section">
-              <h3>⭐ Engagement-Top10</h3>
+              <h3>
+                <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
+                </svg>
+                Engagement-Top10
+              </h3>
               @for (i of s.top_ideas; track i.id) {
                 <div class="top-idea-row">
                   <strong>{{ i.title }}</strong>
                   <span class="meta">
-                    ⭐ {{ i.rating_avg | number: '1.1-1' }} ({{ i.rating_count }})
-                    · 💬 {{ i.comment_count }} · 🤝 {{ i.interest_count }}
+                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
+                    </svg>
+                    {{ i.rating_avg | number: '1.1-1' }} ({{ i.rating_count }})
+                    ·
+                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    {{ i.comment_count }}
+                    ·
+                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                      <circle cx="9" cy="7" r="4"/>
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    {{ i.interest_count }}
                   </span>
                 </div>
               }
@@ -642,7 +929,16 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
           </div>
 
           <div class="stats-section">
-            <h3>📝 Aktivität nach Typ (30 Tage)</h3>
+            <h3>
+              <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+              Aktivität nach Typ (30 Tage)
+            </h3>
             @if (!s.actions_30d.length) {
               <p class="empty-hint">Noch keine Aktivität.</p>
             }
@@ -657,22 +953,45 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
               </div>
             }
           </div>
+
+          <div class="stats-section">
+            <h3>
+              <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+              Pflicht-Metadaten nachpflegen
+            </h3>
+            <p style="margin: 0 0 12px; font-size: .88rem;">
+              Für die WLO-Freischaltung benötigen Ideen Lizenz (CC BY 4.0),
+              Sprache (de) und Replikations-Quelle. Bestehende Ideen ohne
+              diese Felder lassen sich hier in einem Rutsch nachziehen.
+              Bereits gesetzte Felder werden nicht überschrieben.
+            </p>
+            <button class="btn primary-move" (click)="runBackfillMeta()"
+                    [disabled]="backfillBusy()">
+              {{ backfillBusy() ? 'Läuft…' : 'Jetzt 200 Ideen prüfen + nachpflegen' }}
+            </button>
+            @if (backfillMsg()) {
+              <p style="margin: 10px 0 0; font-size: .85rem;">{{ backfillMsg() }}</p>
+            }
+          </div>
         }
       }
 
       @if (tab === 'topics') {
         <div class="intro">
-          Themen (Ebene 1) und Herausforderungen (Ebene 2) verwalten — anlegen,
-          umbenennen, sortieren, leere löschen. Reihenfolge mit ▲▼ pro Zeile,
-          Speichern-Button schreibt die neue sort_order in einem Rutsch.
-          <strong>Löschen</strong> erfordert, dass die Sammlung leer ist.
+          Herausforderungen (Ebene 1) und Bereiche (Ebene 2) verwalten —
+          anlegen, umbenennen, sortieren, leere löschen. Reihenfolge mit ▲▼
+          pro Zeile, Speichern-Button schreibt die neue sort_order in einem
+          Rutsch. <strong>Löschen</strong> erfordert, dass die Sammlung leer ist.
         </div>
 
         <div class="topic-create-row">
           <select [(ngModel)]="newTopic.parent_id">
-            <option [ngValue]="null">— Top-Level (neues Thema) —</option>
+            <option [ngValue]="null">— Top-Level (neue Herausforderung) —</option>
             @for (t of rootThemes(); track t.id) {
-              <option [ngValue]="t.id">↳ unter „{{ t.title }}" (Herausforderung)</option>
+              <option [ngValue]="t.id">↳ unter „{{ t.title }}" (Bereich)</option>
             }
           </select>
           <input type="text" [(ngModel)]="newTopic.title"
@@ -704,7 +1023,12 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                         <label class="btn">
                           <input type="file" accept="image/*" hidden
                                  (change)="onTopicPreviewPick($event, root)" />
-                          🖼 Vorschaubild
+                          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                          </svg>
+                          Vorschaubild
                         </label>
                         <button class="btn primary-move" (click)="saveTopicEdit(root)">✓ Speichern</button>
                         <button class="btn" (click)="editingTopicId=null">✕ Abbrechen</button>
@@ -715,7 +1039,10 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                       <img class="topic-preview" [src]="root.preview_url" alt="" />
                     }
                     <span class="title">
-                      📁 <strong>{{ root.title }}</strong>
+                      <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                      </svg>
+                      <strong>{{ root.title }}</strong>
                       @if (root.description) {
                         <small class="topic-desc">{{ root.description }}</small>
                       }
@@ -726,7 +1053,15 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                               [disabled]="topicChildrenCount(root.id) > 0 || topicIdeasCount(root.id) > 0"
                               [title]="(topicChildrenCount(root.id) || topicIdeasCount(root.id))
                                        ? 'Sammlung ist nicht leer — kann nicht gelöscht werden'
-                                       : 'Sammlung löschen'">🗑</button>
+                                       : 'Sammlung löschen'"
+                              aria-label="Löschen">
+                        <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                          <polyline points="3 6 5 6 21 6"/>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          <line x1="10" y1="11" x2="10" y2="17"/>
+                          <line x1="14" y1="11" x2="14" y2="17"/>
+                        </svg>
+                      </button>
                     </span>
                   }
                 </div>
@@ -746,7 +1081,12 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                             <label class="btn">
                               <input type="file" accept="image/*" hidden
                                      (change)="onTopicPreviewPick($event, ch)" />
-                              🖼 Vorschaubild
+                              <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                          </svg>
+                          Vorschaubild
                             </label>
                             <button class="btn primary-move" (click)="saveTopicEdit(ch)">✓</button>
                             <button class="btn" (click)="editingTopicId=null">✕</button>
@@ -768,7 +1108,15 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                                   [disabled]="topicIdeasCount(ch.id) > 0"
                                   [title]="topicIdeasCount(ch.id) > 0
                                            ? 'Enthält noch Ideen — kann nicht gelöscht werden'
-                                           : 'Herausforderung löschen'">🗑</button>
+                                           : 'Herausforderung löschen'"
+                                  aria-label="Löschen">
+                            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                              <polyline points="3 6 5 6 21 6"/>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                              <line x1="10" y1="11" x2="10" y2="17"/>
+                              <line x1="14" y1="11" x2="14" y2="17"/>
+                            </svg>
+                          </button>
                         </span>
                       }
                     </div>
@@ -813,7 +1161,14 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
             <option value="7d">Letzte 7 Tage</option>
             <option value="30d">Letzte 30 Tage</option>
           </select>
-          <button class="btn" (click)="exportActivityCsv()">⬇ CSV</button>
+          <button class="btn" (click)="exportActivityCsv()">
+            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            CSV
+          </button>
         </div>
         @if (activityLoading()) {
           <div class="loading">Lädt…</div>
@@ -863,7 +1218,14 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                 </div>
                 <div class="report-reason">{{ r.reason }}</div>
                 <div class="report-actions">
-                  <a [href]="ideaLink(r.idea_id)" target="_blank" rel="noopener">Idee öffnen ↗</a>
+                  <a [href]="ideaLink(r.idea_id)" target="_blank" rel="noopener">
+                    Idee öffnen
+                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                      <polyline points="15 3 21 3 21 9"/>
+                      <line x1="10" y1="14" x2="21" y2="3"/>
+                    </svg>
+                  </a>
                   <button class="btn primary-move" (click)="resolveReport(r.id)"
                           [disabled]="resolvingId === r.id">
                     {{ resolvingId === r.id ? '…' : '✓ Erledigt' }}
@@ -877,9 +1239,9 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
       @if (tab === 'inbox') {
         <div class="intro">
-          Hier liegen Ideen, die über die App eingereicht wurden und noch einem Thema zugeordnet
-          werden müssen. Wähle rechts eine Ziel-Herausforderung aus und verschiebe die Idee
-          direkt — oder lösche Dubletten und Spam.
+          Hier liegen Ideen, die über die App eingereicht wurden und noch einem
+          Bereich zugeordnet werden müssen. Wähle rechts einen Ziel-Bereich aus
+          und verschiebe die Idee direkt — oder lösche Dubletten und Spam.
         </div>
 
         @if (loading()) {
@@ -910,33 +1272,207 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         }
         @for (it of items(); track it.id) {
           <div class="item" [class.selected]="selectedInbox.has(it.id)">
-            <input type="checkbox" class="bulk-check"
-                   [checked]="selectedInbox.has(it.id)"
-                   (change)="toggleBulk(it.id)" />
-            <div>
-              <h3>{{ it.title || it.name || '(ohne Titel)' }}</h3>
-              <div class="tags">
-                @if (it.phase) { <span class="tag phase">{{ it.phase }}</span> }
-                @if (it.event) { <span class="tag event">📅 {{ it.event }}</span> }
-                @if (it.target_topic && topicsById[it.target_topic]) {
-                  <span class="tag target">➜ {{ topicTitleFor(it.target_topic) }}</span>
-                }
-              </div>
-              @if (it.description) { <p class="desc">{{ it.description }}</p> }
-              <div class="meta-row">
-                @if (it.author) { <span>👤 {{ it.author }}</span> }
-                @if (it.created_at) { <span>📅 {{ formatDate(it.created_at) }}</span> }
-                @if (it.project_url) {
-                  <span>🔗 <a [href]="it.project_url" target="_blank" rel="noopener">{{ shortUrl(it.project_url) }}</a></span>
-                }
-                <span style="font-family:monospace;font-size:.75rem">{{ it.id }}</span>
+            <div class="head">
+              <input type="checkbox" class="bulk-check" [title]="'Für Bulk-Aktion auswählen'"
+                     [checked]="selectedInbox.has(it.id)"
+                     (change)="toggleBulk(it.id)" />
+              <div class="titlewrap">
+                <h3>{{ it.title || it.name || '(ohne Titel)' }}</h3>
+                <div class="tags">
+                  @if (it.phase) { <span class="tag phase">{{ it.phase }}</span> }
+                  @if (it.event) {
+                    <span class="tag event">
+                      <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/>
+                        <line x1="8" y1="2" x2="8" y2="6"/>
+                        <line x1="3" y1="10" x2="21" y2="10"/>
+                      </svg>
+                      {{ it.event }}
+                    </span>
+                  }
+                  @if (it.target_topic && topicsById[it.target_topic]) {
+                    <span class="tag target">➜ {{ topicTitleFor(it.target_topic) }}</span>
+                  }
+                </div>
               </div>
             </div>
+
+            @if (it.description) {
+              <p class="desc" [class.expanded]="expandedInbox.has(it.id)">{{ it.description }}</p>
+            }
+
+            <div class="meta-row">
+              @if (it.author) { <span>👤 {{ it.author }}</span> }
+              @if (it.created_at) {
+                <span>
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                  {{ formatDate(it.created_at) }}
+                </span>
+              }
+              @if (it.project_url) {
+                <span>🔗 <a [href]="it.project_url" target="_blank" rel="noopener">{{ shortUrl(it.project_url) }}</a></span>
+              }
+              <span class="id">{{ it.id }}</span>
+              <span class="spacer"></span>
+              <button type="button" class="preview-toggle"
+                      (click)="toggleInboxPreview(it.id)">
+                {{ expandedInbox.has(it.id) ? '▴ Vorschau schließen' : '▾ Vorschau öffnen' }}
+              </button>
+            </div>
+
+            @if (expandedInbox.has(it.id)) {
+              @if (inboxPreview[it.id]; as p) {
+                <div class="preview-card">
+                  <!-- Header: Vorschaubild + Metadaten-Grid -->
+                  <div class="preview-row">
+                    <div class="thumb"
+                         [style.background-image]="p.preview_url ? 'url(' + p.preview_url + ')' : null">
+                      @if (!p.preview_url) { 📄 }
+                    </div>
+                    <div class="body">
+                      <h4>Metadaten</h4>
+                      <dl class="meta-grid">
+                        @if (p.owner_username) {
+                          <dt>👤 Owner (ES)</dt><dd>{{ p.owner_username }}</dd>
+                        }
+                        @if (p.author && p.author !== p.owner_username) {
+                          <dt>
+                            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M12 20h9"/>
+                              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>
+                            </svg>
+                            Autor (Freitext)
+                          </dt><dd>{{ p.author }}</dd>
+                        }
+                        @if (p.project_url) {
+                          <dt>🔗 Projekt-Link</dt>
+                          <dd><a [href]="p.project_url" target="_blank" rel="noopener">{{ p.project_url }}</a></dd>
+                        }
+                        @if (p.phase) {
+                          <dt>
+                            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                              <circle cx="12" cy="12" r="10"/>
+                              <circle cx="12" cy="12" r="6"/>
+                              <circle cx="12" cy="12" r="2"/>
+                            </svg>
+                            Phase
+                          </dt><dd>{{ p.phase }}</dd>
+                        }
+                        @if (p.events?.length) {
+                          <dt>
+                            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                              <line x1="16" y1="2" x2="16" y2="6"/>
+                              <line x1="8" y1="2" x2="8" y2="6"/>
+                              <line x1="3" y1="10" x2="21" y2="10"/>
+                            </svg>
+                            Veranstaltung(en)
+                          </dt>
+                          <dd>{{ p.events.join(', ') }}</dd>
+                        }
+                        @if (p.created_at) {
+                          <dt>🆕 Erstellt</dt><dd>{{ formatDate(p.created_at) }}</dd>
+                        }
+                        @if (p.modified_at && p.modified_at !== p.created_at) {
+                          <dt>✎ Geändert</dt><dd>{{ formatDate(p.modified_at) }}</dd>
+                        }
+                        @if (p.rating_count) {
+                          <dt>
+                            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
+                            </svg>
+                            Bewertung
+                          </dt>
+                          <dd>{{ p.rating_avg?.toFixed(1) }} / 5 ({{ p.rating_count }})</dd>
+                        }
+                        @if (p.comment_count) {
+                          <dt>
+                            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                            </svg>
+                            Kommentare
+                          </dt><dd>{{ p.comment_count }}</dd>
+                        }
+                      </dl>
+                    </div>
+                  </div>
+
+                  <!-- Volltext (falls über Karte hinaus) -->
+                  @if (p.description) {
+                    <div>
+                      <h4>Beschreibung</h4>
+                      <p class="full-desc">{{ p.description }}</p>
+                    </div>
+                  }
+
+                  <!-- Keywords / Schlagwörter -->
+                  @if (p.keywords?.length) {
+                    <div>
+                      <h4>Schlagwörter ({{ p.keywords.length }})</h4>
+                      <div class="kw-list">
+                        @for (kw of p.keywords; track kw) {
+                          <span class="kw">#{{ kw }}</span>
+                        }
+                      </div>
+                    </div>
+                  }
+
+                  <!-- Anhänge -->
+                  @if (p.attachments?.length) {
+                    <div class="preview-attachments">
+                      <h4>Dokumente / Anhänge ({{ p.attachments.length }})</h4>
+                      @for (a of p.attachments; track a.id) {
+                        <span class="att">
+                          <span>{{ attIcon(a) }}</span>
+                          <span class="filename">{{ a.title || a.name || 'Datei' }}</span>
+                          @if (a.mimetype) {
+                            <small style="color:var(--wlo-muted)">{{ a.mimetype }}</small>
+                          }
+                          @if (a.size) {
+                            <small style="color:var(--wlo-muted)">· {{ formatSize(a.size) }}</small>
+                          }
+                          <span class="att-actions">
+                            @if (a.download_url) {
+                              <a [href]="a.download_url" target="_blank" rel="noopener" download>
+                                <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                  <polyline points="7 10 12 15 17 10"/>
+                                  <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Download
+                              </a>
+                            }
+                            @if (a.render_url) {
+                              <a [href]="a.render_url" target="_blank" rel="noopener">
+                                <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                  <polyline points="15 3 21 3 21 9"/>
+                                  <line x1="10" y1="14" x2="21" y2="3"/>
+                                </svg>
+                                Öffnen
+                              </a>
+                            }
+                          </span>
+                        </span>
+                      }
+                    </div>
+                  }
+                </div>
+              } @else {
+                <div class="preview-loading">Lädt Vorschau…</div>
+              }
+            }
+
             <div class="actions">
-              <!-- Move-Bereich: Ziel-Dropdown + Button -->
               <select [(ngModel)]="moveTargets[it.id]"
                       (focus)="suggestMoveTarget(it)">
-                <option [ngValue]="undefined">— Ziel wählen —</option>
+                <option [ngValue]="undefined">— Ziel-Herausforderung wählen —</option>
                 @for (t of challenges(); track t.id) {
                   <option [ngValue]="t.id">{{ topicTitleFor(t.id) }}</option>
                 }
@@ -946,16 +1482,30 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                       (click)="doMove(it.id)">
                 {{ movingId === it.id ? 'Verschiebt…' : '➜ Verschieben' }}
               </button>
-
-              <button class="btn" (click)="openInRepo(it.id)">↗ Im Repo öffnen</button>
+              <button class="btn" (click)="openInRepo(it.id)">
+                <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15 3 21 3 21 9"/>
+                  <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+                Im Repo
+              </button>
               @if (confirmId === it.id) {
-                <div class="confirm">
+                <span class="confirm">
                   Sicher?
                   <button class="btn danger" (click)="doDelete(it.id)">Ja, löschen</button>
                   <button class="btn" (click)="confirmId=null">Abbrechen</button>
-                </div>
+                </span>
               } @else {
-                <button class="btn danger" (click)="confirmId=it.id">🗑 Löschen</button>
+                <button class="btn danger" (click)="confirmId=it.id">
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    <line x1="10" y1="11" x2="10" y2="17"/>
+                    <line x1="14" y1="11" x2="14" y2="17"/>
+                  </svg>
+                  Löschen
+                </button>
               }
               @if (moveError[it.id]) {
                 <span style="color:#b00020; font-size:.82rem">{{ moveError[it.id] }}</span>
@@ -1014,7 +1564,15 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                   <button class="btn" (click)="toggleActive('event', e)">
                     {{ e.active ? '⏸' : '▶' }}
                   </button>
-                  <button class="btn danger" (click)="deleteEvent(e.slug)">🗑</button>
+                  <button class="btn danger" (click)="deleteEvent(e.slug)"
+                          aria-label="Löschen">
+                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      <line x1="10" y1="11" x2="10" y2="17"/>
+                      <line x1="14" y1="11" x2="14" y2="17"/>
+                    </svg>
+                  </button>
                 </span>
               }
             </div>
@@ -1036,66 +1594,69 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
       @if (tab === 'mods') {
         <div class="intro">
-          Mitglieder der edu-sharing-Gruppe <code style="background:var(--wlo-bg);
-          padding:1px 6px;border-radius:4px">{{ modsGroup }}</code> haben Mod-Rechte.
-          Änderungen wirken auf das Repository und sind dort nachvollziehbar.
+          Mod-Rechte werden ausschließlich über Mitgliedschaft in den
+          unten gelisteten edu-sharing-Gruppen vergeben. Die Verwaltung
+          (hinzufügen/entfernen) erfolgt direkt im Repository — diese
+          Übersicht ist bewusst nur lesend, um nicht versehentlich
+          globale Admin-Rechte zu vergeben.
         </div>
 
-        <div class="tax-list" style="margin-bottom: 16px">
-          <div class="tax-row header">
+        @if (modsGroups.length) {
+          <div style="margin-bottom: 14px; font-size: .88rem">
+            <strong>Quellen:</strong>
+            @for (g of modsGroupStatus; track g.group) {
+              <span class="pill"
+                    [style.background]="g.ok ? 'var(--wlo-primary-soft)' : 'var(--wlo-accent-soft)'"
+                    [style.color]="g.ok ? 'var(--wlo-text)' : '#8a3a00'"
+                    [title]="g.error || ''"
+                    style="margin: 0 6px 6px 0; display: inline-flex; gap: 4px">
+                <code style="background: transparent; padding: 0">{{ g.group }}</code>
+                · {{ g.count }}
+                @if (!g.ok) {
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                }
+              </span>
+            }
+          </div>
+        }
+
+        <div class="tax-list">
+          <div class="tax-row header" style="grid-template-columns: 1fr 1fr 1.4fr 1.6fr">
             <span>Username</span>
             <span>Name</span>
             <span>E-Mail</span>
             <span>Quelle</span>
-            <span></span>
           </div>
           @for (m of moderators(); track m.username) {
-            <div class="tax-row">
+            <div class="tax-row" style="grid-template-columns: 1fr 1fr 1.4fr 1.6fr">
               <span class="slug">{{ m.username }}</span>
               <span>{{ (m.first_name || '') + ' ' + (m.last_name || '') }}</span>
               <span style="color: var(--wlo-muted)">{{ m.email || '—' }}</span>
               <span>
-                @if (m.source === 'group') {
-                  <span class="pill on">Gruppe</span>
+                @if (m.source === 'bootstrap') {
+                  <span class="pill"
+                        style="background:var(--wlo-accent-soft, #fff8db);color:#5c4a00">
+                    Bootstrap (.env)
+                  </span>
                 } @else {
-                  <span class="pill" style="background:#fff8db;color:#5c4a00">Bootstrap (.env)</span>
-                }
-              </span>
-              <span class="row-actions">
-                @if (m.source === 'group') {
-                  <button class="btn danger" (click)="removeMod(m.username)">🗑 Entfernen</button>
-                } @else {
-                  <span style="color: var(--wlo-muted); font-size: .78rem">unveränderlich</span>
+                  <code style="background: var(--wlo-bg); padding: 2px 6px;
+                               border-radius: 4px; font-size: .78rem">
+                    {{ m.source }}
+                  </code>
                 }
               </span>
             </div>
           } @empty {
             <div class="tax-empty">
-              Noch niemand in der Gruppe. Über Suche unten Mitglieder hinzufügen.
+              Keine Mitglieder gefunden. Prüfe MODERATION_FALLBACK_GROUPS in der .env.
             </div>
           }
         </div>
 
-        <div class="tax-add" style="grid-template-columns: 1fr auto">
-          <input type="text" placeholder="Username, Name oder E-Mail suchen…"
-                 [(ngModel)]="modSearchQ" (input)="onModSearch()" />
-          <span style="color: var(--wlo-muted); font-size: .82rem">
-            mind. 2 Zeichen
-          </span>
-        </div>
-        @if (modSearchResults().length) {
-          <div class="tax-list" style="margin-top: 12px">
-            @for (u of modSearchResults(); track u.username) {
-              <div class="tax-row" style="grid-template-columns: 1fr 1fr 1fr auto auto">
-                <span class="slug">{{ u.username }}</span>
-                <span>{{ (u.first_name || '') + ' ' + (u.last_name || '') }}</span>
-                <span style="color: var(--wlo-muted)">{{ u.email || '—' }}</span>
-                <span></span>
-                <button class="btn primary-move" (click)="addMod(u.username)">+ Hinzufügen</button>
-              </div>
-            }
-          </div>
-        }
         @if (modError) {
           <div style="margin-top: 10px; color: #b00020; font-size: .9rem">{{ modError }}</div>
         }
@@ -1105,7 +1666,15 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         <div class="share-overlay" (click)="closeShare($event)">
           <div class="share-box" (click)="$event.stopPropagation()">
             <div class="share-head">
-              <h2>📅 {{ shareEvent.label }} — teilen</h2>
+              <h2>
+                <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/>
+                  <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                {{ shareEvent.label }} — teilen
+              </h2>
               <button class="x" (click)="shareEvent=null">×</button>
             </div>
             <p>
@@ -1118,7 +1687,18 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
               <input type="text" [value]="shareUrl(shareEvent.slug)" readonly
                      #linkInput (click)="linkInput.select()" />
               <button class="btn primary-move" (click)="copyShareLink(shareEvent.slug)">
-                {{ copied ? '✓ Kopiert' : '📋 Kopieren' }}
+                @if (copied) {
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  Kopiert
+                } @else {
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  Kopieren
+                }
               </button>
             </div>
 
@@ -1127,10 +1707,20 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
               <img [src]="qrUrl(shareEvent.slug)" alt="QR-Code" />
               <div class="qr-actions">
                 <a [href]="qrUrl(shareEvent.slug, 600)" target="_blank" rel="noopener">
-                  ↗ Hochauflösend öffnen (600×600)
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                  Hochauflösend öffnen (600×600)
                 </a>
                 <a [href]="qrUrl(shareEvent.slug, 600)" download="qr-{{shareEvent.slug}}.png">
-                  ⬇ Als PNG herunterladen
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                  Als PNG herunterladen
                 </a>
               </div>
             </div>
@@ -1185,7 +1775,15 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                   <button class="btn" (click)="toggleActive('phase', p)">
                     {{ p.active ? '⏸' : '▶' }}
                   </button>
-                  <button class="btn danger" (click)="deletePhase(p.slug)">🗑</button>
+                  <button class="btn danger" (click)="deletePhase(p.slug)"
+                          aria-label="Löschen">
+                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      <line x1="10" y1="11" x2="10" y2="17"/>
+                      <line x1="14" y1="11" x2="14" y2="17"/>
+                    </svg>
+                  </button>
                 </span>
               }
             </div>
@@ -1209,6 +1807,9 @@ export class ModerationComponent implements OnInit {
   @Input() apiBase = API_BASE_DEFAULT;
   @Input() repoBaseUrl = 'https://redaktion.openeduhub.net';
   @Input() currentUser = '';
+  /** Wird beim Klick auf eine versteckte Idee gefeuert; vom Parent
+   *  als `openIdea($event)`-Handler verkabelt. */
+  @Output() ideaSelected = new EventEmitter<{ id: string; title: string }>();
 
   items = signal<InboxItem[]>([]);
   loading = signal(false);
@@ -1221,7 +1822,9 @@ export class ModerationComponent implements OnInit {
   movingId: string | null = null;
 
   // Tabs + Taxonomie-Verwaltung
-  tab: 'stats' | 'inbox' | 'reports' | 'activity' | 'topics' | 'events' | 'phases' | 'mods' | 'backup' = 'inbox';
+  tab: 'stats' | 'inbox' | 'reports' | 'activity' | 'topics' | 'events' | 'phases' | 'mods' | 'hidden' | 'backup' = 'inbox';
+  hidden = signal<{ id: string; title: string; owner_username?: string;
+                    hidden_reason?: string; modified_at?: string }[]>([]);
 
   // ===== Backup =====
   backups = signal<{
@@ -1480,6 +2083,8 @@ export class ModerationComponent implements OnInit {
 
   // ===== Bulk-Move (Inbox) =====
   selectedInbox = new Set<string>();
+  /** IDs der Inbox-Einträge, deren Vorschau ausgeklappt ist. */
+  expandedInbox = new Set<string>();
   bulkTarget?: string;
   bulkBusy = false;
   bulkResultMsg = '';
@@ -1488,6 +2093,41 @@ export class ModerationComponent implements OnInit {
     if (this.selectedInbox.has(id)) this.selectedInbox.delete(id);
     else this.selectedInbox.add(id);
     this.bulkResultMsg = '';
+  }
+
+  /** Cache der schon geladenen Vorschau-Detaildaten je Inbox-Eintrag.
+   *  Lädt lazy beim ersten Aufklappen via /api/v1/ideas/{id}. */
+  inboxPreview: Record<string, any> = {};
+
+  toggleInboxPreview(id: string) {
+    if (this.expandedInbox.has(id)) {
+      this.expandedInbox.delete(id);
+      return;
+    }
+    this.expandedInbox.add(id);
+    if (!this.inboxPreview[id]) {
+      this.api.getIdea(id).subscribe({
+        next: (idea: any) => { this.inboxPreview[id] = idea; },
+        error: () => {
+          // Fallback: minimaler Stub mit Inbox-Daten, damit was angezeigt wird
+          const it = this.items().find(x => x.id === id);
+          this.inboxPreview[id] = {
+            description: it?.description || '',
+            preview_url: null, attachments: [],
+          };
+        },
+      });
+    }
+  }
+
+  attIcon(a: any): string {
+    const m = (a?.mimetype || '').toLowerCase();
+    if (m.startsWith('image/')) return '🖼';
+    if (m === 'application/pdf') return '📕';
+    if (m.startsWith('video/')) return '🎬';
+    if (m.startsWith('audio/')) return '🎵';
+    if (m.includes('zip') || m.includes('archive')) return '🗜';
+    return '📄';
   }
   doBulkMove() {
     if (!this.bulkTarget || !this.selectedInbox.size) return;
@@ -1568,11 +2208,11 @@ export class ModerationComponent implements OnInit {
       backup_created: 'Backup erstellt',
       backup_deleted: 'Backup gelöscht',
       backup_restored: 'Backup wiederhergestellt',
-      topic_created: 'Thema/Herausforderung angelegt',
-      topic_edited: 'Thema/Herausforderung bearbeitet',
-      topic_deleted: 'Thema/Herausforderung gelöscht',
+      topic_created: 'Herausforderung/Bereich angelegt',
+      topic_edited: 'Herausforderung/Bereich bearbeitet',
+      topic_deleted: 'Herausforderung/Bereich gelöscht',
       topic_preview_set: 'Vorschaubild gesetzt',
-      topics_sorted: 'Themen-Reihenfolge geändert',
+      topics_sorted: 'Reihenfolge geändert',
       phase_changed: 'Phase gewechselt',
     };
     return labels[a] || a;
@@ -1687,18 +2327,14 @@ export class ModerationComponent implements OnInit {
   newEvent: TaxonomyEntry = this.blankEntry();
   newPhase: TaxonomyEntry = this.blankEntry();
 
-  // Moderator-Verwaltung
-  modsGroup = '';
+  // Moderatoren-Anzeige (read-only)
+  modsGroups: string[] = [];
+  modsGroupStatus: { group: string; ok: boolean; error?: string | null; count: number }[] = [];
   moderators = signal<{
     username: string; first_name?: string; last_name?: string;
-    email?: string; source: 'group' | 'bootstrap';
-  }[]>([]);
-  modSearchQ = '';
-  modSearchResults = signal<{
-    username: string; first_name?: string; last_name?: string; email?: string;
+    email?: string; source: string;
   }[]>([]);
   modError = '';
-  private modSearchDebounce?: number;
 
   // Share-Dialog für Veranstaltung
   shareEvent: TaxonomyEntry | null = null;
@@ -1879,7 +2515,7 @@ export class ModerationComponent implements OnInit {
   }
 
   /** QR-Bild über öffentlichen Service. Keine PII enthalten — nur App-URL + Slug. */
-  qrUrl(slug: string, size: number = 240): string {
+  qrUrl(slug: string, size = 240): string {
     const data = encodeURIComponent(this.shareUrl(slug));
     return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}`;
   }
@@ -1892,51 +2528,52 @@ export class ModerationComponent implements OnInit {
     this.copiedTimer = window.setTimeout(() => (this.copied = false), 2000);
   }
 
-  // ===== Moderator-Verwaltung =====
+  // ===== Pflicht-Metadaten nachpflegen =====
+  backfillBusy = signal(false);
+  backfillMsg = signal('');
+  runBackfillMeta() {
+    if (!confirm('Pflicht-Metadaten (Lizenz, Sprache, Replikations-Quelle) ' +
+                 'für bis zu 200 Ideen nachpflegen? Vorhandene Werte ' +
+                 'bleiben unangetastet.')) return;
+    this.backfillBusy.set(true);
+    this.backfillMsg.set('');
+    this.api.backfillPublicationMetaBulk(200).subscribe({
+      next: (r) => {
+        this.backfillBusy.set(false);
+        this.backfillMsg.set(
+          `Geprüft: ${r.processed}, davon ergänzt: ${r.updated}` +
+          (r.errors?.length ? ` · Fehler: ${r.errors.length}` : '')
+        );
+      },
+      error: (e) => {
+        this.backfillBusy.set(false);
+        this.backfillMsg.set(`Fehler: ${e?.error?.detail || `HTTP ${e?.status}`}`);
+      },
+    });
+  }
+
+  // ===== Versteckte Ideen =====
+  loadHidden() {
+    this.api.listHiddenIdeas().subscribe({
+      next: (r) => this.hidden.set(r.items || []),
+      error: () => this.hidden.set([]),
+    });
+  }
+
+  openIdeaFromHidden(h: { id: string; title: string }) {
+    this.ideaSelected.emit({ id: h.id, title: h.title } as any);
+  }
+
+  // ===== Moderatoren-Anzeige (read-only) =====
   loadMods() {
     this.modError = '';
     this.api.listModerators().subscribe({
       next: (r) => {
-        this.modsGroup = r.group;
-        this.moderators.set(r.members);
+        this.modsGroups = r.groups || [];
+        this.modsGroupStatus = r.group_status || [];
+        this.moderators.set(r.members || []);
       },
       error: (e) => (this.modError = e?.error?.detail || 'Konnte Moderator-Liste nicht laden'),
-    });
-  }
-
-  onModSearch() {
-    clearTimeout(this.modSearchDebounce);
-    const q = this.modSearchQ.trim();
-    if (q.length < 2) {
-      this.modSearchResults.set([]);
-      return;
-    }
-    this.modSearchDebounce = window.setTimeout(() => {
-      this.api.searchUsers(q).subscribe({
-        next: (r) => this.modSearchResults.set(r.results),
-        error: () => this.modSearchResults.set([]),
-      });
-    }, 250);
-  }
-
-  addMod(username: string) {
-    this.modError = '';
-    this.api.addModerator(username).subscribe({
-      next: () => {
-        this.modSearchQ = '';
-        this.modSearchResults.set([]);
-        this.loadMods();
-      },
-      error: (e) => (this.modError = e?.error?.detail || `Fehler (HTTP ${e?.status})`),
-    });
-  }
-
-  removeMod(username: string) {
-    if (!confirm(`Moderator-Rechte für „${username}" entfernen?`)) return;
-    this.modError = '';
-    this.api.removeModerator(username).subscribe({
-      next: () => this.loadMods(),
-      error: (e) => (this.modError = e?.error?.detail || `Fehler (HTTP ${e?.status})`),
     });
   }
 

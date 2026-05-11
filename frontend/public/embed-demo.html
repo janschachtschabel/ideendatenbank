@@ -89,25 +89,26 @@
 
   <h2>3. Top-Ideen eines HackathOERn-Events</h2>
   <p>Zeigt nur Ideen eines bestimmten Events — praktisch für Event-Landingpages
-    („Unsere Ideen beim HackathOERn 2").</p>
+    („Unsere Ideen beim HackathOERn 2"). Das <code>event</code>-Attribut nimmt
+    den Slug aus der Event-Taxonomie (klein, mit Bindestrichen).</p>
   <div class="demo">
     <h3>Ideen beim HackathOERn 2</h3>
     <ideendb-tile-grid
       api-base="/api/v1"
-      event="HackathOERn 2"
+      event="hackathoern-2"
       sort="rating"
       limit="4">
     </ideendb-tile-grid>
   </div>
   <pre>&lt;ideendb-tile-grid
   api-base="https://api.example.com/api/v1"
-  event="HackathOERn 2"
+  event="hackathoern-2"
   sort="rating"
   limit="4"&gt;
 &lt;/ideendb-tile-grid&gt;</pre>
 
   <h2>4. Ideen einer Herausforderung</h2>
-  <p>Filter nach Topic-ID (Sammlungs-ID aus edu-sharing) — für Themenseiten,
+  <p>Filter nach Topic-ID (Sammlungs-ID aus edu-sharing) — für Landingpages,
     die zu einer konkreten Herausforderung gehören.</p>
   <div class="demo">
     <h3>Auffindbarkeit und Nutzungsverbesserung von OER</h3>
@@ -148,8 +149,9 @@
     setze <code>APP_CORS_ORIGINS</code> im Backend-Env auf deine CMS-Domain:</p>
   <pre>APP_CORS_ORIGINS=https://www.wirlernenonline.de,https://hackathoern.openeduhub.net</pre>
 
-  <!-- Load the web component bundles (relative to the dev server) -->
-  <link rel="stylesheet" href="/styles.css" />
-  <script type="module" src="/main.js"></script>
+  <!-- Web Component Bundles. Reihenfolge: polyfills → main. -->
+  <link rel="stylesheet" href="styles.css" />
+  <script type="module" src="polyfills.js"></script>
+  <script type="module" src="main.js"></script>
 </body>
 </html>

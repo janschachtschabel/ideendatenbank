@@ -56,10 +56,11 @@ RUN pip install --no-cache-dir -e ./backend
 # (frontend/dist/embed/browser/, relative zu app/main.py)
 COPY --from=frontend-builder /build/dist/embed/browser/ ./frontend/dist/embed/browser/
 
-# Daten-Verzeichnis (SQLite + Backups). Volume mountbar.
-RUN mkdir -p /data /app/backend/data && \
-    ln -sf /data /app/backend/data-volume && \
-    chown -R app:app /app /data
+# Daten-Verzeichnis (SQLite + Backups). Wird per `-v ideendb-data:/data`
+# als persistentes Volume gemountet. Auf einem frischen Volume legt die
+# App beim Erststart ein leeres Verzeichnis an; wenn dort bereits
+# Backup-ZIPs liegen, springt der Auto-Restore an (siehe backup.py).
+RUN mkdir -p /data && chown -R app:app /app /data
 
 USER app
 
@@ -77,6 +78,6 @@ WORKDIR /app/backend
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8000/api/v1/topics > /dev/null || exit 1
+    CMD curl -fsS http://127.0.0.1:8000/api/v1/health > /dev/null || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

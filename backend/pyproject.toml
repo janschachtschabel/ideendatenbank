@@ -20,3 +20,39 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+# ─── Linting / Formatierung ─────────────────────────────────────────────
+# `ruff` ersetzt flake8 + isort + Teile von pylint und ist um Größenordnungen
+# schneller. Lokal:
+#   pip install ruff
+#   ruff check app/          # nur prüfen
+#   ruff check app/ --fix    # sichere Auto-Fixes anwenden
+#   ruff format app/         # Black-kompatible Formatierung
+#
+# Bewusst aktiviert: E (pycodestyle), F (pyflakes), I (isort), B (bugbear),
+# UP (pyupgrade), C4 (comprehensions), SIM (simplify). Deaktiviert: E501
+# (line-too-long) — wir mischen Code mit ausführlichen Kommentaren, das
+# greift sonst überall.
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "C4", "SIM"]
+ignore = [
+    "E501",   # line-too-long — Code/Kommentar-Mischung greift sonst überall
+    "E701",   # mehrere statements pro Zeile (Doppelpunkt) — bewusst genutzt für kurze if/return-Einzeiler
+    "E702",   # mehrere statements pro Zeile (Semikolon) — selten genutzt, ok
+    "B008",   # function-call-in-default-arg — bei FastAPI Depends/Header normal
+    "B904",   # raise-without-from — Exception-Chain ist in Python ohnehin erhalten,
+              # Style-Hint mit hohem Rausch-Anteil bei Wrapping-Handlern wie HTTPStatusError → HTTPException
+    "SIM105", # suppressible-exception — `try/pass` ist oft klarer als `contextlib.suppress`,
+              # gerade wenn der except-Block dokumentiert ist
+    "SIM117", # nested-with — manchmal lesbarer als ein einzelner Multi-Manager
+]
+# Tests + Migrationen würden hier ausgenommen; aktuell haben wir keine.
+exclude = []
+
+[tool.ruff.lint.per-file-ignores]
+# routes.py hat absichtlich viele async def auf Modulebene → Top-Down-Lesbarkeit
+"app/routes.py" = ["E402"]

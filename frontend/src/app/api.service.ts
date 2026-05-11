@@ -89,12 +89,14 @@ export class ApiService {
     );
   }
 
-  meta(): Observable<{
+  meta(topicId?: string | null): Observable<{
     phases: { value: string; count: number }[];
     events: { value: string; count: number }[];
     categories: { value: string; count: number }[];
   }> {
-    return this.http.get<any>(`${this.base}/meta`);
+    let params = new HttpParams();
+    if (topicId) params = params.set('topic_id', topicId);
+    return this.http.get<any>(`${this.base}/meta`, { params });
   }
 
   submitIdea(payload: {
@@ -135,7 +137,10 @@ export class ApiService {
   }
 
   inbox(): Observable<{ count: number; items: InboxItem[] }> {
-    return this.http.get<any>(`${this.base}/inbox`);
+    // Auth-Header ist Pflicht — _require_moderator gated den Endpoint.
+    return this.http.get<any>(`${this.base}/inbox`, {
+      headers: this.authHeaders(),
+    });
   }
 
   deleteInboxItem(id: string): Observable<unknown> {
@@ -148,32 +153,17 @@ export class ApiService {
     });
   }
 
-  // ---- Moderator-Verwaltung ----
+  // ---- Moderatoren-Anzeige (read-only; verwaltet wird in edu-sharing) ----
   listModerators(): Observable<{
-    group: string; fallback_groups: string[]; count: number;
+    groups: string[];
+    group_status: { group: string; ok: boolean; error?: string | null; count: number }[];
+    count: number;
+    managed_externally: boolean;
     members: { username: string; first_name?: string; last_name?: string;
-               email?: string; source: 'group' | 'bootstrap' }[];
+               email?: string; source: string }[];
   }> {
     return this.http.get<any>(`${this.base}/admin/moderators`, {
       headers: this.authHeaders(),
-    });
-  }
-  addModerator(username: string): Observable<{ ok: boolean }> {
-    return this.http.put<any>(`${this.base}/admin/moderators/${encodeURIComponent(username)}`, null, {
-      headers: this.authHeaders(),
-    });
-  }
-  removeModerator(username: string): Observable<{ ok: boolean }> {
-    return this.http.delete<any>(`${this.base}/admin/moderators/${encodeURIComponent(username)}`, {
-      headers: this.authHeaders(),
-    });
-  }
-  searchUsers(q: string): Observable<{
-    results: { username: string; first_name?: string; last_name?: string; email?: string }[];
-  }> {
-    return this.http.get<any>(`${this.base}/admin/users/search`, {
-      headers: this.authHeaders(),
-      params: { q },
     });
   }
 
@@ -292,14 +282,6 @@ export class ApiService {
     return this.http.get<any>(`${this.base}/me/activity`, { headers: this.authHeaders() });
   }
 
-  createAttachmentFolder(ideaId: string): Observable<{
-    ok: boolean; folder_id: string; name?: string; already_exists?: boolean
-  }> {
-    return this.http.post<any>(`${this.base}/ideas/${ideaId}/attachments/folder`, null, {
-      headers: this.authHeaders(),
-    });
-  }
-
   uploadIdeaContent(ideaId: string, file: File): Observable<{ ok: boolean; size: number; name: string }> {
     const fd = new FormData();
     fd.append('file', file, file.name);
@@ -316,16 +298,18 @@ export class ApiService {
     });
   }
 
-  uploadToAttachmentFolder(ideaId: string, file: File, folderId?: string): Observable<{
+  /**
+   * Lädt einen Anhang direkt als Child-IO (Serienobjekt-Pattern) unter die
+   * Idee. Vorher gab es einen separaten "Anhänge-Sammlung anlegen"-Schritt
+   * — dieser entfällt mit `ccm:childio`/`ccm:io_childobject`.
+   */
+  uploadAttachment(ideaId: string, file: File): Observable<{
     ok: boolean; node_id: string; name: string; size: number;
   }> {
     const fd = new FormData();
     fd.append('file', file, file.name);
-    let params = new HttpParams();
-    if (folderId) params = params.set('folder_id', folderId);
     return this.http.post<any>(`${this.base}/ideas/${ideaId}/attachments/upload`, fd, {
       headers: this.authHeaders(),
-      params,
     });
   }
 
@@ -364,6 +348,7 @@ export class ApiService {
     event?: string;
     category?: string;
     q?: string;
+    ids?: string;
     sort?: SortBy;
     order?: 'asc' | 'desc';
     limit?: number;
@@ -390,12 +375,6 @@ export class ApiService {
 
   duplicateIdea(id: string): Observable<{ ok: boolean; node_id: string }> {
     return this.http.post<any>(`${this.base}/ideas/${id}/duplicate`, null, {
-      headers: this.authHeaders(),
-    });
-  }
-
-  deleteAttachmentFolder(id: string): Observable<{ ok: boolean }> {
-    return this.http.delete<any>(`${this.base}/ideas/${id}/attachments/folder`, {
       headers: this.authHeaders(),
     });
   }
@@ -542,6 +521,123 @@ export class ApiService {
     if (replyTo) params = params.set('reply_to', replyTo);
     return this.http.post(`${this.base}/ideas/${id}/comments`, null, {
       params,
+      headers: this.authHeaders(),
+    });
+  }
+
+  refreshIdea(ideaId: string): Observable<{ ok: boolean }> {
+    return this.http.post<any>(`${this.base}/ideas/${ideaId}/refresh`, null, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  /** Pflicht-Metadaten (Lizenz/Sprache/...) für die WLO-Freischaltung
+   *  bei bestehenden Ideen nachpflegen. Single oder Bulk. Mod-only. */
+  backfillPublicationMeta(ideaId: string): Observable<{ ok: boolean; changed: boolean; fields: string[] }> {
+    return this.http.post<any>(
+      `${this.base}/admin/ideas/${ideaId}/backfill-publication-meta`,
+      {}, { headers: this.authHeaders() });
+  }
+  backfillPublicationMetaBulk(limit = 200): Observable<{
+    ok: boolean; processed: number; updated: number; errors: any[];
+  }> {
+    return this.http.post<any>(
+      `${this.base}/admin/ideas/backfill-publication-meta?limit=${limit}`,
+      {}, { headers: this.authHeaders() });
+  }
+
+  deleteComment(commentId: string, ideaId?: string): Observable<unknown> {
+    let params = new HttpParams();
+    if (ideaId) params = params.set('idea_id', ideaId);
+    return this.http.delete(`${this.base}/comments/${commentId}`, {
+      params,
+      headers: this.authHeaders(),
+    });
+  }
+
+  phaseHistory(ideaId: string): Observable<{ count: number;
+    items: { ts: string; actor?: string | null; from?: string | null; to?: string | null }[] }> {
+    return this.http.get<any>(`${this.base}/ideas/${ideaId}/phase-history`);
+  }
+
+  myReports(): Observable<{ count: number; items: {
+    id: number; idea_id: string; idea_title?: string; reason: string;
+    created_at: string; resolved_at?: string | null;
+  }[] }> {
+    return this.http.get<any>(`${this.base}/me/reports`, { headers: this.authHeaders() });
+  }
+
+  ideaReportStatus(ideaId: string): Observable<{
+    reported: boolean; created_at?: string; resolved_at?: string | null;
+    status?: 'open' | 'resolved';
+  }> {
+    return this.http.get<any>(`${this.base}/ideas/${ideaId}/report-status`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  bulkResolveReports(ids: number[]): Observable<{ ok: boolean; count: number }> {
+    return this.http.post<any>(`${this.base}/admin/reports/bulk-resolve`, { ids }, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  rankingRisers(opts: { sort?: 'rating' | 'comments' | 'interest';
+                         event?: string | null; days?: number; limit?: number; }): Observable<{
+    count: number; items: any[]; latest?: string; previous?: string | null;
+  }> {
+    let params = new HttpParams();
+    if (opts.sort) params = params.set('sort', opts.sort);
+    if (opts.event) params = params.set('event', opts.event);
+    if (opts.days) params = params.set('days', String(opts.days));
+    if (opts.limit) params = params.set('limit', String(opts.limit));
+    return this.http.get<any>(`${this.base}/ranking/risers`, { params });
+  }
+
+  publicUserProfile(username: string): Observable<{
+    username: string;
+    stats: { ideas: number; comments: number; ratings: number; avg_rating: number };
+    last_activity?: string;
+    ideas: Idea[];
+  }> {
+    return this.http.get<any>(`${this.base}/users/${encodeURIComponent(username)}`);
+  }
+
+  // ---- Hidden-Verwaltung (Mod) ----
+  listHiddenIdeas(): Observable<{ count: number; items: {
+    id: string; title: string; owner_username?: string;
+    hidden_reason?: string; modified_at?: string;
+  }[] }> {
+    return this.http.get<any>(`${this.base}/admin/hidden-ideas`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  hideIdea(ideaId: string, reason?: string): Observable<{ ok: boolean }> {
+    return this.http.post<any>(
+      `${this.base}/admin/ideas/${ideaId}/hide`,
+      reason ? { reason } : {},
+      { headers: this.authHeaders() },
+    );
+  }
+
+  unhideIdea(ideaId: string): Observable<{ ok: boolean }> {
+    return this.http.post<any>(
+      `${this.base}/admin/ideas/${ideaId}/unhide`,
+      {},
+      { headers: this.authHeaders() },
+    );
+  }
+
+  // ---- Notifications ----
+  unseenNotifications(): Observable<{ count: number; last_seen?: string }> {
+    return this.http.get<any>(`${this.base}/me/notifications/unseen`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  markNotificationsSeen(): Observable<{ ok: boolean; last_seen: string }> {
+    return this.http.post<any>(`${this.base}/me/notifications/seen`, null, {
       headers: this.authHeaders(),
     });
   }

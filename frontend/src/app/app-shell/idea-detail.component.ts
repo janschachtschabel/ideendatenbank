@@ -28,6 +28,7 @@ import { ShareMenuComponent } from './share-menu.component';
     .header-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: .9rem;
                    color: rgba(255,255,255,.92); margin-bottom: 12px; }
     .header-meta a { color: #f5b600; text-decoration: none; &:hover { text-decoration: underline; } }
+    .header-meta .muted-username { opacity: .7; font-size: .85rem; }
     .header-tags { display: flex; gap: 8px; flex-wrap: wrap; }
     .tag {
       display: inline-flex; align-items: center; gap: 6px;
@@ -45,11 +46,16 @@ import { ShareMenuComponent } from './share-menu.component';
             display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; position: relative; }
     @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
 
-    .card { background: #fff; border: 1px solid var(--wlo-border); border-radius: 12px;
+    .card { background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 12px;
             padding: 28px; }
     .card h2 { margin: 0 0 16px; font-size: 1.2rem; color: var(--wlo-text); }
 
-    .desc { line-height: 1.7; color: var(--wlo-text); font-size: 1rem; }
+    .desc { line-height: 1.7; color: var(--wlo-text); font-size: 1rem;
+            /* edu-sharing speichert cclom:general_description meist als
+               Plain-Text mit \n-Umbrüchen. pre-wrap macht die Umbrüche
+               sichtbar, ohne HTML-Tags (falls vorhanden) kaputt zu machen
+               — Block-Elemente legen weiterhin ihre eigenen Pausen ein. */
+            white-space: pre-wrap; }
     .desc > :first-child { margin-top: 0; }
     .desc img { max-width: 100%; height: auto; border-radius: 8px; }
     .desc a { color: var(--wlo-primary); }
@@ -77,7 +83,7 @@ import { ShareMenuComponent } from './share-menu.component';
       grid-template-rows: auto auto;
       gap: 8px 14px;
       padding: 14px 16px;
-      background: #fff;
+      background: var(--wlo-surface, #fff);
       border: 1px solid var(--wlo-border);
       border-radius: 10px;
       transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease;
@@ -126,12 +132,6 @@ import { ShareMenuComponent } from './share-menu.component';
       margin-top: 3px;
       display: flex; gap: 6px; align-items: center;
     }
-    .attach .info .folder-tag {
-      display: inline-block;
-      background: #e6f4ea; color: #0f5b24;
-      padding: 1px 7px; border-radius: 999px;
-      font-size: .7rem; font-weight: 600;
-    }
     .attach .actions {
       grid-column: 2;
       display: flex; gap: 6px; flex-wrap: wrap;
@@ -158,23 +158,6 @@ import { ShareMenuComponent } from './share-menu.component';
       margin-top: 16px;
       padding-top: 16px;
       border-top: 1px solid var(--wlo-border);
-    }
-    .folder-row {
-      display: flex; justify-content: space-between; align-items: center;
-      flex-wrap: wrap; gap: 10px;
-      background: #e6f4ea;
-      border: 1px solid #b5dcc1;
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-size: .92rem;
-      color: #0f5b24;
-    }
-    .folder-link {
-      color: #0f5b24; text-decoration: underline; font-weight: 600;
-      &:hover { color: #052b10; }
-    }
-    .folder-actions {
-      display: inline-flex; gap: 12px; align-items: center; flex-wrap: wrap;
     }
     .link-danger {
       background: none; border: none; padding: 0; cursor: pointer;
@@ -215,24 +198,25 @@ import { ShareMenuComponent } from './share-menu.component';
       display: inline-flex; align-items: center; cursor: pointer;
       padding: 6px 12px; border-radius: 16px;
       border: 1px solid var(--wlo-border, #d8dde6);
-      background: #fff; font-size: .85rem; user-select: none;
+      background: var(--wlo-surface, #fff); font-size: .85rem; user-select: none;
+      color: var(--wlo-text);
+      transition: background .12s ease, border-color .12s ease;
       &:hover { border-color: var(--wlo-primary, #1d3a6e); }
       &.on {
-        background: var(--wlo-primary, #1d3a6e);
-        border-color: var(--wlo-primary, #1d3a6e); color: #fff;
+        background: var(--wlo-primary-soft, #e6edf7);                   /* helles Blau für gute Lesbarkeit */
+        border: 2px solid var(--wlo-primary, #1d3a6e);
+        padding: 5px 11px;                     /* 1px less padding, da Border 2px */
+        color: var(--wlo-primary, #1d3a6e);    /* dunkelblauer Text statt weiß auf dunkel */
+        font-weight: 600;
+      }
+      &.on::before {
+        content: '✓ ';                         /* Häkchen als zusätzlicher Status-Marker */
+        margin-right: 2px;
       }
     }
-    .folder-create {
-      background: var(--wlo-primary); color: #fff; border: none;
-      padding: 10px 18px; border-radius: 8px; cursor: pointer;
-      font-weight: 600; font: inherit; font-size: .92rem;
-      &:hover:not(:disabled) { background: var(--wlo-primary-600); }
-      &:disabled { opacity: .5; cursor: not-allowed; }
-    }
-    .folder-upload { margin-top: 10px; }
     .folder-upload-btn {
       display: inline-flex; align-items: center; gap: 6px;
-      background: #fff; color: var(--wlo-primary);
+      background: var(--wlo-surface, #fff); color: var(--wlo-primary);
       border: 1px dashed var(--wlo-primary); border-radius: 8px;
       padding: 9px 16px; cursor: pointer; font-weight: 600;
       font-size: .9rem;
@@ -253,7 +237,7 @@ import { ShareMenuComponent } from './share-menu.component';
     .quick-edit select {
       width: 100%; padding: 8px 10px;
       border: 1px solid var(--wlo-border); border-radius: 8px;
-      background: #fff; box-sizing: border-box; font: inherit;
+      background: var(--wlo-surface, #fff); box-sizing: border-box; font: inherit;
       &:focus { outline: none; border-color: var(--wlo-primary); }
       &:disabled { opacity: .6; cursor: wait; }
     }
@@ -274,14 +258,49 @@ import { ShareMenuComponent } from './share-menu.component';
     /* === Sidebar === */
     .sidebar { display: flex; flex-direction: column; gap: 16px; align-self: start; }
     @media (min-width: 900px) { .sidebar { position: sticky; top: 88px; } }
-    .side-card { background: #fff; border: 1px solid var(--wlo-border); border-radius: 12px;
+    .side-card { background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 12px;
                  padding: 20px; }
     .side-card h3 { margin: 0 0 12px; font-size: .95rem;
                     color: var(--wlo-muted); text-transform: uppercase; letter-spacing: .06em; }
 
-    .rating-display { display: flex; align-items: baseline; gap: 6px; margin-bottom: 10px; }
-    .rating-display strong { font-size: 2rem; color: var(--wlo-primary); font-weight: 700; }
-    .rating-display span { color: var(--wlo-muted); font-size: .88rem; }
+    /* (alte rating-display-Klasse durch rating-avg ersetzt) */
+    /* Durchschnitt — nur lesen, mit Sternen visualisiert */
+    .rating-avg {
+      display: flex; flex-direction: column; gap: 2px;
+      margin-bottom: 14px;
+    }
+    .rating-avg.empty .stars-readonly .star { color: #e2e7ef; }
+    .stars-readonly { display: flex; gap: 2px; font-size: 1.4rem;
+                      line-height: 1; user-select: none; }
+    .stars-readonly .star {
+      color: #d1d9e6;  /* leer: Hellgrau */
+      position: relative; display: inline-block;
+    }
+    .stars-readonly .star.full { color: var(--wlo-accent, #f5b600); }
+    /* halber Stern: Stern in Akzentfarbe, aber rechte Hälfte clipt */
+    .stars-readonly .star.half {
+      background: linear-gradient(90deg,
+        var(--wlo-accent, #f5b600) 50%, #d1d9e6 50%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+    }
+    .rating-numbers { font-size: .9rem; color: var(--wlo-text);
+                      strong { color: var(--wlo-primary); font-size: 1.05rem; }
+                      small { color: var(--wlo-muted); } }
+
+    /* Eigene Bewertung */
+    .own-rating-label {
+      font-size: .85rem; color: var(--wlo-muted); margin-bottom: 4px;
+      strong { color: var(--wlo-accent, #f5b600); }
+    }
+    .rating-clear {
+      background: none; border: none; padding: 4px 0; cursor: pointer;
+      color: var(--wlo-muted); font: inherit; font-size: .8rem;
+      text-decoration: underline;
+      &:hover { color: var(--wlo-text); }
+    }
     .stars-input { display: flex; gap: 4px; font-size: 1.8rem; cursor: pointer; user-select: none; }
     .stars-input .star { color: #d1d9e6; transition: color .1s; }
     .stars-input .star.on, .stars-input:hover .star:hover,
@@ -291,13 +310,18 @@ import { ShareMenuComponent } from './share-menu.component';
     .stars-input:hover .star:hover ~ .star { color: transparent; }
     /* simpler: only highlight the selected count */
     .stars-input .star.on { color: var(--wlo-accent); }
+    .rate-status { margin-top: 6px; font-size: .85rem; font-weight: 600; }
+    .rate-status.ok { color: #137333; }
+    .rate-status.err { color: #c5221f; }
 
     .action-btn {
       display: flex; align-items: center; justify-content: center; gap: 6px;
-      width: 100%; background: var(--wlo-bg); border: 1px solid var(--wlo-border);
+      width: 100%; box-sizing: border-box;       /* sonst ragt <a class=action-btn> raus */
+      background: var(--wlo-bg); border: 1px solid var(--wlo-border);
       padding: 10px 14px; border-radius: 8px; cursor: pointer; font: inherit;
       font-weight: 600; color: var(--wlo-text); font-size: .92rem;
-      &:hover { background: #e6edf7; border-color: var(--wlo-primary); color: var(--wlo-primary); }
+      text-decoration: none;   /* falls als <a> verwendet */
+      &:hover { background: var(--wlo-primary-soft, #e6edf7); border-color: var(--wlo-primary); color: var(--wlo-primary); }
       &.on {
         background: var(--wlo-primary);
         border-color: var(--wlo-primary);
@@ -310,6 +334,9 @@ import { ShareMenuComponent } from './share-menu.component';
         &:hover { background: #fde7e7; border-color: #c5221f; color: #c5221f; }
       }
       &[disabled] { opacity: .55; cursor: not-allowed; }
+      .act-ico { width: 14px; height: 14px; flex-shrink: 0;
+                  stroke: currentColor; stroke-width: 2;
+                  stroke-linecap: round; stroke-linejoin: round; fill: none; }
     }
     .avatar-row { display: flex; gap: -4px; margin-bottom: 10px; }
     .mini-avatar {
@@ -336,11 +363,33 @@ import { ShareMenuComponent } from './share-menu.component';
     .comment { padding: 14px 0; border-top: 1px solid var(--wlo-border); display: flex; gap: 12px; }
     .comment.reply { margin-left: 48px; border-top: none; border-left: 2px solid var(--wlo-border);
                      padding-left: 12px; background: var(--wlo-bg); border-radius: 6px; margin-top: 4px; }
-    .reply-hint { background: #e6edf7; color: var(--wlo-primary); padding: 1px 8px; border-radius: 999px;
+    .reply-hint { background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary); padding: 1px 8px; border-radius: 999px;
                   font-size: .72rem; font-weight: 600; margin-left: 8px; }
+    .embed-toggle, .embed-copy {
+      background: none; border: 1px solid var(--wlo-border);
+      color: var(--wlo-text); padding: 6px 12px; border-radius: 6px;
+      cursor: pointer; font-size: .82rem; font-weight: 600;
+      margin-top: 12px;
+      /* Schließt rechts mit dem E-Mail-Button ab — die ▾-Schaltfläche
+         in der share-menu-Zeile ist 38px breit, der gap dazwischen 6px. */
+      width: calc(100% - 44px);
+      box-sizing: border-box;
+      &:hover { border-color: var(--wlo-primary); color: var(--wlo-primary); }
+    }
+    .embed-snippet {
+      background: var(--wlo-bg); padding: 10px 12px; border-radius: 6px;
+      font-size: .75rem; overflow-x: auto; margin: 10px 0 6px;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .embed-hint { font-size: .78rem; color: var(--wlo-muted); margin: 6px 0 0; }
+    .hidden-badge { background: var(--wlo-accent-soft, #fff8db); color: #8a5a00;
+                    padding: 6px 10px; border-radius: 6px; font-size: .8rem;
+                    font-weight: 600; margin: 8px 0 0; text-align: center; }
     .reply-btn { background: none; border: none; color: var(--wlo-primary); cursor: pointer;
                  font-weight: 600; font-size: .82rem; padding: 4px 0; margin-top: 6px;
-                 &:hover { text-decoration: underline; } }
+                 &:hover { text-decoration: underline; }
+                 &.danger { color: var(--wlo-danger, #c5221f); margin-left: 12px; }
+                 &:disabled { opacity: .5; cursor: progress; } }
     .reply-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px;
                   align-items: flex-end; }
     .reply-form textarea { min-height: 60px; }
@@ -360,7 +409,7 @@ import { ShareMenuComponent } from './share-menu.component';
     .comment .when { color: var(--wlo-muted); font-size: .78rem; margin-left: 8px; }
     .comment .text { margin-top: 4px; color: var(--wlo-text); white-space: pre-wrap; word-wrap: break-word; }
 
-    .notice { background: #fff8db; border: 1px solid #f5b600; border-radius: 8px;
+    .notice { background: var(--wlo-accent-soft, #fff8db); border: 1px solid #f5b600; border-radius: 8px;
               padding: 10px 14px; font-size: .88rem; color: #5c4a00; }
     .error { color: #b00020; font-size: .88rem; margin-top: 6px; }
     .loading-skel { color: var(--wlo-muted); padding: 40px; text-align: center; }
@@ -373,7 +422,7 @@ import { ShareMenuComponent } from './share-menu.component';
       display: flex; align-items: center; justify-content: center; padding: 20px;
     }
     .edit-box {
-      background: #fff; border-radius: 12px; padding: 24px 28px;
+      background: var(--wlo-surface, #fff); border-radius: 12px; padding: 24px 28px;
       width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto;
       box-shadow: 0 20px 60px rgba(0,0,0,.3);
     }
@@ -407,6 +456,35 @@ import { ShareMenuComponent } from './share-menu.component';
       background: #fff0f0; border: 1px solid #e1a5ac; padding: 8px 12px;
       border-radius: 6px;
     }
+
+    .edit-box .upload-row {
+      margin-top: 14px; padding-top: 14px;
+      border-top: 1px solid var(--wlo-border);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .edit-box .upload-row .meta {
+      color: var(--wlo-muted); font-size: .85rem;
+    }
+    .edit-box .preview-thumb {
+      display: inline-flex; align-items: center; gap: 10px;
+      img {
+        width: 120px; height: 76px; object-fit: cover;
+        border: 1px solid var(--wlo-border); border-radius: 6px; background: #f4f6fa;
+      }
+    }
+    .edit-box .upload-btn {
+      display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+      background: var(--wlo-surface, #fff); color: var(--wlo-primary);
+      border: 1px dashed var(--wlo-primary); border-radius: 8px;
+      padding: 9px 16px; cursor: pointer; font-weight: 600; font-size: .9rem;
+      transition: all .12s ease;
+      &:hover { background: var(--wlo-primary); color: #fff; border-style: solid; }
+    }
+    .edit-box .error {
+      color: #b00020; font-size: .82rem;
+      background: #fff0f0; border: 1px solid #e1a5ac; padding: 6px 10px;
+      border-radius: 6px;
+    }
   `],
   template: `
     @if (reportOpen && idea(); as i) {
@@ -419,6 +497,21 @@ import { ShareMenuComponent } from './share-menu.component';
           @if (reportSent) {
             <p style="color: #137333; font-weight: 600; padding: 16px 0;">
               ✓ Meldung gesendet — danke! Das Mod-Team prüft sie zeitnah.
+            </p>
+          } @else if (reportStatus()?.reported && reportStatus()?.status === 'open') {
+            <p style="background: var(--wlo-accent-soft, #fff8db); color: #8a5a00;
+                      padding: 10px 14px; border-radius: 8px; margin-top: 0;">
+              ⚠ Du hast diese Idee bereits am
+              {{ formatHistoryDate(reportStatus()!.created_at!) }} gemeldet.
+              Das Mod-Team prüft sie noch.
+            </p>
+          } @else if (reportStatus()?.reported && reportStatus()?.status === 'resolved') {
+            <p style="background: #e6f6ec; color: #137333; padding: 10px 14px;
+                      border-radius: 8px; margin-top: 0;">
+              ✓ Deine frühere Meldung wurde bearbeitet. Du kannst bei Bedarf erneut melden.
+            </p>
+            <p style="color: var(--wlo-muted); margin-top: 8px;">
+              Was stimmt mit „{{ i.title }}" nicht?
             </p>
           } @else {
             <p style="color: var(--wlo-muted); margin-top: 0;">
@@ -482,6 +575,47 @@ import { ShareMenuComponent } from './share-menu.component';
           <input [(ngModel)]="edit.project_url" type="url" placeholder="https://…" />
           <label>Schlagwörter (Komma-getrennt, ohne phase:/event:-Präfix)</label>
           <input [(ngModel)]="edit.keywordsCsv" />
+
+          <!-- Vorschaubild ersetzen ───────────────────────────────────── -->
+          <div class="upload-row">
+            <label>Vorschaubild</label>
+            @if (i.preview_url) {
+              <div class="preview-thumb">
+                <img [src]="previewSrc(i.preview_url)" alt="Aktuelle Vorschau" />
+                <span class="meta">aktuell</span>
+              </div>
+            }
+            <label class="upload-btn">
+              <input type="file" accept="image/*"
+                     (change)="onPreviewPick($event, i.id)" hidden />
+              {{ previewUploadBusy ? previewUploadStatus : '🖼 Vorschaubild ' + (i.preview_url ? 'ersetzen' : 'hochladen') }}
+            </label>
+            @if (previewUploadError) { <div class="error">{{ previewUploadError }}</div> }
+          </div>
+
+          <!-- Hauptdatei ersetzen — nur sinnvoll für kind=io ───────────── -->
+          <div class="upload-row">
+            <label>Hauptdatei</label>
+            @if (i.attachments?.length) {
+              <div class="meta">
+                Aktuell: {{ i.attachments![0]!.name || '–' }}
+                @if (i.attachments![0]!.size) {
+                  · {{ formatSize(i.attachments![0]!.size!) }}
+                }
+              </div>
+            }
+            <label class="upload-btn">
+              <input type="file"
+                     (change)="onContentPick($event, i.id)" hidden />
+              {{ contentUploadBusy ? contentUploadStatus : '📎 Hauptdatei ersetzen' }}
+            </label>
+            @if (contentUploadError) { <div class="error">{{ contentUploadError }}</div> }
+            <p class="hint" style="margin-top:6px; font-size:.8rem">
+              Lädt eine neue Version. Die alte bleibt in der Versionshistorie. Für
+              zusätzliche Anhänge unten den „+ Datei als Anhang"-Button benutzen.
+            </p>
+          </div>
+
           @if (editError) { <div class="edit-error">{{ editError }}</div> }
           <div class="edit-actions">
             <button class="action-btn" (click)="editing=false">Abbrechen</button>
@@ -510,7 +644,13 @@ import { ShareMenuComponent } from './share-menu.component';
           </nav>
           <h1>{{ i.title }}</h1>
           <div class="header-meta">
-            @if (i.author) { <span>👤 {{ i.author }}</span> }
+            @if (ownerLabel(i); as label) {
+              @if (i.owner_username && ownerProfileUrl(i)) {
+                <a class="author-link" [href]="ownerProfileUrl(i)">👤 {{ label }}</a>
+              } @else {
+                <span>👤 {{ label }}</span>
+              }
+            }
             @if (i.modified_at) { <span>📅 geändert {{ formatDate(i.modified_at) }}</span> }
             @if (i.created_at && i.created_at !== i.modified_at) {
               <span>🆕 erstellt {{ formatDate(i.created_at) }}</span>
@@ -541,14 +681,15 @@ import { ShareMenuComponent } from './share-menu.component';
                 einreichen" ein.
               </p>
             }
-            @if (i.keywords?.length) {
+            @if (visibleKeywords(i).length) {
               <div class="kws">
-                @for (k of i.keywords; track k) { <span class="kw">#{{ k }}</span> }
+                @for (k of visibleKeywords(i); track k) { <span class="kw">{{ k }}</span> }
               </div>
             }
           </section>
 
-          @if (i.attachments?.length || i.attachment_folder || api.hasCredentials()) {
+
+          @if (i.attachments?.length || api.hasCredentials()) {
             <section class="card attach-card">
               <h2>Dokumente
                 @if (i.attachments?.length) {
@@ -578,7 +719,6 @@ import { ShareMenuComponent } from './share-menu.component';
                           <span class="meta">
                             <span>{{ mimeLabel(a) }}</span>
                             @if (a.size) { <span>· {{ formatSize(a.size) }}</span> }
-                            @if (a.from_folder) { <span class="folder-tag">📁 Sammlung</span> }
                           </span>
                         }
                       </div>
@@ -608,47 +748,20 @@ import { ShareMenuComponent } from './share-menu.component';
                 </div>
               }
 
-              <!-- Anhänge-Sammlung-Bereich -->
-              <div class="attach-folder">
-                @if (i.attachment_folder) {
-                  <div class="folder-row">
-                    <span>📁 <strong>Anhänge-Sammlung</strong>: {{ i.attachment_folder.name }}</span>
-                    <span class="folder-actions">
-                      <a [href]="folderRepoUrl(i.attachment_folder.id)" target="_blank" rel="noopener" class="folder-link">
-                        Im Repo öffnen ↗
-                      </a>
-                      @if (canEdit(i)) {
-                        <button type="button" class="link-danger"
-                                (click)="deleteFolder(i)"
-                                [disabled]="folderDeleteBusy">
-                          {{ folderDeleteBusy ? 'Lösche…' : '🗑 Sammlung löschen' }}
-                        </button>
-                      }
-                    </span>
-                  </div>
-                  @if (api.hasCredentials()) {
-                    <div class="folder-upload">
-                      <label class="folder-upload-btn">
-                        <input type="file" (change)="onAttachmentPick($event, i.id)" hidden />
-                        ➕ {{ folderUploadBusy ? folderUploadStatus : 'Datei in Anhänge-Sammlung hochladen' }}
-                      </label>
-                      @if (folderUploadError) { <div class="error">{{ folderUploadError }}</div> }
-                    </div>
-                  }
-                } @else if (api.hasCredentials()) {
-                  <button class="folder-create"
-                          (click)="createAttachmentFolder(i.id)"
-                          [disabled]="folderBusy">
-                    📎 {{ folderBusy ? 'Wird angelegt…' : 'Anhänge-Sammlung anlegen' }}
-                  </button>
-                  @if (folderError) { <div class="error">{{ folderError }}</div> }
+              <!-- Direkter Anhang-Upload (Serienobjekt-Pattern) -->
+              @if (api.hasCredentials() && canEdit(i)) {
+                <div class="attach-folder">
+                  <label class="folder-upload-btn">
+                    <input type="file" (change)="onAttachmentPick($event, i.id)" hidden />
+                    ➕ {{ folderUploadBusy ? folderUploadStatus : 'Datei als Anhang hochladen' }}
+                  </label>
+                  @if (folderUploadError) { <div class="error">{{ folderUploadError }}</div> }
                   <p class="hint">
-                    Lege eine Geschwister-Sammlung neben dieser Idee an, um weitere
-                    Materialien (PDFs, Folien, Mockups) zu sammeln. Der Name wird
-                    automatisch aus dem Idee-Titel abgeleitet.
+                    Anhänge werden direkt unter der Idee gespeichert (Serienobjekt).
+                    Beim Löschen der Idee werden sie automatisch mit entfernt.
                   </p>
-                }
-              </div>
+                </div>
+              }
             </section>
           }
 
@@ -682,23 +795,32 @@ import { ShareMenuComponent } from './share-menu.component';
             }
 
             @for (c of threadedComments(i.comments || []); track c.ref.id) {
-              <div class="comment" [class.reply]="c.replyTo">
+              <div class="comment" [class.reply]="isReply(c)">
                 <div class="avatar">{{ initials(c) }}</div>
                 <div class="body">
                   <span class="who">{{ formatUser(c) }}</span>
                   <span class="when">{{ formatTs(c.created) }}</span>
-                  @if (c.replyTo) { <span class="reply-hint">↩ Antwort</span> }
-                  <div class="text">{{ c.comment }}</div>
-                  @if (api.hasCredentials() && !c.replyTo) {
+                  @if (isReply(c)) { <span class="reply-hint">↩ Antwort</span> }
+                  <div class="text">{{ c.comment || '(leer)' }}</div>
+                  @if (api.hasCredentials()) {
                     <button class="reply-btn" (click)="startReply(c.ref.id)">
-                      {{ replyingTo === c.ref.id ? 'Abbrechen' : 'Antworten' }}
+                      {{ replyingTo === c.ref.id ? 'Abbrechen' : '↩ Antworten' }}
                     </button>
+                    @if (canDeleteComment(c)) {
+                      <button class="reply-btn danger" (click)="deleteComment(c, i.id)"
+                              [disabled]="deletingCommentId === c.ref.id">
+                        {{ deletingCommentId === c.ref.id ? 'Lösche…' : '🗑 Löschen' }}
+                      </button>
+                    }
                   }
                   @if (replyingTo === c.ref.id) {
                     <div class="reply-form">
                       <textarea [(ngModel)]="replyText"
-                                placeholder="Antwort schreiben…"></textarea>
-                      <button class="submit-btn" (click)="submitReply(i.id, c.ref.id)"
+                                placeholder="Antwort an {{ formatUser(c) }} schreiben…"></textarea>
+                      @if (commentError) {
+                        <span class="error">{{ commentError }}</span>
+                      }
+                      <button class="submit-btn" (click)="submitReply(i.id, replyTargetId(c))"
                               [disabled]="!replyText.trim() || commentBusy">
                         {{ commentBusy ? 'Sendet…' : 'Antwort senden' }}
                       </button>
@@ -720,19 +842,61 @@ import { ShareMenuComponent } from './share-menu.component';
         <aside class="sidebar">
           <div class="side-card">
             <h3>Bewertung</h3>
-            <div class="rating-display">
-              <strong>{{ i.rating_avg | number: '1.1-1' }}</strong>
-              <span>/ 5 · {{ i.rating_count }} Stimmen</span>
-            </div>
+
+            <!-- Durchschnitt der Community: nur lesen, mit Sternen visualisiert -->
+            @if (i.rating_count > 0) {
+              <div class="rating-avg">
+                <div class="stars-readonly" [attr.aria-label]="i.rating_avg + ' von 5'">
+                  @for (n of [1,2,3,4,5]; track n) {
+                    <span class="star"
+                          [class.full]="i.rating_avg >= n"
+                          [class.half]="i.rating_avg >= n - 0.5 && i.rating_avg < n">★</span>
+                  }
+                </div>
+                <div class="rating-numbers">
+                  <strong>{{ i.rating_avg | number: '1.1-1' }}</strong>
+                  <span>/ 5 · {{ i.rating_count }} {{ i.rating_count === 1 ? 'Stimme' : 'Stimmen' }}</span>
+                </div>
+              </div>
+            } @else {
+              <div class="rating-avg empty">
+                <div class="stars-readonly">
+                  <span class="star">★</span><span class="star">★</span>
+                  <span class="star">★</span><span class="star">★</span><span class="star">★</span>
+                </div>
+                <div class="rating-numbers">
+                  <small>Noch keine Bewertungen</small>
+                </div>
+              </div>
+            }
+
+            <!-- Eigene Bewertung: klickbar -->
             @if (!api.hasCredentials()) {
               <div class="notice">Zum Bewerten anmelden.</div>
             } @else {
+              <div class="own-rating-label">
+                @if (userRating > 0) {
+                  Deine Bewertung: <strong>{{ userRating }} ★</strong>
+                } @else {
+                  Deine Bewertung
+                }
+              </div>
               <div class="stars-input">
                 @for (n of [1,2,3,4,5]; track n) {
                   <span class="star" [class.on]="n <= (userRating || 0)"
                         (click)="setRating(i.id, n)" [attr.aria-label]="n + ' Sterne'">★</span>
                 }
               </div>
+              @if (userRating > 0) {
+                <button class="rating-clear" (click)="setRating(i.id, 0)"
+                        title="Eigene Bewertung zurücksetzen">
+                  Bewertung zurücksetzen
+                </button>
+              }
+              @if (rateStatus) {
+                <div class="rate-status" [class.ok]="rateStatusOk"
+                     [class.err]="!rateStatusOk">{{ rateStatus }}</div>
+              }
               @if (rateError) { <div class="error">{{ rateError }}</div> }
             }
           </div>
@@ -741,9 +905,21 @@ import { ShareMenuComponent } from './share-menu.component';
             <h3>Teilen</h3>
             <ideendb-share-menu
               [url]="shareUrl"
-              [title]="i.title"
-              [repoUrl]="repoUrl(i)">
+              [title]="i.title">
             </ideendb-share-menu>
+            <button class="embed-toggle" type="button" (click)="toggleEmbed()">
+              {{ embedOpen ? 'Embed-Code ausblenden' : embedLabel }}
+            </button>
+            @if (embedOpen) {
+              <pre class="embed-snippet">{{ embedSnippet }}</pre>
+              <button class="embed-copy" type="button" (click)="copyEmbed()">
+                {{ embedCopied ? '✓ Kopiert' : 'Code kopieren' }}
+              </button>
+              <p class="embed-hint">
+                Setze das Snippet auf einer beliebigen Webseite ein —
+                die App lädt sich als Web-Komponente von dieser Instanz.
+              </p>
+            }
           </div>
 
           @if (api.hasCredentials() && (canEditIdea(i) || api.isModerator())) {
@@ -800,11 +976,28 @@ import { ShareMenuComponent } from './share-menu.component';
               @if (api.hasCredentials()) {
                 <button class="action-btn" [class.on]="x.interest.mine"
                         (click)="toggleInterest()">
-                  {{ x.interest.mine ? '✓ Ich mache mit' : '🤝 Ich will mitmachen' }}
+                  @if (x.interest.mine) {
+                    <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Ich mache mit
+                  } @else {
+                    <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                      <circle cx="9" cy="7" r="4"/>
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    Ich will mitmachen
+                  }
                 </button>
                 <button class="action-btn" [class.on]="x.follow.mine"
                         (click)="toggleFollow()">
-                  {{ x.follow.mine ? '🔔 Ich folge' : '🔔 Folgen' }}
+                  <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                  </svg>
+                  {{ x.follow.mine ? 'Ich folge' : 'Folgen' }}
                   @if (x.follow.count) { <small style="opacity:.7; margin-left:4px;">({{ x.follow.count }})</small> }
                 </button>
               } @else {
@@ -818,21 +1011,83 @@ import { ShareMenuComponent } from './share-menu.component';
           <div class="side-card">
             <h3>Aktionen</h3>
             @if (canEdit(i)) {
-              <button class="action-btn" (click)="startEdit(i)">✎ Bearbeiten</button>
-            }
-            @if (api.hasCredentials()) {
-              <button class="action-btn" (click)="duplicateIdea(i)"
-                      [disabled]="duplicateBusy">
-                {{ duplicateBusy ? 'Dupliziere…' : '⎘ Duplizieren' }}
+              <button class="action-btn" (click)="startEdit(i)">
+                <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 20h9"/>
+                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>
+                </svg>
+                Bearbeiten
               </button>
             }
             @if (canDelete(i)) {
               <button class="action-btn danger" (click)="deleteIdea(i)"
                       [disabled]="deleteBusy">
-                {{ deleteBusy ? 'Lösche…' : '🗑 Löschen' }}
+                <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  <line x1="10" y1="11" x2="10" y2="17"/>
+                  <line x1="14" y1="11" x2="14" y2="17"/>
+                </svg>
+                {{ deleteBusy ? 'Lösche…' : 'Löschen' }}
               </button>
             }
-            <button class="action-btn" (click)="reportProblem(i)">⚠ Melden</button>
+            @if (api.hasCredentials() && (canEditIdea(i) || api.isModerator())) {
+              <button class="action-btn" (click)="refreshFromRepo(i)"
+                      [disabled]="refreshBusy"
+                      title="Lädt Titel, Beschreibung, Vorschaubild und Metadaten frisch aus edu-sharing">
+                <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <polyline points="1 20 1 14 7 14"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                {{ refreshBusy ? 'Aktualisiere…' : 'Aus Repo aktualisieren' }}
+              </button>
+            }
+            @if (api.isModerator()) {
+              @if (i.hidden) {
+                <button class="action-btn" (click)="unhideIdea(i)"
+                        [disabled]="hideBusy"
+                        title="Idee wieder öffentlich anzeigen">
+                  <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                  {{ hideBusy ? '…' : 'Wieder anzeigen' }}
+                </button>
+              } @else {
+                <button class="action-btn" (click)="hideIdea(i)"
+                        [disabled]="hideBusy"
+                        title="Soft-Delete: Idee bleibt in der DB, aber unsichtbar für Besucher">
+                  <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                  {{ hideBusy ? '…' : 'Verstecken' }}
+                </button>
+              }
+            }
+            <a class="action-btn" [href]="repoUrl(i)" target="_blank" rel="noopener">
+              <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15 3 21 3 21 9"/>
+                <line x1="10" y1="14" x2="21" y2="3"/>
+              </svg>
+              Im edu-sharing öffnen
+            </a>
+            <button class="action-btn" (click)="reportProblem(i)">
+              <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              Melden
+            </button>
+            @if (i.hidden && api.isModerator()) {
+              <p class="hidden-badge">
+                Versteckt
+                @if (i.hidden_reason) { · {{ i.hidden_reason }} }
+              </p>
+            }
           </div>
         </aside>
       </div>
@@ -856,8 +1111,14 @@ export class IdeaDetailComponent implements OnChanges {
   commentError = '';
   replyingTo: string | null = null;
   replyText = '';
+  deletingCommentId: string | null = null;
+
+  reportStatus = signal<{ reported: boolean; status?: 'open' | 'resolved';
+                          created_at?: string } | null>(null);
   userRating = 0;
   rateError = '';
+  rateStatus = '';
+  rateStatusOk = true;
 
   interactions = signal<{
     interest: { count: number; users: { name: string; user_key: string }[]; mine: boolean };
@@ -868,10 +1129,79 @@ export class IdeaDetailComponent implements OnChanges {
   editing = false;
   editBusy = false;
   editError = '';
+  previewUploadBusy = false;
+  previewUploadStatus = '';
+  previewUploadError = '';
+  /** Client-seitiger Cache-Bust nach Vorschaubild-Upload — edu-sharing's
+   *  `dontcache=`-Param ändert sich erst, wenn der Server das Bild neu
+   *  generiert hat (kann 1-2s dauern). Wir hängen einen eigenen
+   *  Timestamp an, damit der Browser die URL als neu erkennt. */
+  previewCacheBust = '';
+  contentUploadBusy = false;
+  contentUploadStatus = '';
+  contentUploadError = '';
 
-  // Attachment folder state
-  folderBusy = false;
-  folderError = '';
+  /** Vorschau-URL um den client-eigenen Cache-Bust ergänzen, falls einer
+   *  gesetzt ist (nach Upload). Sonst URL unverändert lassen. */
+  previewSrc(url: string): string {
+    if (!url || !this.previewCacheBust) return url;
+    return url + (url.includes('?') ? '&' : '?') + '_cb=' + this.previewCacheBust;
+  }
+
+  onPreviewPick(ev: Event, ideaId: string) {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    this.previewUploadBusy = true;
+    this.previewUploadStatus = `Lädt ${file.name} hoch…`;
+    this.previewUploadError = '';
+    this.api.uploadIdeaPreview(ideaId, file).subscribe({
+      next: () => {
+        this.previewUploadBusy = false;
+        this.previewUploadStatus = '';
+        input.value = '';
+        // ES generiert das Vorschaubild asynchron — etwas warten, dann
+        // reloaden + Cache-Bust setzen, damit der Browser nicht das alte
+        // Bild aus seinem HTTP-Cache zieht.
+        this.previewCacheBust = `${Date.now()}`;
+        setTimeout(() => {
+          this.load({ keepCurrent: true });
+          this.previewCacheBust = `${Date.now()}`;   // erneut, falls URL gleich blieb
+        }, 1500);
+      },
+      error: (e) => {
+        this.previewUploadBusy = false;
+        this.previewUploadStatus = '';
+        this.previewUploadError = e?.error?.detail || `Fehler (HTTP ${e?.status})`;
+        input.value = '';
+      },
+    });
+  }
+
+  onContentPick(ev: Event, ideaId: string) {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    this.contentUploadBusy = true;
+    this.contentUploadStatus = `Lädt ${file.name} (${this.formatSize(file.size)}) hoch…`;
+    this.contentUploadError = '';
+    this.api.uploadIdeaContent(ideaId, file).subscribe({
+      next: () => {
+        this.contentUploadBusy = false;
+        this.contentUploadStatus = '';
+        input.value = '';
+        setTimeout(() => this.load({ keepCurrent: true }), 600);
+      },
+      error: (e) => {
+        this.contentUploadBusy = false;
+        this.contentUploadStatus = '';
+        this.contentUploadError = e?.error?.detail || `Fehler (HTTP ${e?.status})`;
+        input.value = '';
+      },
+    });
+  }
+
+  // Attachment upload state (Serienobjekt-Pattern, Child-IO direkt unter Idee)
   folderUploadBusy = false;
   folderUploadStatus = '';
   folderUploadError = '';
@@ -901,18 +1231,15 @@ export class IdeaDetailComponent implements OnChanges {
       this.userRating = 0;
     }
     this.api.getIdea(this.ideaId).subscribe({
-      next: (i) => {
-        // Optimistische Felder nicht überschreiben: wenn der Cache noch keine
-        // attachment_folder kennt, behalten wir die lokal bekannten Werte.
-        const prev = this.idea();
-        const merged: Idea = {
-          ...i,
-          attachment_folder: i.attachment_folder ?? prev?.attachment_folder ?? null,
-          attachment_folder_id: i.attachment_folder_id ?? prev?.attachment_folder_id ?? null,
-        };
-        this.idea.set(merged);
+      next: (i: any) => {
+        this.idea.set(i);
         this.quickPhase = i.phase || '';
         this.quickEvent = (i.events && i.events[0]) || '';
+        // Eigenes Rating direkt aus den Live-Metadaten übernehmen, damit die
+        // Sterne nach einem Reload korrekt vorausgewählt sind.
+        if (typeof i.my_rating === 'number' && i.my_rating > 0) {
+          this.userRating = i.my_rating;
+        }
       },
       error: () => {
         // Fresh idea, noch nicht im Cache — optimistische Anzeige beibehalten.
@@ -922,6 +1249,27 @@ export class IdeaDetailComponent implements OnChanges {
     // Taxonomien lazy laden, falls noch nicht vorhanden (für Quick-Edit-Dropdowns)
     if (!this.phases.length) this.api.listPhases().subscribe((p) => (this.phases = p));
     if (!this.events.length)  this.api.listEvents().subscribe((e) => (this.events = e));
+
+    // Eigenen Report-Status laden (für „bereits gemeldet"-Hinweis im Melden-Dialog)
+    if (this.api.hasCredentials()) {
+      this.api.ideaReportStatus(this.ideaId).subscribe({
+        next: (r) => this.reportStatus.set(r),
+        error: () => this.reportStatus.set(null),
+      });
+    } else {
+      this.reportStatus.set(null);
+    }
+  }
+
+  formatHistoryDate(iso: string): string {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('de-DE', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      });
+    } catch { return iso; }
   }
 
   /** Liefert die Phase-Taxonomie-Einträge, die der aktuelle Caller setzen darf.
@@ -951,13 +1299,38 @@ export class IdeaDetailComponent implements OnChanges {
     return this.canEditIdea(i) || this.api.isModerator();
   }
 
-  // ===== Idee / Anhänge löschen / duplizieren ===========================
+  // ===== Idee / Anhänge löschen ===========================
   deleteBusy = false;
-  duplicateBusy = false;
-  folderDeleteBusy = false;
   attachmentDeletingId: string | null = null;
   renamingAttachmentId: string | null = null;
   renameAttachmentValue = '';
+
+  /** Anzeige-Label für den Eigentümer: bevorzugt der Real-Name aus dem
+   *  edu-sharing-Profil (firstName + lastName, wie in den Kommentaren),
+   *  fallback der Freitext-Autor aus dem Submit-Formular, dann der
+   *  Login-Username, sonst leer. Login wird NICHT zusätzlich angezeigt
+   *  (konsistent mit Kommentaren). */
+  ownerLabel(i: any): string {
+    return (i.owner_display_name || i.author || i.owner_username || '').trim();
+  }
+
+  /** Erzeugt einen URL zur öffentlichen Profilseite des Owners, oder
+   *  leeren String, wenn kein technischer Username vorhanden ist. */
+  ownerProfileUrl(i: any): string {
+    const uname = i?.owner_username;
+    if (!uname) return '';
+    const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+    return `${base}?view=user&u=${encodeURIComponent(uname)}`;
+  }
+
+  /** Nur die für User relevanten Keywords — interne Marker (`target-topic:`,
+   *  `submitter:`, `phase:`, `event:`) werden vom Detail-Header ausgespart. */
+  visibleKeywords(i: Idea): string[] {
+    const internal = ['target-topic:', 'submitter:', 'phase:', 'event:'];
+    return (i.keywords || []).filter(
+      (k) => !internal.some((p) => (k || '').toLowerCase().startsWith(p)),
+    );
+  }
 
   startRenameAttachment(a: Attachment) {
     this.renamingAttachmentId = a.id;
@@ -985,31 +1358,8 @@ export class IdeaDetailComponent implements OnChanges {
     });
   }
 
-  deleteFolder(i: Idea) {
-    if (!i.attachment_folder?.id) return;
-    if (!confirm(
-      `Anhänge-Sammlung „${i.attachment_folder.name}" inklusive aller darin ` +
-      `enthaltenen Dateien wirklich löschen? Aktion ist nicht rückgängig zu machen.`
-    )) return;
-    this.folderDeleteBusy = true;
-    this.api.deleteAttachmentFolder(i.id).subscribe({
-      next: () => {
-        this.folderDeleteBusy = false;
-        const cur = this.idea();
-        if (cur) {
-          this.idea.set({ ...cur, attachment_folder: null, attachment_folder_id: null });
-        }
-        setTimeout(() => this.load({ keepCurrent: true }), 400);
-      },
-      error: (e) => {
-        this.folderDeleteBusy = false;
-        alert(`Löschen fehlgeschlagen: ${e?.error?.detail || e?.message}`);
-      },
-    });
-  }
-
   deleteAttachment(i: Idea, attId: string) {
-    if (!confirm('Diese Datei aus der Anhänge-Sammlung wirklich löschen?')) return;
+    if (!confirm('Diesen Anhang wirklich löschen?')) return;
     this.attachmentDeletingId = attId;
     this.api.deleteAttachment(i.id, attId).subscribe({
       next: () => {
@@ -1032,8 +1382,8 @@ export class IdeaDetailComponent implements OnChanges {
   deleteIdea(i: Idea) {
     if (!confirm(
       `„${i.title}" wirklich löschen?\n\n` +
-      `Eine eventuell verknüpfte Anhänge-Sammlung wird NICHT mitgelöscht — ` +
-      `räum die ggf. separat auf. Aktion ist nicht rückgängig zu machen.`
+      `Anhängende Dateien (Serienobjekte) werden automatisch mit entfernt. ` +
+      `Aktion ist nicht rückgängig zu machen.`
     )) return;
     this.deleteBusy = true;
     this.api.deleteIdea(i.id).subscribe({
@@ -1045,25 +1395,6 @@ export class IdeaDetailComponent implements OnChanges {
       error: (e) => {
         this.deleteBusy = false;
         alert(`Löschen fehlgeschlagen: ${e?.error?.detail || e?.message}`);
-      },
-    });
-  }
-
-  duplicateIdea(i: Idea) {
-    this.duplicateBusy = true;
-    this.api.duplicateIdea(i.id).subscribe({
-      next: (r) => {
-        this.duplicateBusy = false;
-        // Wechsel zur Kopie. Parent-Komponente muss auf den Event reagieren —
-        // wir simulieren via window.location.search-Update.
-        const url = new URL(window.location.href);
-        url.searchParams.set('view', 'detail');
-        url.searchParams.set('id', r.node_id);
-        window.location.href = url.toString();
-      },
-      error: (e) => {
-        this.duplicateBusy = false;
-        alert(`Duplizieren fehlgeschlagen: ${e?.error?.detail || e?.message}`);
       },
     });
   }
@@ -1117,7 +1448,73 @@ export class IdeaDetailComponent implements OnChanges {
   }
 
   get shareUrl(): string {
-    return window.location.href;
+    // Wenn wir in einer Embed-/Frame-Situation laufen, ist window.location
+    // evtl. nicht ideal. Wir bauen einen sauberen Share-URL auf Basis von
+    // origin + pathname + ?view=detail&id=…
+    try {
+      const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+      return `${base}?view=detail&id=${encodeURIComponent(this.ideaId)}`;
+    } catch {
+      return window.location.href;
+    }
+  }
+
+  get embedSnippet(): string {
+    const apiBase = this.api.base || '/api/v1';
+    return `<ideendb-app
+  api-base="${apiBase}"
+  view="detail"
+  idea-id="${this.ideaId}"></ideendb-app>`;
+  }
+
+  embedOpen = false;
+  embedCopied = false;
+  embedLabel = '</> Als Webkomponente einbetten';
+  toggleEmbed() { this.embedOpen = !this.embedOpen; }
+  copyEmbed() {
+    navigator.clipboard?.writeText(this.embedSnippet);
+    this.embedCopied = true;
+    setTimeout(() => (this.embedCopied = false), 2000);
+  }
+
+  refreshBusy = false;
+  refreshFromRepo(i: Idea) {
+    this.refreshBusy = true;
+    this.api.refreshIdea(i.id).subscribe({
+      next: () => {
+        this.refreshBusy = false;
+        // Cache-Buster auf preview_url, falls Browser das Bild gecached hat
+        this.load({ keepCurrent: true });
+      },
+      error: (e) => {
+        this.refreshBusy = false;
+        alert(e?.error?.detail || `Aktualisieren fehlgeschlagen (HTTP ${e?.status})`);
+      },
+    });
+  }
+
+  // ===== Mod: Idee verstecken / wieder anzeigen =====
+  hideBusy = false;
+  hideIdea(i: Idea) {
+    const reason = prompt('Grund für das Verstecken (optional):') ?? '';
+    this.hideBusy = true;
+    this.api.hideIdea(i.id, reason || undefined).subscribe({
+      next: () => { this.hideBusy = false; this.load(); },
+      error: (e) => {
+        this.hideBusy = false;
+        alert(e?.error?.detail || `Verstecken fehlgeschlagen (HTTP ${e?.status})`);
+      },
+    });
+  }
+  unhideIdea(i: Idea) {
+    this.hideBusy = true;
+    this.api.unhideIdea(i.id).subscribe({
+      next: () => { this.hideBusy = false; this.load(); },
+      error: (e) => {
+        this.hideBusy = false;
+        alert(e?.error?.detail || `Anzeigen fehlgeschlagen (HTTP ${e?.status})`);
+      },
+    });
   }
 
   repoUrl(i: Idea): string {
@@ -1166,16 +1563,61 @@ export class IdeaDetailComponent implements OnChanges {
     });
   }
 
+  /** Wer darf den Kommentar löschen? Der Verfasser selbst oder ein
+   *  Moderator. Username wird gegen `creator.authorityName` gematcht. */
+  canDeleteComment(c: any): boolean {
+    if (!this.api.hasCredentials()) return false;
+    if (this.api.isModerator()) return true;
+    const me = (this.api.currentUser() || '').toLowerCase();
+    const author = (c?.creator?.authorityName || '').toLowerCase();
+    return !!me && me === author;
+  }
+
+  deleteComment(c: any, ideaId: string) {
+    if (!confirm('Diesen Kommentar wirklich löschen? Antworten bleiben sichtbar.')) return;
+    const cid = c?.ref?.id;
+    if (!cid) return;
+    this.deletingCommentId = cid;
+    this.api.deleteComment(cid, ideaId).subscribe({
+      next: () => { this.deletingCommentId = null; this.load(); },
+      error: (e) => {
+        this.deletingCommentId = null;
+        alert(e?.error?.detail || `Löschen fehlgeschlagen (HTTP ${e?.status})`);
+      },
+    });
+  }
+
+  /** Returns parent-comment-id for a comment, or null if it's a root.
+   *  edu-sharing serialisiert `replyTo` als Objekt `{id, repo, ...}`. */
+  private replyParentId(c: any): string | null {
+    if (!c?.replyTo) return null;
+    if (typeof c.replyTo === 'string') return c.replyTo;  // Defensive
+    return c.replyTo.id || null;
+  }
+  /** Helper fürs Template (Class-Binding `[class.reply]`). */
+  isReply(c: any): boolean { return this.replyParentId(c) !== null; }
+
+  /** Wenn der User auf eine Antwort antwortet, hängen wir die neue
+   *  Antwort an denselben Thread-Root, damit unser flacher 1-Level-Tree
+   *  konsistent bleibt. Bei einem Top-Level-Kommentar ist die Eltern-ID
+   *  der Kommentar selbst. */
+  replyTargetId(c: any): string {
+    return this.replyParentId(c) || c.ref.id;
+  }
+
   /** Order comments so each reply follows its parent. One level deep;
-   *  nested replies (reply-to-reply) come out flat under the thread root. */
+   *  nested replies (reply-to-reply) come out flat unter dem Thread-Root. */
   threadedComments(list: any[]): any[] {
     const byId = new Map<string, any>(list.map((c) => [c.ref.id, c]));
-    const roots = list.filter((c) => !c.replyTo || !byId.has(c.replyTo));
+    const roots = list.filter((c) => {
+      const pid = this.replyParentId(c);
+      return !pid || !byId.has(pid);
+    });
     const out: any[] = [];
     for (const r of roots) {
       out.push(r);
       for (const c of list) {
-        if (c.replyTo === r.ref.id) out.push(c);
+        if (this.replyParentId(c) === r.ref.id) out.push(c);
       }
     }
     return out;
@@ -1184,10 +1626,10 @@ export class IdeaDetailComponent implements OnChanges {
   setRating(id: string, n: number) {
     this.userRating = n;
     this.rateError = '';
+    this.rateStatus = `Speichere ${n} ★…`;
+    this.rateStatusOk = true;
     this.api.rateIdea(id, n).subscribe({
       next: (r: any) => {
-        // Fresh rating data included in the response — patch locally instead
-        // of re-fetching the full idea (which would cost a whole round-trip).
         const i = this.idea();
         if (i && r?.rating) {
           this.idea.set({
@@ -1197,10 +1639,21 @@ export class IdeaDetailComponent implements OnChanges {
           });
           this.userRating = r.rating.mine || n;
         }
+        this.rateStatusOk = true;
+        this.rateStatus = `✓ ${n} ★ gespeichert`;
+        setTimeout(() => { if (this.rateStatus.startsWith('✓')) this.rateStatus = ''; }, 2500);
       },
       error: (e) => {
+        // Stern-Auswahl visuell zurücknehmen — die Aktion ist gescheitert.
         this.userRating = 0;
-        this.rateError = e?.error?.detail || `Fehler bei der Bewertung (HTTP ${e?.status})`;
+        this.rateStatus = '';
+        // Backend liefert klare Fehlermeldungen: 401 (Login) oder 403
+        // (Permission verweigert) — beide haben ein `detail`-Feld mit
+        // verständlichem Text. Anzeigen.
+        this.rateError = e?.error?.detail
+          || (e?.status === 401
+              ? 'Bitte zuerst anmelden, um zu bewerten.'
+              : `Fehler beim Speichern (HTTP ${e?.status || '?'})`);
       },
     });
   }
@@ -1267,37 +1720,6 @@ export class IdeaDetailComponent implements OnChanges {
     });
   }
 
-  createAttachmentFolder(ideaId: string) {
-    this.folderBusy = true;
-    this.folderError = '';
-    this.api.createAttachmentFolder(ideaId).subscribe({
-      next: (r) => {
-        this.folderBusy = false;
-        // Optimistic update so UI flips immediately
-        const i = this.idea();
-        if (i) {
-          this.idea.set({
-            ...i,
-            attachment_folder: { id: r.folder_id, name: r.name || null },
-            attachment_folder_id: r.folder_id,
-          });
-        }
-        // Sanfter Reload — bestehender Optimistic-State bleibt erhalten,
-        // damit die Sammlung auch dann sichtbar ist, wenn der Cache (noch)
-        // nichts vom Folder weiß.
-        setTimeout(() => this.load({ keepCurrent: true }), 600);
-      },
-      error: (e) => {
-        this.folderBusy = false;
-        this.folderError = e?.error?.detail || `Fehler (HTTP ${e?.status})`;
-      },
-    });
-  }
-
-  folderRepoUrl(folderId: string): string {
-    return `${this.repoBaseUrl}/edu-sharing/components/collections?id=${folderId}&scope=TYPE_EDITORIAL`;
-  }
-
   onAttachmentPick(ev: Event, ideaId: string) {
     const input = ev.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -1305,8 +1727,7 @@ export class IdeaDetailComponent implements OnChanges {
     this.folderUploadBusy = true;
     this.folderUploadStatus = `Lädt ${file.name} (${this.formatSize(file.size)}) hoch…`;
     this.folderUploadError = '';
-    const folderId = this.idea()?.attachment_folder?.id || this.idea()?.attachment_folder_id || undefined;
-    this.api.uploadToAttachmentFolder(ideaId, file, folderId).subscribe({
+    this.api.uploadAttachment(ideaId, file).subscribe({
       next: () => {
         this.folderUploadBusy = false;
         this.folderUploadStatus = '';
@@ -1363,13 +1784,28 @@ export class IdeaDetailComponent implements OnChanges {
     window.open(mail);
   }
 
+  /** edu-sharing kann Vor-/Nachnamen an drei Stellen liefern:
+   *  - direkt am creator (`creator.firstName`)
+   *  - im Profile-Objekt (`creator.profile.firstName`)
+   *  - oder als Property-Array (`creator.properties['cm:firstName']`)
+   *  Wir checken in der Reihenfolge profile → properties → creator-direct
+   *  und fallen zurück auf userName/authorityName. */
   formatUser(c: any): string {
     const u = c?.creator || {};
-    const props = u?.properties || {};
-    const fn = (props['cm:firstName'] || [])[0] || u.firstName;
-    const ln = (props['cm:lastName'] || [])[0] || u.lastName;
+    const profile = u.profile || {};
+    const props = u.properties || {};
+    const fn = profile.firstName
+      || (props['cm:firstName'] || [])[0]
+      || u.firstName;
+    const ln = profile.lastName
+      || (props['cm:lastName'] || [])[0]
+      || u.lastName;
     const name = [fn, ln].filter(Boolean).join(' ');
-    return name || (props['cm:userName'] || [])[0] || u.userName || 'Unbekannt';
+    return name
+      || u.userName
+      || (props['cm:userName'] || [])[0]
+      || u.authorityName
+      || 'Unbekannt';
   }
 
   initials(c: any): string {
@@ -1400,9 +1836,10 @@ export class IdeaDetailComponent implements OnChanges {
       case 'archive': return 'ZIP';
       case 'html': return '<>';
       case 'link': return '🔗';
-      default:
+      default: {
         const ext = (a.name || '').split('.').pop()?.toUpperCase() || '?';
         return ext.length <= 4 ? ext : '?';
+      }
     }
   }
 

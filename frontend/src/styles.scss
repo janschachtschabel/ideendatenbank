@@ -1,15 +1,46 @@
 @use '@angular/material' as mat;
 
+/* ────────────────────────────────────────────────────────────────────────
+ * Themen / Color Schemes
+ *   - default:     dunkelblau (Status quo, professionell-ruhig)
+ *   - hackathoern: helles Hauptthema mit den Original-Logo-Farben (Cyan/Orange/Olive/Coral)
+ *   - dark:        Dark Mode für Abend-/Nachtnutzung
+ * Umschalten via data-theme-Attribut auf <html>, persistiert im
+ * localStorage (siehe app-shell.component.ts → ThemeSwitcher).
+ * ──────────────────────────────────────────────────────────────────────── */
+
 html {
   color-scheme: light;
+  /* ─── Default-Theme (dunkelblau) — Status Quo ─── */
   --wlo-primary: #002855;
   --wlo-primary-600: #003c7e;
+  --wlo-primary-soft: #e6edf7;   /* heller Tint von Primary für Hover/Pill-Bg */
   --wlo-accent: #f5b600;
+  --wlo-accent-soft: #fff8db;    /* heller Tint von Accent */
   --wlo-bg: #f4f6f9;
   --wlo-surface: #ffffff;
+  --wlo-surface-2: #f8f9fc;
   --wlo-text: #1a2235;
   --wlo-muted: #5b6778;
   --wlo-border: #e2e7ef;
+  --wlo-success: #137333;
+  --wlo-danger:  #c5221f;
+  /* CTA-Button-Tokens — gleiche Farbe in Topbar UND Hero, pro Theme. */
+  --wlo-cta-bg:        #f5b600;        /* Default: Gelb */
+  --wlo-cta-bg-hover:  #ffc727;
+  --wlo-cta-text:      #1a2235;
+  /* Hero-Sektion (Startseite, Topic-Hero etc.) — eigene Token, nicht Primary */
+  --wlo-hero-bg-from: #002855;
+  --wlo-hero-bg-to:   #003c7e;
+  --wlo-hero-text:    #ffffff;
+  --wlo-hero-text-muted: rgba(255,255,255,.92);
+  /* Topbar-Tokens */
+  --wlo-topbar-bg:        #002855;
+  --wlo-topbar-text:      #ffffff;
+  --wlo-topbar-text-muted: rgba(255,255,255,.85);
+  --wlo-topbar-hover:     rgba(255,255,255,.10);
+  --wlo-topbar-active:    rgba(255,255,255,.15);
+  --wlo-topbar-border:    rgba(255,255,255,.20);
 
   @include mat.theme((
     color: (
@@ -19,6 +50,74 @@ html {
     typography: Roboto,
     density: 0,
   ));
+}
+
+/* ───── Theme: HackathOERn (heller Header, Logo-Farben als Akzente) ───── */
+html[data-theme="hackathoern"] {
+  color-scheme: light;
+  --wlo-primary:     #27ABE2;
+  --wlo-primary-600: #1e8ec0;
+  --wlo-primary-soft: #e0f3fb;
+  --wlo-accent:      #ED8F65;
+  --wlo-accent-soft: #fbe5d9;
+  --wlo-bg:          #f4f6f7;
+  --wlo-surface:     #ffffff;
+  --wlo-surface-2:   #fafbfc;
+  --wlo-text:        #383838;
+  --wlo-muted:       #6b6b6b;
+  --wlo-border:      #e3e6ea;
+  --wlo-success:     #B7B764;
+  --wlo-danger:      #D65256;
+  /* CTA: Cyan-Blau (Logo-Primary) — sowohl in Topbar als auch im Hero */
+  --wlo-cta-bg:        #27ABE2;
+  --wlo-cta-bg-hover:  #1e8ec0;
+  --wlo-cta-text:      #ffffff;
+  /* Hero: helles Bg mit Cyan-Akzent statt vollem Cyan-Verlauf */
+  --wlo-hero-bg-from: #f0f7fb;
+  --wlo-hero-bg-to:   #e1edf3;
+  --wlo-hero-text:    #383838;
+  --wlo-hero-text-muted: #5a5a5a;
+  /* Heller Header */
+  --wlo-topbar-bg:        #ffffff;
+  --wlo-topbar-text:      #383838;
+  --wlo-topbar-text-muted: #5a5a5a;
+  --wlo-topbar-hover:     #f0f3f6;
+  --wlo-topbar-active:    #e3eaf0;
+  --wlo-topbar-border:    #e3e6ea;
+}
+
+/* ───── Theme: Dark Mode (rein neutrale Grauabstufungen) ───── */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --wlo-primary:     #d6d6d6;       /* helles Grau für Text/Borders/Active-Akzente */
+  --wlo-primary-600: #f0f0f0;
+  --wlo-primary-soft: #2a2a2a;      /* dunkler Tint für Pill/Hover-Bg */
+  --wlo-accent:      #d4a73a;       /* desaturierter Gold-Akzent */
+  --wlo-accent-soft: #3a311a;
+  --wlo-bg:          #161616;
+  --wlo-surface:     #1f1f1f;
+  --wlo-surface-2:   #262626;
+  --wlo-text:        #e6e6e6;
+  --wlo-muted:       #9a9a9a;
+  --wlo-border:      #333333;
+  --wlo-success:     #6da16d;
+  --wlo-danger:      #c97070;
+  /* CTA: Gold-Akzent — wie im Hero, deutlich sichtbar auf dunkler Topbar */
+  --wlo-cta-bg:        #d4a73a;
+  --wlo-cta-bg-hover:  #e6b945;
+  --wlo-cta-text:      #1a1a1a;
+  /* Hero im Dark-Mode: dezent dunkler Verlauf, kein Blau */
+  --wlo-hero-bg-from: #1c1c1c;
+  --wlo-hero-bg-to:   #242424;
+  --wlo-hero-text:    #e6e6e6;
+  --wlo-hero-text-muted: rgba(230,230,230,.85);
+  /* Topbar: tiefer als bg, kein Blau */
+  --wlo-topbar-bg:        #0d0d0d;
+  --wlo-topbar-text:      #e6e6e6;
+  --wlo-topbar-text-muted: rgba(230,230,230,.78);
+  --wlo-topbar-hover:     rgba(255,255,255,.06);
+  --wlo-topbar-active:    rgba(255,255,255,.10);
+  --wlo-topbar-border:    rgba(255,255,255,.12);
 }
 
 ideendb-app, ideendb-tile-grid {

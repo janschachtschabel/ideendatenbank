@@ -26,7 +26,7 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import settings
@@ -46,11 +46,11 @@ def _backup_dir() -> Path:
 
 
 def _now_str() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M")
 
 
 def _iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _gather_metadata() -> dict:
@@ -79,7 +79,7 @@ def _vacuum_into(target: Path) -> None:
     if target.exists():
         target.unlink()
     with sqlite3.connect(settings.sqlite_path) as con:
-        con.execute(f"VACUUM INTO ?", (str(target),))
+        con.execute("VACUUM INTO ?", (str(target),))
 
 
 def create_backup() -> Path:
@@ -127,10 +127,11 @@ def list_backups() -> list[dict]:
     aus dem ZIP für die UI-Anzeige."""
     out: list[dict] = []
     for p in sorted(_backup_dir().iterdir(), reverse=True):
-        if not p.is_file() or not BACKUP_NAME_RE.match(p.name):
-            # Auch Suffix-Variante (-2, -3) zulassen
-            if not p.name.startswith(BACKUP_NAME_PREFIX) or not p.name.endswith(".zip"):
-                continue
+        # Reguläres Namensschema ODER Suffix-Variante (-2, -3) für Kollisionen
+        if (not p.is_file() or not BACKUP_NAME_RE.match(p.name)) and (
+            not p.name.startswith(BACKUP_NAME_PREFIX) or not p.name.endswith(".zip")
+        ):
+            continue
         try:
             with zipfile.ZipFile(p) as zf:
                 if "metadata.json" in zf.namelist():
@@ -144,7 +145,7 @@ def list_backups() -> list[dict]:
             "filename": p.name,
             "size": stat.st_size,
             "created_at": datetime.fromtimestamp(
-                stat.st_mtime, tz=timezone.utc
+                stat.st_mtime, tz=UTC
             ).isoformat(),
             "metadata": meta,
         })
@@ -274,6 +275,86 @@ async def restore_backup(zip_bytes: bytes) -> dict:
     }
 
 
+# ===== Auto-Restore beim Erststart =================================
+# Sinn: Nach Neuinstallation oder Container-Neudeploy auf leeres Volume
+# soll die App nicht „leer" hochkommen, sondern automatisch das letzte
+# verfügbare Backup ziehen. Wir tun das BEVOR `init_db()` läuft —
+# init_db ist nachher idempotent und ergänzt fehlende Spalten.
+#
+# Triggert nur, wenn:
+#   1. Die SQLite-Datei nicht existiert ODER quasi-leer ist (< 200 Bytes,
+#      also nicht mal SQLite-Header) UND
+#   2. Mindestens ein Backup-ZIP im Backup-Ordner liegt.
+#
+# Asynchron läuft hier nichts — alle Aufrufe sind synchron, damit's vor
+# init_db sauber sequenziert ist. Der reguläre Restore-Endpoint nutzt
+# zusätzlich den Sync-Lock; beim Erststart ist der Sync noch nicht
+# gestartet, also überflüssig.
+
+def auto_restore_if_fresh() -> dict | None:
+    """Stellt das jüngste Backup wieder her, wenn keine DB vorhanden ist.
+    Gibt das Restore-Manifest zurück oder None, wenn kein Restore lief."""
+    db_path = Path(settings.sqlite_path)
+    if db_path.is_file() and db_path.stat().st_size >= 200:
+        return None  # DB existiert und ist plausibel — kein Auto-Restore
+
+    backups = list_backups()
+    if not backups:
+        log.info("auto-restore: keine Backups vorhanden, starte fresh")
+        return None
+
+    newest = backups[0]
+    zip_path = _backup_dir() / newest["filename"]
+    if not zip_path.is_file():
+        log.warning("auto-restore: Backup-Datei nicht gefunden: %s", zip_path)
+        return None
+
+    log.info("auto-restore: stelle %s wieder her (DB war leer/fehlend)",
+             newest["filename"])
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            if "database.sqlite" not in zf.namelist():
+                log.error("auto-restore: %s enthält keine database.sqlite",
+                          newest["filename"])
+                return None
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp = Path(tmp_dir)
+                zf.extract("database.sqlite", tmp)
+                src = tmp / "database.sqlite"
+                if not src.is_file() or src.stat().st_size < 100:
+                    log.error("auto-restore: database.sqlite im ZIP ist leer")
+                    return None
+                with open(src, "rb") as f:
+                    if not f.read(16).startswith(b"SQLite format 3"):
+                        log.error("auto-restore: database.sqlite hat falschen "
+                                  "Magic-Header")
+                        return None
+                # Begleitdateien wegräumen (sollten bei fresh install nicht
+                # existieren, aber sicher ist sicher)
+                for ext in ("", "-wal", "-shm", "-journal"):
+                    aux = Path(str(db_path) + ext)
+                    if aux.exists():
+                        try:
+                            aux.unlink()
+                        except Exception as e:
+                            log.warning("auto-restore: konnte %s nicht entfernen: %s",
+                                        aux, e)
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(src, db_path)
+    except Exception as e:
+        log.exception("auto-restore: fehlgeschlagen: %s", e)
+        return None
+
+    log.info("auto-restore: erfolgreich aus %s — Schema-Migration via init_db",
+             newest["filename"])
+    return {
+        "ok": True,
+        "from": newest["filename"],
+        "size": newest.get("size"),
+        "metadata": newest.get("metadata", {}),
+    }
+
+
 # ===== Auto-Backup-Loop ===========================================
 
 _last_auto_backup: datetime | None = None
@@ -303,7 +384,7 @@ async def auto_backup_loop() -> None:
     while True:
         try:
             interval = max(1, int(settings.backup_interval_hours))
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             due = (
                 _last_auto_backup is None
                 or (now - _last_auto_backup).total_seconds() >= interval * 3600

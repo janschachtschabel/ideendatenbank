@@ -17,8 +17,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
 from . import edu_sharing
 from .db import connect
@@ -36,9 +35,19 @@ PHASE_PREFIX = "phase:"
 EVENT_PREFIX = "event:"
 TOPIC_PREFIX = "topic:"
 
+# Legacy-Slug → kanonischer Slug. Reference-Knoten in edu-sharing sind
+# nach Erstellung „eingefroren" — ES bietet keine API um sie auf das
+# Original umzustellen. Daher normalisieren wir clientseitig beim Sync,
+# damit die Cache-/Filter-Ansicht konsistent ist.
+EVENT_SLUG_ALIASES = {
+    "hackthoern-01":  "hackathoern-1",
+    "hackathoern-02": "hackathoern-2",
+    "hackathoern-03": "hackathoern-3",
+}
+
 
 def _iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _props(node: dict) -> dict:
@@ -70,9 +79,18 @@ def _classify_keywords(kws: list[str]) -> tuple[str | None, list[str], list[str]
         if lk.lower().startswith(PHASE_PREFIX):
             phase = lk[len(PHASE_PREFIX):]
         elif lk.lower().startswith(EVENT_PREFIX):
-            events.append(lk[len(EVENT_PREFIX):])
+            slug = lk[len(EVENT_PREFIX):]
+            events.append(EVENT_SLUG_ALIASES.get(slug, slug))
         elif lk.lower().startswith(TOPIC_PREFIX):
             categories.append(lk[len(TOPIC_PREFIX):])
+        elif lk.lower().startswith("submitter:"):
+            # interner Tracking-Keyword — nicht in der UI-Keyword-Liste anzeigen
+            continue
+        elif lk.lower().startswith("target-topic:"):
+            # Vom Submit-Formular automatisch gesetzter Hinweis-Marker für die
+            # Moderation. Bleibt in `cclom:general_keyword`, fällt aber aus
+            # der UI-sichtbaren Keyword-Liste raus.
+            continue
         else:
             other.append(lk)
     return phase, events, categories, other
@@ -231,22 +249,37 @@ async def _upsert_idea(
         attach_url = node.get("downloadUrl")
 
     # Owner-Identität für /me/ideas. Reihenfolge:
-    #   1. cm:owner   (explizit gesetzt, z.B. nach Move durch Mod)
-    #   2. cm:creator (User, der den Node angelegt hat)
-    #   3. node.owner.authorityName (wenn vorhanden)
+    #   1. submitter:<user>-Keyword (gesetzt vom Submit-Endpoint, wenn der
+    #      Caller eingeloggt war — überschreibt cm:creator=guest)
+    #   2. cm:owner   (explizit gesetzt, z.B. nach Move durch Mod)
+    #   3. cm:creator (User, der den Node angelegt hat)
+    #   4. node.owner.authorityName (wenn vorhanden)
+    submitter_kw = next(
+        (k[len("submitter:"):]
+         for k in (kws or [])
+         if isinstance(k, str) and k.lower().startswith("submitter:")),
+        None,
+    )
     owner_username = (
-        _first(props, "cm:owner")
+        submitter_kw
+        or _first(props, "cm:owner")
         or _first(props, "cm:creator")
         or (node.get("owner") or {}).get("authorityName")
     )
+
+    # Original-ID merken: Reference-Knoten in Sammlungen tragen
+    # `originalId`, der auf den ursprünglichen Inbox-Knoten zeigt.
+    # Wir nutzen das später, um „bereits einsortierte" Originals aus
+    # dem Postfach-Listing auszublenden.
+    original_id = node.get("originalId") or None
 
     con.execute(
         """INSERT INTO idea
              (id,kind,topic_id,main_content_id,title,description,preview_url,author,
               project_url,phase,events,categories,keywords,rating_avg,rating_count,
               comment_count,attachment_mimetype,attachment_size,attachment_name,
-              attachment_url,owner_username,created_at,modified_at,synced_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              attachment_url,owner_username,original_id,created_at,modified_at,synced_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
              kind=excluded.kind,
              topic_id=excluded.topic_id,
@@ -268,6 +301,7 @@ async def _upsert_idea(
              attachment_name=excluded.attachment_name,
              attachment_url=excluded.attachment_url,
              owner_username=excluded.owner_username,
+             original_id=excluded.original_id,
              modified_at=excluded.modified_at,
              synced_at=excluded.synced_at""",
         (
@@ -292,6 +326,7 @@ async def _upsert_idea(
             attach_name,
             attach_url,
             owner_username,
+            original_id,
             node.get("createdAt"),
             node.get("modifiedAt"),
             _iso_now(),
@@ -338,15 +373,30 @@ async def refresh_idea(idea_id: str, *, auth_header: str | None = None) -> bool:
         log.debug("refresh_idea: skip inbox node %s", idea_id)
         return False
 
-    try:
-        with connect() as con:
-            await _upsert_idea(
-                con, node, kind="io", topic_id=parent_id, main_content_id=idea_id,
-            )
-        return True
-    except Exception as e:
-        log.warning("refresh_idea: upsert fehlgeschlagen für %s: %s", idea_id, e)
-        return False
+    # Retry-Logik für SQLite-Lock-Konflikte. Mit dem WAL-Mode + busy_timeout
+    # in db.py sollte das selten passieren, aber ein paar Retries kosten
+    # nichts und decken den seltenen Fall ab, wo der Voll-Sync mehrere
+    # Sekunden lang exklusiven Lock hält.
+    import sqlite3
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            with connect() as con:
+                await _upsert_idea(
+                    con, node, kind="io", topic_id=parent_id, main_content_id=idea_id,
+                )
+            return True
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower():
+                log.warning("refresh_idea: upsert SQL-Fehler für %s: %s", idea_id, e)
+                return False
+            last_err = e
+            await asyncio.sleep(0.5 * (attempt + 1))  # 0.5s, 1s, 1.5s
+        except Exception as e:
+            log.warning("refresh_idea: upsert fehlgeschlagen für %s: %s", idea_id, e)
+            return False
+    log.warning("refresh_idea: nach 3 Retries gescheitert für %s: %s", idea_id, last_err)
+    return False
 
 
 async def run_sync(*, wait: bool = True) -> dict:
@@ -516,8 +566,8 @@ def _should_capture_snapshot(con) -> bool:
     except Exception:
         return True
     if last_dt.tzinfo is None:
-        last_dt = last_dt.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - last_dt >= SNAPSHOT_MIN_INTERVAL
+        last_dt = last_dt.replace(tzinfo=UTC)
+    return datetime.now(UTC) - last_dt >= SNAPSHOT_MIN_INTERVAL
 
 
 def _capture_ranking_snapshot(con, ts: str) -> None:
@@ -548,13 +598,18 @@ def _capture_ranking_snapshot(con, ts: str) -> None:
     }
 
     def _rank_for(event_filter: str | None, sort_key: str, primary: str, secondary: str):
+        # Trend-Snapshots sollen nur Ideen enthalten, die im jeweiligen
+        # Sort-Kriterium *tatsächlich Aktivität* haben — sonst füllen 0er
+        # die Top-N mit zufällig gewählten Karteileichen auf, was die
+        # Verlaufs-Charts unbrauchbar macht.
         where = []
         params: list = []
         if event_filter:
             where.append("events LIKE ?")
             params.append(f'%"{event_filter}"%')
-        sql_where = (" WHERE " + " AND ".join(where)) if where else ""
+
         if sort_key == "interest":
+            sql_where = (" WHERE " + " AND ".join(where)) if where else ""
             ideas = con.execute(
                 f"SELECT id, comment_count, rating_avg FROM idea{sql_where}",
                 params,
@@ -562,9 +617,14 @@ def _capture_ranking_snapshot(con, ts: str) -> None:
             scored = [
                 (r["id"], float(interest_map.get(r["id"], 0)), float(r["comment_count"] or 0))
                 for r in ideas
+                if interest_map.get(r["id"], 0) > 0  # nur Ideen mit Mitmachen-Klick
             ]
             scored.sort(key=lambda t: (-t[1], -t[2]))
             return [(idea_id, score) for idea_id, score, _ in scored[:SNAPSHOT_TOP_N]]
+
+        # Rating + Comments: nur Ideen mit primary > 0
+        where.append(f"{primary} > 0")
+        sql_where = " WHERE " + " AND ".join(where)
         ideas = con.execute(
             f"SELECT id, {primary} AS p, {secondary} AS s FROM idea{sql_where} "
             f"ORDER BY p DESC, s DESC LIMIT ?",
@@ -595,7 +655,7 @@ def _prune_activity_log(con) -> None:
     """Behalte Einträge der letzten ACTIVITY_LOG_KEEP_DAYS Tage UND maximal
     ACTIVITY_LOG_KEEP_ROWS Zeilen. Wird einmal pro Sync-Lauf gerufen (sehr
     günstig wegen ts-Index)."""
-    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_LOG_KEEP_DAYS)
+    cutoff_dt = datetime.now(UTC) - timedelta(days=ACTIVITY_LOG_KEEP_DAYS)
     cutoff = cutoff_dt.isoformat()
     con.execute("DELETE FROM activity_log WHERE ts < ?", (cutoff,))
     # Hard-Cap: lösche alles, was über die jüngsten ACTIVITY_LOG_KEEP_ROWS
@@ -624,3 +684,7 @@ def _prune_snapshots(con) -> None:
     con.execute(
         "DELETE FROM ranking_snapshot WHERE snapshot_at < ?", (cutoff,)
     )
+    # Defensives Cleanup: Score=0 darf NIE in der Tabelle stehen — selbst
+    # wenn ein zukünftiger Bug es einschleust, wird es bei jedem Sync wieder
+    # rausgeworfen. Idea-Listen (auch deren History) bleiben so sauber.
+    con.execute("DELETE FROM ranking_snapshot WHERE score <= 0")

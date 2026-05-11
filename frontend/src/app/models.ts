@@ -31,6 +31,8 @@ export interface Idea {
   comments?: Comment[];
   attachments?: Attachment[];
   owner_username?: string | null;
+  /** @deprecated Felder bleiben aus Kompatibilität — Anhänge werden jetzt
+   *  direkt als Child-IO unter der Idee gespeichert (Serienobjekt-Pattern). */
   attachment_folder_id?: string | null;
   attachment_folder?: { id: string; name: string | null } | null;
   can_edit?: boolean;
@@ -48,6 +50,10 @@ export interface Idea {
    *  Owner: aktuelle + max 1 vorwärts (ohne Archiv).
    *  Mod: alle aktiven Phasen. Leer wenn !can_edit. */
   allowed_next_phases?: string[];
+  /** Mod-Sichtbarkeits-Sperre: true = Idee ist soft-versteckt. Backend
+   *  blendet sie für non-mods aus, Mods sehen sie mit Hinweis. */
+  hidden?: boolean;
+  hidden_reason?: string | null;
 }
 
 export interface Attachment {
@@ -63,11 +69,25 @@ export interface Attachment {
 }
 
 export interface Comment {
-  ref: { id: string };
-  creator?: { firstName?: string; lastName?: string; userName?: string };
+  ref: { id: string; repo?: string; archived?: boolean };
+  /** edu-sharing liefert ein verschachteltes Profile-Objekt; firstName/
+   *  lastName liegen entweder direkt am creator oder unter `profile.*`,
+   *  oder als Property-Array (`properties['cm:firstName']`). */
+  creator?: {
+    firstName?: string;
+    lastName?: string;
+    userName?: string;
+    authorityName?: string;
+    profile?: {
+      firstName?: string;
+      lastName?: string;
+    };
+    properties?: Record<string, string[]>;
+  };
   created: number;
   comment: string;
-  replyTo?: string | null;
+  /** edu-sharing liefert hier ein Objekt `{id, repo, ...}` (oder null). */
+  replyTo?: { id: string } | null;
 }
 
 export interface IdeaList {

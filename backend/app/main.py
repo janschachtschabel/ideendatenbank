@@ -3,17 +3,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from . import backup as backup_mod, edu_sharing, sync as sync_mod
+from . import backup as backup_mod
+from . import edu_sharing
+from . import sync as sync_mod
 from .config import settings
 from .db import init_db
 from .ratelimit import limiter
@@ -40,6 +40,20 @@ async def _sync_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Auto-Restore beim Erststart: wenn keine DB vorhanden ist und ein
+    # Backup-ZIP im Backup-Ordner liegt, ziehen wir das jüngste vor der
+    # Schema-Migration. So kommt eine frisch deployte App nicht „leer"
+    # hoch, sondern setzt nahtlos beim letzten Backup auf.
+    try:
+        restored = backup_mod.auto_restore_if_fresh()
+        if restored:
+            log.info(
+                "auto-restore: aktiv — DB aus %s wiederhergestellt (%d Bytes)",
+                restored["from"], restored.get("size") or 0,
+            )
+    except Exception:
+        log.exception("auto-restore: unerwarteter Fehler — starte mit leerer DB")
+
     init_db()
     sync_task = asyncio.create_task(_sync_loop())
     backup_task = asyncio.create_task(backup_mod.auto_backup_loop())

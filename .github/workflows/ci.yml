@@ -78,7 +78,12 @@ jobs:
 
       - name: Install
         working-directory: frontend
-        run: npm ci --no-audit --no-fund
+        # `npm install --no-save` statt `npm ci`, weil das Lockfile auf
+        # einem Windows-Host generiert wurde und gelegentlich Linux-
+        # spezifische peer-Deps (z.B. `chokidar@^5`) fehlen. `--no-save`
+        # behält das Lockfile unverändert, ergänzt nur fehlende Pakete.
+        # Identisch zum Dockerfile.
+        run: npm install --no-save --no-audit --no-fund
 
       - name: Lint (ng lint)
         working-directory: frontend

@@ -1587,15 +1587,78 @@ class BulkMoveRequest(BaseModel):
     target_topic_id: str
 
 
+async def _move_or_reference(
+    source_id: str, target_topic_id: str, *, authorization: str,
+) -> tuple[str, str | None]:
+    """Hängt eine Inbox-Idee an eine Ziel-Sammlung. Versucht zuerst die
+    HackathOERn-Standardvorgehensweise (Reference: Original bleibt in
+    Inbox, Sammlung kriegt einen Reference-Knoten). Wenn ES das wegen
+    Tool-Permission/ACL ablehnt (403/500), fällt auf das alte Verhalten
+    zurück (`_move`: Knoten wird relocated, wird zu Direct-Child).
+    Der Sync findet beide Varianten (siehe sync.py).
+
+    Returns: (mode, ref_or_node_id) — mode ist 'reference' oder 'move'.
+    Wirft den ursprünglichen httpx-Error weiter, wenn beide Wege fehlschlagen.
+    """
+    # 1. Reference-Pfad — saubere Standard-Variante
+    try:
+        result = await edu_sharing.client.add_collection_reference(
+            collection_id=target_topic_id,
+            node_id=source_id,
+            auth_header=authorization,
+        )
+        ref_node = (result or {}).get("node") or {}
+        ref_id = (ref_node.get("ref") or {}).get("id")
+        if ref_id:
+            try:
+                with connect() as con:
+                    await sync_mod._upsert_idea(
+                        con, ref_node,
+                        kind="io",
+                        topic_id=target_topic_id,
+                        main_content_id=ref_id,
+                    )
+            except Exception as e:
+                log.warning("upsert nach addReference für %s: %s", ref_id, e)
+            return ("reference", ref_id)
+    except httpx.HTTPStatusError as e:
+        # 403/500/405 → kein Reference-Recht. Versuche _move als Fallback.
+        if e.response.status_code not in (403, 405, 500):
+            raise
+        log.info(
+            "addReference verwehrt (%s) für %s → fallback auf _move",
+            e.response.status_code, source_id,
+        )
+
+    # 2. Fallback: echtes Move (Direct-Child der Challenge)
+    await edu_sharing.client.move_node(
+        source_id=source_id,
+        target_parent_id=target_topic_id,
+        auth_header=authorization,
+    )
+    # Cache: refresh_idea liest neue parent.id aus ES und schreibt sie ins
+    # idea-Row. topic_id wird damit korrekt gesetzt.
+    try:
+        await sync_mod.refresh_idea(source_id, auth_header=authorization)
+    except Exception:
+        pass
+    return ("move", source_id)
+
+
 @router.post("/moderation/bulk_move", tags=["moderation"])
 async def bulk_move_to_topic(
     body: BulkMoveRequest,
     authorization: str | None = Header(None),
 ):
-    """Verschiebt mehrere Ideen in einem Schwung in eine Ziel-Herausforderung.
-    Pro Idee wird einzeln per ES-API gemoved + per refresh_idea im Cache
-    aktualisiert. Pro-Item-Fehler werden gesammelt und im Antwort-Body
-    zurückgegeben — der Gesamtaufruf bricht nicht ab."""
+    """Hängt mehrere Inbox-Ideen an eine Ziel-Herausforderung.
+
+    Bevorzugt das **Reference**-Pattern (Original in Inbox, Reference in
+    Sammlung — HackathOERn-Standard). Bei fehlender Tool-Permission
+    fallback auf **Move** (Direct-Child der Sammlung). Beide Patterns
+    werden vom Sync erkannt.
+
+    Pro-Item-Fehler werden gesammelt; der Gesamtaufruf bricht nicht ab.
+    """
     await _require_moderator(authorization)
     with connect() as con:
         t = con.execute(
@@ -1606,12 +1669,11 @@ async def bulk_move_to_topic(
 
     succeeded: list[str] = []
     failed: list[dict] = []
+    modes: dict[str, int] = {"reference": 0, "move": 0}
     for nid in body.node_ids:
         try:
-            await edu_sharing.client.move_node(
-                source_id=nid,
-                target_parent_id=body.target_topic_id,
-                auth_header=authorization,
+            mode, new_id = await _move_or_reference(
+                nid, body.target_topic_id, authorization=authorization,
             )
         except httpx.HTTPStatusError as e:
             failed.append({"id": nid, "status": e.response.status_code,
@@ -1620,19 +1682,21 @@ async def bulk_move_to_topic(
         except Exception as e:
             failed.append({"id": nid, "status": 0, "detail": str(e)[:160]})
             continue
-        try:
-            await sync_mod.refresh_idea(nid, auth_header=authorization)
-        except Exception:
-            pass
-        # Titel für Log
+        modes[mode] = modes.get(mode, 0) + 1
+        # Titel für Log (aus Cache nach Upsert/Refresh)
         with connect() as con:
-            r = con.execute("SELECT title FROM idea WHERE id=?", (nid,)).fetchone()
+            r = con.execute(
+                "SELECT title FROM idea WHERE id=? OR original_id=?",
+                (new_id, nid),
+            ).fetchone()
             moved_title = r["title"] if r else None
         _log_activity(
             action="idea_moved", authorization=authorization, is_mod=True,
             target_type="idea", target_id=nid, target_label=moved_title,
             detail={"to_topic_id": body.target_topic_id,
-                    "to_topic_title": t["title"], "bulk": True},
+                    "to_topic_title": t["title"],
+                    "mode": mode, "result_id": new_id,
+                    "bulk": True},
         )
         succeeded.append(nid)
 
@@ -1643,6 +1707,7 @@ async def bulk_move_to_topic(
         "failed": failed,
         "succeeded_count": len(succeeded),
         "failed_count": len(failed),
+        "modes": modes,
     }
 
 
@@ -1651,12 +1716,11 @@ async def move_to_topic(
     body: MoveRequest,
     authorization: str | None = Header(None),
 ):
-    """Move an inbox submission into a target topic/challenge collection.
-
-    Caller muss Moderator sein. Triggers einen Sync nach erfolgreichem Move.
-    """
+    """Hängt eine Inbox-Idee an eine Herausforderung. Versucht zuerst
+    den HackathOERn-Standard (Reference: Original bleibt in Inbox), fällt
+    bei fehlender Tool-Permission auf das alte Move-Verhalten zurück.
+    Caller muss Moderator sein."""
     await _require_moderator(authorization)
-    # Validate target exists in our cache
     with connect() as con:
         t = con.execute(
             "SELECT id,title FROM topic WHERE id = ?", (body.target_topic_id,)
@@ -1665,10 +1729,8 @@ async def move_to_topic(
         raise HTTPException(404, f"Unknown target topic {body.target_topic_id}")
 
     try:
-        result = await edu_sharing.client.move_node(
-            source_id=body.node_id,
-            target_parent_id=body.target_topic_id,
-            auth_header=authorization,
+        mode, new_id = await _move_or_reference(
+            body.node_id, body.target_topic_id, authorization=authorization,
         )
     except httpx.HTTPStatusError as e:
         raise HTTPException(
@@ -1676,26 +1738,23 @@ async def move_to_topic(
             f"edu-sharing: {e.response.text[:200]}",
         )
 
-    # Single-Node-Refresh: neuer Eltern-Container wird im Cache gesetzt,
-    # damit die Idee sofort unter der Ziel-Herausforderung auftaucht.
-    try:
-        await sync_mod.refresh_idea(body.node_id, auth_header=authorization)
-    except Exception:
-        pass
-
-    # Idee-Titel für Log nachschlagen (nach Refresh ist die Row aktuell)
+    # Titel für Log
     moved_title = None
     with connect() as con:
-        r = con.execute("SELECT title FROM idea WHERE id=?", (body.node_id,)).fetchone()
+        r = con.execute(
+            "SELECT title FROM idea WHERE id=? OR original_id=?",
+            (new_id, body.node_id),
+        ).fetchone()
         moved_title = r["title"] if r else None
     _log_activity(
         action="idea_moved",
         authorization=authorization, is_mod=True,
         target_type="idea", target_id=body.node_id, target_label=moved_title,
-        detail={"to_topic_id": body.target_topic_id, "to_topic_title": t["title"]},
+        detail={"to_topic_id": body.target_topic_id, "to_topic_title": t["title"],
+                "mode": mode, "result_id": new_id},
     )
 
-    return {"ok": True, "moved_to": t["title"], "node": result}
+    return {"ok": True, "moved_to": t["title"], "mode": mode, "result_id": new_id}
 
 
 # Selbstregistrierung läuft extern über https://wirlernenonline.de/register/.

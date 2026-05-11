@@ -474,13 +474,49 @@ class EduSharingClient:
     async def move_node(
         self, source_id: str, target_parent_id: str, *, auth_header: str | None = None
     ) -> dict:
-        """Move a node to become a child of target_parent_id.
+        """RELOCATE: Move a node to become a child of target_parent_id.
         edu-sharing signature: POST /children/_move?source={sourceId} on the
-        TARGET parent. Returns NodeEntry."""
+        TARGET parent. Returns NodeEntry.
+
+        Achtung: zerstört die Original-Container-Beziehung. Für das
+        HackathOERn-Pattern (Original bleibt in Inbox, Sammlung verlinkt
+        per Reference) → siehe `add_collection_reference()`."""
         return await self._req(
             "POST",
             f"/node/v1/nodes/-home-/{target_parent_id}/children/_move",
             params={"source": source_id},
+            auth_header=auth_header,
+        )
+
+    async def add_collection_reference(
+        self, collection_id: str, node_id: str, *, auth_header: str | None = None
+    ) -> dict:
+        """REFERENZIEREN: Fügt einen Knoten als Reference zu einer Sammlung.
+        Original-Container bleibt unverändert (Idee bleibt in Inbox),
+        die Sammlung enthält einen `ccm:io_reference`-Knoten mit
+        `originalId=<node_id>`.
+
+        edu-sharing signature: PUT /collection/v1/collections/-home-/
+        {collection_id}/references/{node_id}. Returns NodeEntry des
+        neu angelegten Reference-Knotens.
+
+        Das ist die HackathOERn-Standardvorgehensweise — entspricht dem
+        Web-UI „Zu Sammlung hinzufügen"."""
+        return await self._req(
+            "PUT",
+            f"/collection/v1/collections/-home-/{collection_id}/references/{node_id}",
+            auth_header=auth_header,
+        )
+
+    async def delete_collection_reference(
+        self, reference_id: str, *, auth_header: str | None = None
+    ) -> None:
+        """Entfernt einen Reference-Knoten aus einer Sammlung (nicht das
+        Original). edu-sharing signature: DELETE /node/v1/nodes/-home-/
+        {reference_id}."""
+        await self._req(
+            "DELETE",
+            f"/node/v1/nodes/-home-/{reference_id}",
             auth_header=auth_header,
         )
 

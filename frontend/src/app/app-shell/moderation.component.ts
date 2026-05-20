@@ -90,7 +90,8 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
     .preview-toggle:hover { filter: brightness(1.2); }
     .preview-card {
       border: 1px solid var(--wlo-border); border-radius: 8px;
-      background: #fafbfd; padding: 16px 18px;
+      background: var(--wlo-surface-2, var(--wlo-surface, #fafbfd));
+      padding: 16px 18px;
       display: flex; flex-direction: column; gap: 14px;
     }
     .preview-row { display: flex; gap: 16px; align-items: flex-start; }
@@ -268,8 +269,9 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
     .topic-row {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 14px;
-      &.editing { background: #f4f6f9; }
-      &.child { padding-left: 32px; background: #fafbfc; border-top: 1px solid #f1f3f5; }
+      &.editing { background: var(--wlo-bg); }
+      &.child   { padding-left: 32px; background: var(--wlo-surface-2, var(--wlo-bg));
+                  border-top: 1px solid var(--wlo-border); }
       .sort-handle { display: inline-flex; flex-direction: column; gap: 2px;
         button { background: none; border: 1px solid var(--wlo-border);
           border-radius: 4px; width: 22px; height: 18px; cursor: pointer;
@@ -309,7 +311,10 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       label.btn { cursor: pointer; }
     }
     .topic-save-bar {
-      padding: 10px 14px; background: #fff8eb; border-top: 1px solid #f5c45e;
+      padding: 10px 14px;
+      background: var(--wlo-accent-soft, #fff8eb);
+      color: var(--wlo-text);
+      border-top: 1px solid var(--wlo-border);
       display: flex; align-items: center; gap: 12px;
     }
 
@@ -349,17 +354,17 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       grid-template-columns: 110px 140px 1fr;
       gap: 12px; align-items: baseline;
       padding: 8px 14px;
-      border-bottom: 1px solid #f1f3f5;
+      border-bottom: 1px solid var(--wlo-border);
       font-size: .9rem;
       &:last-child { border-bottom: none; }
-      &.mod-action { background: #fff8eb; }
+      &.mod-action { background: var(--wlo-accent-soft, #fff8eb); color: var(--wlo-text); }
       .ts { color: var(--wlo-muted); font-variant-numeric: tabular-nums;
             font-size: .82rem; }
       .actor { color: var(--wlo-text); font-weight: 600;
                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .msg { color: var(--wlo-text);
-             code { background: #eef0f3; padding: 1px 5px; border-radius: 3px;
-                    font-size: .85em; } }
+             code { background: var(--wlo-bg); padding: 1px 5px;
+                    border-radius: 3px; font-size: .85em; } }
       .icon { margin-right: 6px; }
       .mod-badge {
         display: inline-block; padding: 1px 6px;
@@ -422,6 +427,30 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       white-space: nowrap;
       &:hover { color: var(--wlo-primary); }
       &.active {
+        color: var(--wlo-primary);
+        border-bottom-color: var(--wlo-primary);
+      }
+    }
+
+    /* Textlink-Tabs (z.B. Inbox-Filter) — visuell wie die oberen Tabs,
+       aber ohne Bottom-Border-Channel; nutzt einen Unterstrich beim
+       aktiven Eintrag. */
+    .inbox-filter-row {
+      display: flex; flex-wrap: wrap; align-items: center;
+      gap: 0 14px; margin-bottom: 14px;
+      font-size: .92rem;
+    }
+    .inbox-filter-label {
+      color: var(--wlo-muted); font-weight: 600;
+      font-size: .82rem; margin-right: 6px;
+    }
+    .link-tab {
+      background: none; border: none; padding: 4px 0; margin: 0;
+      cursor: pointer; font: inherit; font-size: .92rem; font-weight: 600;
+      color: var(--wlo-muted); white-space: nowrap;
+      border-bottom: 2px solid transparent;
+      &:hover { color: var(--wlo-primary); }
+      &.on {
         color: var(--wlo-primary);
         border-bottom-color: var(--wlo-primary);
       }
@@ -563,7 +592,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
           </svg>
           Statistik
         </button>
-        <button [class.active]="tab==='inbox'" (click)="tab='inbox'">
+        <button [class.active]="tab==='inbox'" (click)="tab='inbox'; load()">
           <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
             <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
             <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
@@ -1239,9 +1268,33 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
       @if (tab === 'inbox') {
         <div class="intro">
-          Hier liegen Ideen, die über die App eingereicht wurden und noch einem
-          Bereich zugeordnet werden müssen. Wähle rechts einen Ziel-Bereich aus
-          und verschiebe die Idee direkt — oder lösche Dubletten und Spam.
+          Hier liegen Einreichungen aus der edu-sharing-Inbox. Ohne Sammlung
+          gelistete Items müssen einer Herausforderung zugeordnet werden —
+          dafür rechts ein Ziel wählen und „Verschieben". Dubletten und Spam
+          lassen sich direkt löschen.
+        </div>
+        <div class="inbox-filter-row">
+          <span class="inbox-filter-label">Anzeigen:</span>
+          <button class="link-tab" [class.on]="inboxFilter === 'uncategorized'"
+                  (click)="setInboxFilter('uncategorized')">
+            Ohne Sammlung
+            @if (inboxCounts['uncategorized'] !== undefined) { ({{ inboxCounts['uncategorized'] }}) }
+          </button>
+          <button class="link-tab" [class.on]="inboxFilter === 'all'"
+                  (click)="setInboxFilter('all')">
+            Alle
+            @if (inboxCounts['all'] !== undefined) { ({{ inboxCounts['all'] }}) }
+          </button>
+          <button class="link-tab" [class.on]="inboxFilter === 'categorized'"
+                  (click)="setInboxFilter('categorized')">
+            In Sammlung
+            @if (inboxCounts['categorized'] !== undefined) { ({{ inboxCounts['categorized'] }}) }
+          </button>
+          <button class="link-tab" [class.on]="inboxFilter === 'app-submits'"
+                  (click)="setInboxFilter('app-submits')">
+            App-Einreichungen
+            @if (inboxCounts['app-submits'] !== undefined) { ({{ inboxCounts['app-submits'] }}) }
+          </button>
         </div>
 
         @if (loading()) {
@@ -1293,6 +1346,11 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                   }
                   @if (it.target_topic && topicsById[it.target_topic]) {
                     <span class="tag target">➜ {{ topicTitleFor(it.target_topic) }}</span>
+                  }
+                  @if (it.in_collection) {
+                    <span class="tag" style="background:#e6f6ec;color:#137333">
+                      ✓ In Sammlung
+                    </span>
                   }
                 </div>
               </div>
@@ -2246,9 +2304,9 @@ export class ModerationComponent implements OnInit {
       } else if (a.action === 'attachment_uploaded' && a.detail.size) {
         extra = ` (${this.formatSize(a.detail.size)})`;
       } else if (a.action === 'idea_submitted' && a.detail.anonymous) {
-        extra = ' <span style="color:#6b7280">(anonym)</span>';
+        extra = ' <span style="color:var(--wlo-muted)">(anonym)</span>';
       } else if (a.action === 'report_submitted' && a.detail.reason_excerpt) {
-        extra = `: <em style="color:#6b7280">„${this.escape(a.detail.reason_excerpt)}"</em>`;
+        extra = `: <em style="color:var(--wlo-muted)">„${this.escape(a.detail.reason_excerpt)}"</em>`;
       }
     }
     return `${label}: ${target}${extra}`;
@@ -2356,12 +2414,38 @@ export class ModerationComponent implements OnInit {
     this.loadReports();
   }
 
+  inboxFilter: 'uncategorized' | 'all' | 'categorized' | 'app-submits' = 'uncategorized';
+  inboxCounts: Record<string, number | undefined> = {};
+
+  setInboxFilter(f: 'uncategorized' | 'all' | 'categorized' | 'app-submits') {
+    if (this.inboxFilter === f) return;
+    this.inboxFilter = f;
+    this.load();
+  }
+
+  /** Holt die Counts für alle vier Filter parallel, damit die
+   *  Filter-Buttons live „(N)" zeigen. Wird beim Tab-Open + nach
+   *  Move/Delete-Aktionen aufgerufen. */
+  private loadInboxCounts() {
+    const filters: ('uncategorized' | 'all' | 'categorized' | 'app-submits')[] =
+      ['uncategorized', 'all', 'categorized', 'app-submits'];
+    for (const f of filters) {
+      this.api.inbox(f).subscribe({
+        next: (r) => (this.inboxCounts[f] = (r as { total?: number }).total ?? r.count),
+        error: () => {},
+      });
+    }
+  }
+
   load() {
     this.loading.set(true);
-    this.api.inbox().subscribe({
+    this.api.inbox(this.inboxFilter).subscribe({
       next: (r) => {
         this.items.set(r.items);
         this.loading.set(false);
+        // Counts mit aktualisieren — der aktuelle Filter ist schon da,
+        // die übrigen drei laden wir parallel im Hintergrund.
+        this.loadInboxCounts();
       },
       error: () => this.loading.set(false),
     });
@@ -2396,9 +2480,29 @@ export class ModerationComponent implements OnInit {
       },
       error: (e) => {
         this.movingId = null;
-        this.moveError[id] = e?.error?.detail || `Fehler (HTTP ${e?.status})`;
+        this.moveError[id] = this.friendlyMoveError(e);
       },
     });
+  }
+
+  /** Übersetzt häufige edu-sharing-Fehler in lesbare Mod-Hinweise.
+   *  Bleibt sprachlich kurz, damit der Hinweis neben der Idee Platz hat. */
+  private friendlyMoveError(e: any): string {
+    const detail: string = e?.error?.detail || '';
+    const status = e?.status || 0;
+    if (detail.includes('DAODuplicateNodeNameException') || status === 409) {
+      return 'Idee ist bereits in dieser Herausforderung referenziert.';
+    }
+    if (detail.includes('DAOSecurityException') || detail.includes('DAOToolPermissionException')) {
+      return 'Keine Berechtigung — der Admin muss die Sammlung freischalten.';
+    }
+    if (status === 401) return 'Nicht angemeldet.';
+    if (status === 403) return 'Keine Mod-Rechte für diese Aktion.';
+    if (status === 404) return 'Ziel-Herausforderung nicht gefunden.';
+    if (status === 502) return 'edu-sharing antwortet gerade nicht — bitte gleich nochmal probieren.';
+    // Fallback: erste Zeile des Detail-Strings, oder generisch
+    const firstLine = detail.split('\n')[0]?.slice(0, 120);
+    return firstLine || `Fehler (HTTP ${status || '?'})`;
   }
 
   resync() {

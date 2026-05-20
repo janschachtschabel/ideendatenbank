@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import sqlite3
@@ -112,10 +113,16 @@ def create_backup() -> Path:
         #    transportable Backups. Wenn Konfig-Migration nötig: separat
         #    bei der System-Env vornehmen.
 
-        # 4. ZIP packen
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 4. ZIP packen — atomar: erst in eine Temp-Datei im Zielordner
+        #    schreiben, dann per os.replace() umbenennen. Falls der Prozess
+        #    während des ZIP-Schreibens stirbt, bleibt nur die .tmp-Datei
+        #    liegen (wird beim nächsten Lauf manuell oder per Prune entfernt),
+        #    aber list_backups() listet keine kaputten Halb-ZIPs als gültig.
+        tmp_zip = zip_path.with_suffix(".zip.tmp")
+        with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
             for entry in tmp.iterdir():
                 zf.write(entry, arcname=entry.name)
+        os.replace(tmp_zip, zip_path)
 
     prune_old_backups()
     log.info("backup created: %s", zip_path.name)
@@ -153,14 +160,23 @@ def list_backups() -> list[dict]:
 
 
 def prune_old_backups() -> int:
-    """Behalte nur die neuesten settings.backup_keep Backups."""
+    """Behalte nur die neuesten settings.backup_keep Backups.
+    Räumt zusätzlich verwaiste `.zip.tmp`-Dateien weg (Crash während eines
+    Backup-Laufs)."""
     keep = max(1, int(settings.backup_keep))
+    removed = 0
+    # Reste vom letzten halb-fertigen Backup wegräumen
+    for stale in _backup_dir().glob(f"{BACKUP_NAME_PREFIX}*.zip.tmp"):
+        try:
+            stale.unlink()
+            log.info("stale backup tempfile pruned: %s", stale.name)
+        except Exception as e:
+            log.warning("prune (tmp) failed for %s: %s", stale.name, e)
     files = sorted(
         [p for p in _backup_dir().iterdir() if p.is_file()
          and p.name.startswith(BACKUP_NAME_PREFIX) and p.name.endswith(".zip")],
         reverse=True,
     )
-    removed = 0
     for old in files[keep:]:
         try:
             old.unlink()
@@ -293,10 +309,34 @@ async def restore_backup(zip_bytes: bytes) -> dict:
 
 def auto_restore_if_fresh() -> dict | None:
     """Stellt das jüngste Backup wieder her, wenn keine DB vorhanden ist.
-    Gibt das Restore-Manifest zurück oder None, wenn kein Restore lief."""
+    Gibt das Restore-Manifest zurück oder None, wenn kein Restore lief.
+
+    Sicherheits-Opt-in: Der Restore springt nur an, wenn im Backup-
+    Verzeichnis eine Marker-Datei liegt (`AUTO_RESTORE_OK` per Default,
+    konfigurierbar via `settings.backup_auto_restore_marker`). So kann
+    nicht ein versehentlich oder böswillig hineingelegtes ZIP automatisch
+    aktiviert werden — der Operator muss den Auto-Restore bewusst
+    freigeben (z.B. nach Volume-Migration).
+    """
     db_path = Path(settings.sqlite_path)
     if db_path.is_file() and db_path.stat().st_size >= 200:
         return None  # DB existiert und ist plausibel — kein Auto-Restore
+
+    marker_name = (settings.backup_auto_restore_marker or "").strip()
+    if not marker_name:
+        log.info(
+            "auto-restore: deaktiviert (kein Marker-Name konfiguriert)"
+        )
+        return None
+    marker = _backup_dir() / marker_name
+    if not marker.exists():
+        log.info(
+            "auto-restore: übersprungen — Marker fehlt (%s). "
+            "Zum Aktivieren: leere Datei mit diesem Namen ins Backup-"
+            "Verzeichnis legen.",
+            marker,
+        )
+        return None
 
     backups = list_backups()
     if not backups:
@@ -344,6 +384,17 @@ def auto_restore_if_fresh() -> dict | None:
     except Exception as e:
         log.exception("auto-restore: fehlgeschlagen: %s", e)
         return None
+
+    # Marker konsumieren — Auto-Restore ist ein einmaliger Vorgang. Wer
+    # nochmal automatisch restoren möchte (z.B. nach erneutem Volume-
+    # Verlust), muss den Marker erneut anlegen. Das verhindert, dass eine
+    # versehentlich gelöschte DB stillschweigend durch ein altes Backup
+    # ersetzt wird.
+    try:
+        marker.unlink()
+        log.info("auto-restore: Marker %s konsumiert", marker.name)
+    except Exception as e:
+        log.warning("auto-restore: Marker konnte nicht entfernt werden: %s", e)
 
     log.info("auto-restore: erfolgreich aus %s — Schema-Migration via init_db",
              newest["filename"])

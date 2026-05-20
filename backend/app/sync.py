@@ -466,29 +466,20 @@ async def _run_sync_locked() -> dict:
                     await _upsert_topic(con, ch, parent_id=tid)
                     topics_seen += 1
 
-                    # Architektur 2026-04-25 + 2026-05-11:
-                    #  Ideen können auf zwei Arten an einer Challenge hängen:
-                    #  (a) Reference: `ccm:io_reference`-Knoten in der Sammlung,
-                    #      `originalId` zeigt auf die Original-Idee in der Inbox.
-                    #      → HackathOERn-Standardvorgehensweise, klappt bei
-                    #      ausreichenden Tool-Permissions.
-                    #  (b) Direct Child: Original-`ccm:io` ist direkt unter der
-                    #      Challenge (via `_move`). Tritt auf, wenn der
-                    #      Reference-Pfad mangels Permission auf das `_move`-
-                    #      Fallback im Move-Endpoint zurückgefallen ist.
-                    # Wir crawlen beide Quellen + dedupliziern über die Knoten-ID.
-                    seen_ideas: set[str] = set()
-
-                    # (a) References — der saubere Pfad
+                    # HackathOERn-Architektur: Ideen leben als ccm:io in der
+                    # Inbox. Sammlungen (Challenges) hängen sie als
+                    # `ccm:io_reference`-Knoten ein (originalId → Inbox-Knoten).
+                    # Direct-Children-Pattern wurde 2026-05-11 aus dem Code
+                    # entfernt; bestehende Direct-Children wurden rückgängig
+                    # gemacht und als Reference neu eingehängt.
                     ch_refs = await _safe(
                         edu_sharing.client.collection_references(chid, max_items=200),
                         f"challenge:{chid}",
                     ) or {}
                     for ref_node in ch_refs.get("references") or []:
                         ref_id = (ref_node.get("ref") or {}).get("id")
-                        if not ref_id or ref_id in seen_ideas:
+                        if not ref_id:
                             continue
-                        seen_ideas.add(ref_id)
                         try:
                             await _upsert_idea(
                                 con, ref_node, kind="io", topic_id=chid,
@@ -498,28 +489,6 @@ async def _run_sync_locked() -> dict:
                         except Exception as e:
                             log.warning("sync upsert ref %s failed: %s", ref_id, e)
                             skipped.append(f"idea-ref:{ref_id}")
-
-                    # (b) Direct ccm:io-Children — Fallback-Pfad
-                    ch_children = await _safe(
-                        edu_sharing.client.node_children(chid, max_items=200),
-                        f"challenge-children:{chid}",
-                    ) or {}
-                    for child in ch_children.get("nodes") or []:
-                        if child.get("type") != "ccm:io":
-                            continue
-                        cid = (child.get("ref") or {}).get("id")
-                        if not cid or cid in seen_ideas:
-                            continue
-                        seen_ideas.add(cid)
-                        try:
-                            await _upsert_idea(
-                                con, child, kind="io", topic_id=chid,
-                                main_content_id=cid,
-                            )
-                            ideas_seen += 1
-                        except Exception as e:
-                            log.warning("sync upsert child %s failed: %s", cid, e)
-                            skipped.append(f"idea-child:{cid}")
 
                     # Anhänge-Sammlungen sind ccm:map-Geschwister mit Keyword
                     # `attachment-of:<idea-id>` — an die Idee verknüpfen.
@@ -550,6 +519,21 @@ async def _run_sync_locked() -> dict:
             # 30er-Limit der ranking_snapshot-Tabelle nicht in 2.5h voll ist.
             if _should_capture_snapshot(con):
                 _capture_ranking_snapshot(con, _iso_now())
+
+            # Geisterzeilen aufräumen: Inbox-Originale (deren id auch als
+            # original_id eines Reference-Eintrags vorkommt) gehören NICHT
+            # in den Public-Cache — der Reference-Eintrag repräsentiert sie
+            # in den Challenges. So bleibt die Idee-Liste pro Sync sauber,
+            # auch wenn ein Knoten umgehängt wurde.
+            con.execute(
+                """DELETE FROM idea WHERE id IN (
+                       SELECT original_id FROM idea
+                       WHERE original_id IS NOT NULL
+                   )"""
+            )
+            con.execute(
+                "DELETE FROM idea_fts WHERE id NOT IN (SELECT id FROM idea)"
+            )
 
             # Activity-Log gleich mit ausdünnen — billig und passt zum Sync-Tick.
             _prune_activity_log(con)

@@ -134,7 +134,56 @@ Beispiel Cron-Zeile mit Overrides:
 | Quota überschritten | Bei persönlichem Drive-Account: alte ZIPs löschen oder `RCLONE_MAX_AGE_DAYS` reduzieren. |
 | Sync läuft, aber Mod sieht nichts im App-UI | Korrekt — die App weiß nichts von der Drive-Spiegelung. Status nur über die Logdatei. |
 
-## 8. Wiederherstellung aus Drive
+## 8. Verschlüsselung der Off-Site-Backups (DSGVO-Empfehlung)
+
+Die Backup-ZIPs landen **standardmäßig unverschlüsselt** in Google Drive.
+Die SQLite-DB enthält personenbezogene Daten (Usernamen, Aktivitätsprotokoll,
+Mitmachen/Folgen-Marker, Report-Texte) — laut DSGVO ist das mindestens als
+„personenbezogen, schutzbedürftig" einzustufen. Drei einfache Optionen,
+absteigend nach Komfort:
+
+**Option A — `rclone crypt` (empfohlen)**
+
+Ein zweiter rclone-Remote, der den ersten transparent verschlüsselt:
+
+```bash
+rclone config
+# n) New remote
+# name: gdrive-enc
+# storage: crypt
+# remote: gdrive:HackathOERn-Backups-enc
+# Filename encryption: standard
+# Directory name encryption: true
+# Eigene Passwörter wählen (lange Passphrases, an sicherem Ort sichern!)
+```
+
+In `backup-to-gdrive.sh`/`.ps1` dann `RCLONE_REMOTE=gdrive-enc` setzen.
+Drive sieht nur Chiffrate, jeder Restore geht aber transparent über
+`rclone copy gdrive-enc:…`.
+
+⚠ Passphrase verlieren = Backups unbrauchbar. In einem Passwort-Manager
+**außerhalb** des Servers sichern.
+
+**Option B — GPG vor Upload**
+
+Im Backup-Script vor `rclone copy` einfügen:
+
+```bash
+gpg --batch --yes --symmetric --cipher-algo AES256 \
+    --passphrase-file /etc/ideendb/backup.pass \
+    "$BACKUP_DIR/$ZIP"
+rclone copy "$BACKUP_DIR/$ZIP.gpg" "$RCLONE_REMOTE:$RCLONE_PATH/"
+```
+
+Restore: `gpg --decrypt < backup.zip.gpg > backup.zip`.
+
+**Option C — Drive-Client-seitige Verschlüsselung deaktivieren (NICHT empfohlen)**
+
+Wenn dein Drive ohnehin in einer abgeschotteten Workspace-Tenant liegt
+und die Risiko-Einschätzung ergibt: kein Handlungsbedarf, dann dokumentiere
+diese Entscheidung schriftlich (im Verarbeitungsverzeichnis).
+
+## 9. Wiederherstellung aus Drive
 
 1. ZIP aus Drive auf den Server kopieren (Web-UI → Download, oder `rclone copy gdrive:HackathOERn-Backups/ideendb-backup-XXX.zip .`).
 2. Im Mod-UI: Tab **Backup** → **Backup hochladen + wiederherstellen** → ZIP wählen.

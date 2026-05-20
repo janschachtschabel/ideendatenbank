@@ -98,4 +98,17 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/api/v1/health > /dev/null || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
+# `--proxy-headers` macht uvicorn die Reverse-Proxy-Header (X-Forwarded-For,
+# X-Forwarded-Proto) auswerten — nötig, damit Rate-Limiting auf der echten
+# Client-IP arbeitet statt auf 127.0.0.1 (= dem nginx-Container/-Host).
+#
+# `--forwarded-allow-ips="*"` ist im Container sicher, weil wir laut
+# README ohnehin nur an 127.0.0.1 binden (siehe docker-compose.yml
+# Ports-Mapping) und damit nur der lokale Reverse-Proxy direkt sprechen
+# kann. Wer das Image ohne Proxy direkt ans öffentliche Netz hängt,
+# sollte den Wert auf die nginx-IP beschränken — dort fließt der
+# X-Forwarded-For-Header sonst spoofbar in die Rate-Limits ein.
+CMD ["uvicorn", "app.main:app", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--log-level", "info", \
+     "--proxy-headers", "--forwarded-allow-ips=*"]

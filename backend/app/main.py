@@ -83,8 +83,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Nur tatsächlich genutzte Methoden / Header erlauben — minimiert die
+    # Angriffsfläche bei einer kompromittierten Origin-Domain.
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "X-Requested-With",
+    ],
 )
 
 app.include_router(router, prefix="/api/v1")

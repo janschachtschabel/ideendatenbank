@@ -40,6 +40,20 @@ class Settings(BaseSettings):
     backup_dir: Path = Path("./data/backups")
     backup_interval_hours: int = 24
     backup_keep: int = 3
+    # Auto-Restore beim Erststart nur, wenn diese Marker-Datei im
+    # Backup-Verzeichnis existiert (`<backup_dir>/AUTO_RESTORE_OK`).
+    # Sicherheits-Opt-in: verhindert, dass ein versehentlich oder
+    # böswillig hineingelegtes ZIP automatisch produktiv geladen wird.
+    backup_auto_restore_marker: str = "AUTO_RESTORE_OK"
+
+    # Upload-Größen-Limits (Bytes). Schützt vor RAM-/Disk-Ausnutzung.
+    # Schwellwerte gelten je Einzel-Upload und gelten zusätzlich zu
+    # ggf. davor geschalteten Reverse-Proxy-Limits (nginx
+    # client_max_body_size).
+    upload_image_max_bytes: int = 10 * 1024 * 1024       # 10 MB Vorschaubilder
+    upload_content_max_bytes: int = 50 * 1024 * 1024     # 50 MB Idee-Hauptinhalte
+    upload_attachment_max_bytes: int = 50 * 1024 * 1024  # 50 MB pro Anhang
+    upload_restore_max_bytes: int = 200 * 1024 * 1024    # 200 MB Backup-Restore
 
     # KI (optional)
     b_api_key: str | None = Field(default=None, alias="B_API_KEY")

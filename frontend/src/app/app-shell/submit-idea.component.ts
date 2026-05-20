@@ -38,6 +38,15 @@ import { TaxonomyEntry, Topic } from '../models';
                                  cursor: pointer; font-weight: 600; font-size: .85rem;
                                  &:hover { background: #1a7f37; color: #fff; } } }
     .error { color: #b00020; font-size: .9rem; }
+    .captcha-block {
+      background: var(--wlo-accent-soft, #fff8db);
+      border: 1px solid var(--wlo-border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .captcha-block input[type="number"] { margin-bottom: 0; }
     input[type="file"] {
       width: 100%; padding: 8px;
       border: 1px dashed var(--wlo-border); border-radius: 8px;
@@ -221,6 +230,32 @@ import { TaxonomyEntry, Topic } from '../models';
           <div class="status-line">{{ uploadStatus }}</div>
         }
 
+        @if (!isLoggedIn()) {
+          <div class="captcha-block">
+            <label for="captcha-answer">
+              Spam-Schutz: <strong>{{ captchaQuestion || 'wird geladen…' }}</strong>
+            </label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input
+                id="captcha-answer"
+                type="number"
+                inputmode="numeric"
+                autocomplete="off"
+                [(ngModel)]="captchaAnswer"
+                style="width: 100px"
+                [disabled]="!captchaToken"
+              />
+              <button type="button" class="link-btn" (click)="loadCaptcha()">
+                Neue Aufgabe
+              </button>
+            </div>
+            <small style="color: var(--wlo-muted)">
+              Eine einfache Rechenaufgabe verhindert automatische Spam-Einreichungen.
+              Mit WLO-Login entfällt der Spam-Schutz.
+            </small>
+          </div>
+        }
+
         <div style="display: flex; gap: 10px; align-items: center;">
           <button class="btn" (click)="submit()" [disabled]="!title.trim() || busy">
             {{ busy ? 'Wird gesendet…' : 'Idee einreichen' }}
@@ -265,6 +300,30 @@ export class SubmitIdeaComponent implements OnInit {
   previewFile: File | null = null;
   contentFile: File | null = null;
 
+  // Mathe-Captcha — nur für anonyme Submits. Eingeloggte User sehen das
+  // Feld nicht und schicken die Felder leer (Backend prüft dann nichts).
+  captchaToken = '';
+  captchaQuestion = '';
+  captchaAnswer: string = '';
+
+  isLoggedIn(): boolean { return this.api.hasCredentials(); }
+
+  loadCaptcha() {
+    if (this.isLoggedIn()) return;
+    this.captchaToken = '';
+    this.captchaQuestion = '';
+    this.captchaAnswer = '';
+    this.api.getCaptcha().subscribe({
+      next: (c) => {
+        this.captchaToken = c.token;
+        this.captchaQuestion = c.question;
+      },
+      error: () => {
+        this.captchaQuestion = 'Spam-Schutz konnte nicht geladen werden.';
+      },
+    });
+  }
+
   placeholderText =
     'Beschreibe deine Idee frei. Mögliche Leitfragen:\n' +
     '• Welches Problem adressiert die Idee?\n' +
@@ -288,6 +347,8 @@ export class SubmitIdeaComponent implements OnInit {
         this.selectedEvents.add(this.presetEvent);
       }
     });
+    // Captcha lazy laden — nur, wenn der User nicht eingeloggt ist.
+    if (!this.isLoggedIn()) this.loadCaptcha();
   }
 
   isPreset(): boolean {
@@ -321,6 +382,18 @@ export class SubmitIdeaComponent implements OnInit {
   }
 
   submit() {
+    // Frontend-seitige Vorprüfung — gibt sofortige Rückmeldung statt
+    // erst nach Backend-Rejected.
+    if (!this.isLoggedIn()) {
+      if (!this.captchaToken) {
+        this.error = 'Bitte warte, bis der Spam-Schutz geladen ist.';
+        return;
+      }
+      if (!String(this.captchaAnswer).trim()) {
+        this.error = 'Bitte beantworte die Rechenaufgabe (Spam-Schutz).';
+        return;
+      }
+    }
     this.busy = true;
     this.error = '';
     this.successMessage = '';
@@ -338,6 +411,8 @@ export class SubmitIdeaComponent implements OnInit {
         phase: this.phase || null,
         event: this.event || null,
         events: Array.from(this.selectedEvents),
+        captcha_token: this.isLoggedIn() ? null : this.captchaToken,
+        captcha_answer: this.isLoggedIn() ? null : String(this.captchaAnswer).trim(),
       })
       .subscribe({
         next: async (r) => {
@@ -373,6 +448,10 @@ export class SubmitIdeaComponent implements OnInit {
           this.busy = false;
           this.uploadStatus = '';
           this.error = e?.error?.detail || `Fehler (HTTP ${e?.status})`;
+          // Backend hat das Captcha entweder verbraucht (Submit lief
+          // weiter und scheiterte später) oder als ungültig abgelehnt —
+          // in beiden Fällen brauchen wir ein neues Token.
+          if (!this.isLoggedIn()) this.loadCaptcha();
         },
       });
   }
@@ -386,5 +465,8 @@ export class SubmitIdeaComponent implements OnInit {
     this.contentFile = null;
     // File-Inputs visuell zurücksetzen (clear ist bei <input type="file"> tricky)
     document.querySelectorAll<HTMLInputElement>('input[type="file"]').forEach((el) => (el.value = ''));
+    // Frisches Captcha für eventuelle Folge-Einreichung
+    this.captchaAnswer = '';
+    if (!this.isLoggedIn()) this.loadCaptcha();
   }
 }

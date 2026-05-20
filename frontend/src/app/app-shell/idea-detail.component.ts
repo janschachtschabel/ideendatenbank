@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
-import { Attachment, Idea, TaxonomyEntry } from '../models';
+import { Attachment, Idea, TaxonomyEntry, Topic } from '../models';
 import { ShareMenuComponent } from './share-menu.component';
 
 @Component({
@@ -12,30 +12,44 @@ import { ShareMenuComponent } from './share-menu.component';
   styles: [`
     :host { display: block; }
 
-    /* === Header band === */
+    /* === Header band ===
+       Nutzt Hero-Tokens (vom Theme gesetzt). Damit ist die Header-Farbe
+       konsistent mit dem Hero auf der Startseite und passt sich automatisch
+       an Dark-Mode + Hackathoern-Theme an, statt fest auf Dunkelblau zu sein. */
     .header {
-      background: linear-gradient(135deg, var(--wlo-primary, #002855), var(--wlo-primary-600, #003c7e));
-      color: #fff;
+      background: linear-gradient(135deg,
+                  var(--wlo-hero-bg-from, var(--wlo-primary, #002855)),
+                  var(--wlo-hero-bg-to,   var(--wlo-primary-600, #003c7e)));
+      color: var(--wlo-hero-text, #fff);
       padding: 28px 0 40px;
     }
     .header .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
     .crumb { display: flex; gap: 8px; align-items: center; font-size: .85rem;
-             color: rgba(255,255,255,.85); margin-bottom: 14px; }
-    .crumb button { background: none; border: none; color: #fff; cursor: pointer;
-                    font-weight: 600; padding: 2px 0; &:hover { text-decoration: underline; } }
+             color: var(--wlo-hero-text-muted, rgba(255,255,255,.85));
+             margin-bottom: 14px; }
+    .crumb button { background: none; border: none; color: var(--wlo-hero-text, #fff);
+                    cursor: pointer; font-weight: 600; padding: 2px 0;
+                    &:hover { text-decoration: underline; } }
     .crumb span { opacity: .6; }
-    h1 { margin: 0 0 10px; font-size: clamp(1.5rem, 2.6vw, 2.1rem); line-height: 1.2; max-width: 960px; }
+    .crumb-topic { color: var(--wlo-hero-text, #fff); opacity: .92;
+                    font-weight: 600; padding: 2px 0;
+                    background: none; border: none; cursor: pointer; font: inherit;
+                    &:hover { text-decoration: underline; opacity: 1; } }
+    h1 { margin: 0 0 10px; font-size: clamp(1.5rem, 2.6vw, 2.1rem); line-height: 1.2;
+         max-width: 960px; color: var(--wlo-hero-text, #fff); }
     .header-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: .9rem;
-                   color: rgba(255,255,255,.92); margin-bottom: 12px; }
-    .header-meta a { color: #f5b600; text-decoration: none; &:hover { text-decoration: underline; } }
+                   color: var(--wlo-hero-text-muted, rgba(255,255,255,.92));
+                   margin-bottom: 12px; }
+    .header-meta a { color: var(--wlo-accent, #f5b600); text-decoration: none;
+                     &:hover { text-decoration: underline; } }
     .header-meta .muted-username { opacity: .7; font-size: .85rem; }
     .header-tags { display: flex; gap: 8px; flex-wrap: wrap; }
     .tag {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 4px 12px; border-radius: 999px; font-size: .78rem; font-weight: 600;
       text-transform: uppercase; letter-spacing: .04em;
-      background: rgba(255,255,255,.14); color: #fff;
-      border: 1px solid rgba(255,255,255,.2);
+      background: rgba(127,127,127,.18); color: var(--wlo-hero-text, #fff);
+      border: 1px solid rgba(127,127,127,.28);
     }
     .tag.phase { background: var(--wlo-accent, #f5b600); color: #1a2235; border-color: transparent; }
     .tag.event::before { content: '📅 '; }
@@ -539,6 +553,27 @@ import { ShareMenuComponent } from './share-menu.component';
             <h2>Idee bearbeiten</h2>
             <button class="x" (click)="editing=false">×</button>
           </div>
+          @if (api.isModerator()) {
+            <label>Herausforderung
+              <small style="font-weight:400; color:var(--wlo-muted)">
+                · Auswahl wird sofort übernommen (Reference wird umgehängt)
+              </small>
+            </label>
+            <select [ngModel]="i.topic_id || ''"
+                    (ngModelChange)="onChangeTopic(i.id, $event)"
+                    [disabled]="topicChangeBusy">
+              <option value="">— keine —</option>
+              @for (t of challengeTopics(); track t.id) {
+                <option [value]="t.id">{{ t.title }}</option>
+              }
+            </select>
+            @if (topicChangeStatus) {
+              <div class="quick-status">{{ topicChangeStatus }}</div>
+            }
+            @if (topicChangeError) {
+              <div class="quick-error">{{ topicChangeError }}</div>
+            }
+          }
           <label>Titel</label>
           <input [(ngModel)]="edit.title" />
           <label>Phase
@@ -641,6 +676,14 @@ import { ShareMenuComponent } from './share-menu.component';
             <button class="back-inline" (click)="back.emit()">← Zurück</button>
             <span>/</span>
             <button (click)="back.emit()">Ideen</button>
+            @if (topicTitle(i) && i.topic_id) {
+              <span>/</span>
+              <button class="crumb-topic" type="button"
+                      (click)="openTopic.emit(i.topic_id!)"
+                      title="Alle Ideen in dieser Herausforderung zeigen">
+                {{ topicTitle(i) }}
+              </button>
+            }
           </nav>
           <h1>{{ i.title }}</h1>
           <div class="header-meta">
@@ -928,7 +971,28 @@ import { ShareMenuComponent } from './share-menu.component';
               <p class="hint" style="margin: 0 0 10px; font-size: .82rem;">
                 Änderung wird sofort am edu-sharing-Node gespeichert (Keywords).
               </p>
-              <label>Phase
+              @if (api.isModerator()) {
+                <label>Herausforderung
+                  <small style="font-weight:400; color:var(--wlo-muted)">
+                    · Reference wird umgehängt
+                  </small>
+                </label>
+                <select [ngModel]="i.topic_id || ''"
+                        (ngModelChange)="onChangeTopic(i.id, $event)"
+                        [disabled]="topicChangeBusy">
+                  <option value="">— keine —</option>
+                  @for (t of challengeTopics(); track t.id) {
+                    <option [value]="t.id">{{ t.title }}</option>
+                  }
+                </select>
+                @if (topicChangeStatus) {
+                  <div class="quick-status">{{ topicChangeStatus }}</div>
+                }
+                @if (topicChangeError) {
+                  <div class="quick-error">{{ topicChangeError }}</div>
+                }
+              }
+              <label [style.margin-top]="api.isModerator() ? '8px' : '0'">Phase
                 @if (idea()?.allowed_next_phases?.length &&
                      idea()!.allowed_next_phases!.length < phases.length) {
                   <small style="font-weight:400; color:var(--wlo-muted)">
@@ -1104,6 +1168,9 @@ export class IdeaDetailComponent implements OnChanges {
   @Input() repoBaseUrl = 'https://redaktion.openeduhub.net';
   @Output() back = new EventEmitter<void>();
   @Output() requestLogin = new EventEmitter<void>();
+  /** Klick auf den Topic-Crumb im Header — die Eltern-Shell soll auf die
+   *  Ideen-Liste umschalten und nach diesem Topic vorfiltern. */
+  @Output() openTopic = new EventEmitter<string>();
 
   idea = signal<Idea | null>(null);
   newComment = '';
@@ -1218,6 +1285,15 @@ export class IdeaDetailComponent implements OnChanges {
   };
   phases: TaxonomyEntry[] = [];
   events: TaxonomyEntry[] = [];
+  /** Topic-Liste für Anzeige (Breadcrumb) + Herausforderungs-Wechsel (Mod).
+   *  Als Signal, damit das Template re-rendert sobald die async-Antwort
+   *  da ist — sonst sähen ausgeloggte User den Topic-Crumb nicht (idea kommt
+   *  vor topics, ohne signal kein zweiter Render). */
+  topics = signal<Topic[]>([]);
+
+  topicChangeBusy = false;
+  topicChangeStatus = '';
+  topicChangeError = '';
 
   ngOnChanges(ch: SimpleChanges) {
     if (ch['ideaId']) this.load();
@@ -1249,6 +1325,7 @@ export class IdeaDetailComponent implements OnChanges {
     // Taxonomien lazy laden, falls noch nicht vorhanden (für Quick-Edit-Dropdowns)
     if (!this.phases.length) this.api.listPhases().subscribe((p) => (this.phases = p));
     if (!this.events.length)  this.api.listEvents().subscribe((e) => (this.events = e));
+    if (!this.topics().length) this.api.topics().subscribe((t) => this.topics.set(t));
 
     // Eigenen Report-Status laden (für „bereits gemeldet"-Hinweis im Melden-Dialog)
     if (this.api.hasCredentials()) {
@@ -1270,6 +1347,55 @@ export class IdeaDetailComponent implements OnChanges {
         hour: '2-digit', minute: '2-digit',
       });
     } catch { return iso; }
+  }
+
+  /** Topic-Titel für die Header-Breadcrumb. Wenn Topic noch nicht aus
+   *  api.topics() geladen ist, leerer Fallback. */
+  topicTitle(i: Idea): string {
+    if (!i.topic_id) return '';
+    return this.topics().find((t) => t.id === i.topic_id)?.title || '';
+  }
+
+  /** Liste der Sub-Topics (Ebene 2 / Challenges) für den Mod-Dropdown.
+   *  Top-Level-Themen filtern wir raus — Ideen hängen typischerweise
+   *  unter einer Challenge, nicht direkt im Themengebiet. */
+  challengeTopics(): Topic[] {
+    return this.topics()
+      .filter((t) => t.parent_id)
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  onChangeTopic(ideaId: string, newTopicId: string) {
+    if (!newTopicId) return;
+    this.topicChangeBusy = true;
+    this.topicChangeStatus = '';
+    this.topicChangeError = '';
+    this.api.changeIdeaTopic(ideaId, newTopicId).subscribe({
+      next: (r) => {
+        this.topicChangeBusy = false;
+        this.topicChangeStatus = r.no_op
+          ? 'Bereits in dieser Herausforderung.'
+          : `Verschoben nach „${r.moved_to}".`;
+        // Falls eine neue Reference-ID erzeugt wurde, wechseln wir auf sie.
+        if (r.result_id && r.result_id !== ideaId) {
+          this.ideaId = r.result_id;
+          this.load();
+        } else {
+          this.load({ keepCurrent: true });
+        }
+      },
+      error: (e) => {
+        this.topicChangeBusy = false;
+        const detail = e?.error?.detail || '';
+        if (detail.includes('DAOSecurityException') || detail.includes('DAOToolPermissionException')) {
+          this.topicChangeError = 'Keine Berechtigung für diese Sammlung.';
+        } else if (e?.status === 409) {
+          this.topicChangeError = 'Idee ist bereits in dieser Herausforderung.';
+        } else {
+          this.topicChangeError = detail || `Fehler (HTTP ${e?.status || '?'})`;
+        }
+      },
+    });
   }
 
   /** Liefert die Phase-Taxonomie-Einträge, die der aktuelle Caller setzen darf.

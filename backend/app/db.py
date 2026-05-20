@@ -167,6 +167,19 @@ CREATE INDEX IF NOT EXISTS idx_activity_ts        ON activity_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_actor     ON activity_log (actor, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_action    ON activity_log (action, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_target_id ON activity_log (target_id);
+
+-- Einmalige Mathe-Captcha-Tokens für anonyme Submits. Schlank, ohne
+-- Drittpartei. Hält Drive-by-Bots fern, ist aber bewusst KEIN Schutz
+-- gegen gezielte Angriffe (eval('3+7') trivial). Auto-Cleanup beim
+-- Anlegen neuer Tokens.
+CREATE TABLE IF NOT EXISTS captcha_challenge (
+    token       TEXT PRIMARY KEY,
+    answer      INTEGER NOT NULL,
+    expires_at  TEXT NOT NULL,
+    used        INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_captcha_expires ON captcha_challenge(expires_at);
 """
 
 

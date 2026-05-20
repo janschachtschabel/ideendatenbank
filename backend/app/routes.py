@@ -60,6 +60,168 @@ def _safe_get(row, key: str):
         return None
 
 
+# ---- URL- und Upload-Helfer (Security) ----------------------------------
+
+_SAFE_URL_SCHEMES = ("http://", "https://")
+
+
+def _validate_external_url(value: str | None, *, field: str = "URL") -> str | None:
+    """Akzeptiert nur http(s)-URLs. Verhindert `javascript:`/`data:`/
+    `file:`-Schemes, die später z.B. als Link gerendert werden könnten
+    (XSS-Vektor). Leere Strings → None."""
+    if value is None:
+        return None
+    v = value.strip()
+    if not v:
+        return None
+    low = v.lower()
+    if not low.startswith(_SAFE_URL_SCHEMES):
+        raise HTTPException(
+            400,
+            f"Ungültige {field}: nur http(s)-Adressen erlaubt "
+            f"(z.B. https://example.org).",
+        )
+    if len(v) > 2000:
+        raise HTTPException(400, f"{field} zu lang (max 2000 Zeichen)")
+    return v
+
+
+async def _read_upload_capped(file: UploadFile, max_bytes: int) -> bytes:
+    """Liest einen UploadFile chunk-weise und bricht ab, sobald `max_bytes`
+    überschritten wird. Verhindert RAM-DoS via riesige Uploads — `await
+    file.read()` ohne Limit würde alles vollständig laden."""
+    chunks: list[bytes] = []
+    total = 0
+    chunk_size = 1024 * 1024  # 1 MB Schritte
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            mb = max_bytes // (1024 * 1024)
+            raise HTTPException(413, f"Datei zu groß (max {mb} MB)")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+# LIKE-Wildcards in User-Input escapen — `%` und `_` würden sonst als
+# Pattern wirken (Mod kann ungewollt z.B. mit `%` alle Datensätze ziehen
+# oder Ressourcen via `%%%%...` belasten).
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _build_update_set(
+    assignments: list[tuple[str, object]],
+    allowed_columns: frozenset[str],
+) -> tuple[str, list[object]]:
+    """Baut sicher eine `SET col=?, col=?`-Klausel aus (Spaltenname, Wert).
+
+    Werte gehen weiterhin parametrisiert (`?`), Spaltennamen werden gegen
+    eine Whitelist geprüft — so kann niemals User-Input als Spaltenname
+    in die SQL gelangen, selbst wenn der Aufruf-Code sich später ändert.
+    Wirft ValueError bei nicht erlaubten Spalten (= Programmierfehler,
+    nie aus User-Daten ableitbar).
+    """
+    fragments: list[str] = []
+    params: list[object] = []
+    for col, value in assignments:
+        if col not in allowed_columns:
+            # Hart abbrechen statt still ignorieren — soll als Bug auffallen.
+            raise ValueError(f"Spalte nicht in Whitelist: {col!r}")
+        fragments.append(f"{col}=?")
+        params.append(value)
+    return ", ".join(fragments), params
+
+
+# ---- Mathe-Captcha (gegen Bot-Spam beim anonymen Submit) -----------------
+#
+# Bewusste Design-Entscheidungen:
+#   - Kein Drittanbieter (kein hCaptcha/reCAPTCHA → DSGVO-neutral, kein
+#     Tracking, kein Bilderrätsel-UX).
+#   - Schützt nur gegen generische Drive-by-Bots. Wer die Plattform
+#     gezielt angreift, baut in 5 Zeilen einen Bypass — dafür greifen
+#     Rate-Limit + Auth.
+#   - NUR für anonyme Submits Pflicht; eingeloggte User skippen das.
+
+import secrets as _secrets
+
+CAPTCHA_TTL_SECONDS = 600  # 10 Min Zeit zum Lösen
+
+
+def _captcha_make_question() -> tuple[str, int]:
+    """Erzeugt eine einfache Plus/Minus-Aufgabe mit zweistelligen Werten.
+    Ergebnis ist immer ≥ 0 (keine negativen Antworten, damit ein
+    nummerisches Eingabefeld ohne Vorzeichen reicht)."""
+    a = _secrets.randbelow(13) + 2    # 2..14
+    b = _secrets.randbelow(10) + 1    # 1..10
+    if a >= b and _secrets.randbelow(2):
+        return f"Was ist {a} − {b}?", a - b
+    return f"Was ist {a} + {b}?", a + b
+
+
+def _captcha_cleanup(con) -> None:
+    now = datetime.now(UTC).isoformat()
+    con.execute(
+        "DELETE FROM captcha_challenge WHERE expires_at < ? OR used = 1",
+        (now,),
+    )
+
+
+def _captcha_issue() -> dict:
+    question, answer = _captcha_make_question()
+    token = _secrets.token_urlsafe(18)
+    now = datetime.now(UTC)
+    expires = (now + timedelta(seconds=CAPTCHA_TTL_SECONDS)).isoformat()
+    with connect() as con:
+        _captcha_cleanup(con)
+        con.execute(
+            "INSERT INTO captcha_challenge (token, answer, expires_at, used, created_at) "
+            "VALUES (?, ?, ?, 0, ?)",
+            (token, answer, expires, now.isoformat()),
+        )
+    return {"token": token, "question": question, "ttl_seconds": CAPTCHA_TTL_SECONDS}
+
+
+def _captcha_verify(token: str | None, answer: int | str | None) -> None:
+    """Wirft 400 wenn Token unbekannt, abgelaufen, schon verbraucht oder
+    Antwort falsch. Markiert als used (Single-Use), wenn erfolgreich."""
+    if not token or answer is None or str(answer).strip() == "":
+        raise HTTPException(400, "Captcha-Lösung fehlt")
+    try:
+        ans_int = int(str(answer).strip())
+    except ValueError:
+        raise HTTPException(400, "Captcha-Lösung muss eine Zahl sein")
+    now = datetime.now(UTC).isoformat()
+    with connect() as con:
+        row = con.execute(
+            "SELECT answer, expires_at, used FROM captcha_challenge WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(400, "Captcha abgelaufen oder unbekannt — bitte neu laden")
+        if row["used"]:
+            raise HTTPException(400, "Captcha schon verwendet — bitte neu laden")
+        if row["expires_at"] < now:
+            raise HTTPException(400, "Captcha abgelaufen — bitte neu laden")
+        if int(row["answer"]) != ans_int:
+            raise HTTPException(400, "Captcha-Antwort falsch — bitte neu versuchen")
+        # Single-Use: sofort löschen (statt nur als used markieren) hält
+        # die Tabelle klein.
+        con.execute("DELETE FROM captcha_challenge WHERE token = ?", (token,))
+
+
+@router.get("/captcha", tags=["public"])
+def captcha_new():
+    """Liefert eine frische Mathe-Aufgabe + Single-Use-Token.
+
+    Frontend rendert `question` als Klartext-Frage, sammelt die Antwort
+    und sendet beim anonymen `POST /ideas` `captcha_token` +
+    `captcha_answer` mit. Eingeloggte User brauchen nichts davon."""
+    return _captcha_issue()
+
+
 def _attachment_from_node(n: dict) -> dict:
     """Normalise an edu-sharing ccm:io node into our attachment payload."""
     props = n.get("properties") or {}
@@ -210,20 +372,25 @@ async def edit_topic(
                 e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
             )
 
-    set_parts: list[str] = []
-    params: list = []
+    # SET-Klausel über Whitelist-Helper bauen — Spaltennamen werden gegen
+    # eine harte Liste geprüft, Werte gehen parametrisiert rein. So bleibt
+    # die SQL injection-sicher, auch wenn jemand später User-Input in die
+    # assignments-Liste packen sollte.
+    _TOPIC_UPDATABLE = frozenset({"title", "description", "color", "modified_at"})
+    assignments: list[tuple[str, object]] = []
     if body.title is not None:
-        set_parts.append("title=?"); params.append(body.title)
+        assignments.append(("title", body.title))
     if body.description is not None:
-        set_parts.append("description=?"); params.append(body.description)
+        assignments.append(("description", body.description))
     if body.color is not None:
-        set_parts.append("color=?"); params.append(body.color)
-    if set_parts:
-        set_parts.append("modified_at=?"); params.append(sync_mod._iso_now())
+        assignments.append(("color", body.color))
+    if assignments:
+        assignments.append(("modified_at", sync_mod._iso_now()))
+        set_sql, params = _build_update_set(assignments, _TOPIC_UPDATABLE)
         params.append(topic_id)
         with connect() as con:
             con.execute(
-                f"UPDATE topic SET {', '.join(set_parts)} WHERE id=?", params,
+                f"UPDATE topic SET {set_sql} WHERE id=?", params,
             )
     _log_activity(
         action="topic_edited", authorization=authorization, is_mod=True,
@@ -288,7 +455,7 @@ async def upload_topic_preview(
     await _require_moderator(authorization)
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(400, "Vorschaubild muss ein Bild sein (image/*).")
-    data = await file.read()
+    data = await _read_upload_capped(file, settings.upload_image_max_bytes)
     if not data:
         raise HTTPException(400, "Leere Datei")
     try:
@@ -877,7 +1044,7 @@ async def rate_idea(
     request: Request,
     idea_id: str,
     rating: float = Query(..., ge=0, le=5),
-    text: str = "",
+    text: str = Query("", max_length=4000),
     authorization: str | None = Header(None),
 ):
     user = _user_key_from_auth(authorization)
@@ -983,7 +1150,7 @@ async def rate_idea(
 async def comment_idea(
     request: Request,
     idea_id: str,
-    comment: str = Query(..., min_length=1),
+    comment: str = Query(..., min_length=1, max_length=4000),
     reply_to: str | None = None,
     authorization: str | None = Header(None),
 ):
@@ -1017,6 +1184,10 @@ class IdeaSubmission(BaseModel):
     phase: str | None = None
     event: str | None = None  # legacy single-event (wird auf events[] gemerged)
     events: list[str] = []  # mehrere Veranstaltungen pro Idee
+    # Mathe-Captcha — Pflicht NUR bei anonymem Submit. Eingeloggte User
+    # (= mit Authorization-Header) lassen das Feld leer.
+    captcha_token: str | None = None
+    captcha_answer: str | None = None
 
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9_\-]+")
@@ -1036,7 +1207,13 @@ async def submit_idea(
 ):
     """Create a new idea as ccm:io. Without Authorization header it is created
     in the guest inbox for moderator review. With Authorization it is created
-    under the same inbox for now (later: directly under the target challenge)."""
+    under the same inbox for now (later: directly under the target challenge).
+
+    Anonyme Submits müssen ein zuvor von `GET /captcha` geholtes Token
+    + Lösung mitschicken (`captcha_token` + `captcha_answer`).
+    Eingeloggte User skippen das."""
+    if not authorization:
+        _captcha_verify(body.captcha_token, body.captcha_answer)
     kws = [k.strip() for k in body.keywords if k and k.strip()]
     if body.phase and not any(k.lower().startswith("phase:") for k in kws):
         kws.append(f"phase:{body.phase}")
@@ -1076,8 +1253,9 @@ async def submit_idea(
         props["cclom:general_keyword"] = kws
     if body.author:
         props["ccm:author_freetext"] = [body.author]
-    if body.project_url:
-        props["ccm:wwwurl"] = [body.project_url]
+    safe_url = _validate_external_url(body.project_url, field="Projekt-URL")
+    if safe_url:
+        props["ccm:wwwurl"] = [safe_url]
     # Pflicht-Metadaten für die WLO-Freischaltung. Ohne diese Felder flaggt
     # die Redaktionsmaske die Idee als "unvollständig". Wir setzen WLO-übliche
     # Defaults, damit die Idee out-of-the-box freischaltbar ist:
@@ -1364,16 +1542,28 @@ def toggle_follow(
 
 @router.get("/inbox", tags=["moderation"])
 async def list_inbox(
-    limit: int = Query(50, ge=1, le=200),
+    # Default 200: Inbox passt in eine Seite, "Alle" zeigt wirklich alle.
+    # Niedrigeres Limit muss der Caller explizit setzen.
+    limit: int = Query(200, ge=1, le=500),
+    filter: Literal[
+        "uncategorized",  # noch nicht in einer Sammlung (Default — was zu tun ist)
+        "all",            # alle ccm:io der Inbox
+        "categorized",    # bereits irgendwo als Reference verlinkt
+        "app-submits",    # nur App-Einreichungen mit phase:/event:-Markern
+    ] = Query("uncategorized", description="Sichtfilter über die Inbox"),
     authorization: str | None = Header(None),
 ):
     await _require_moderator(authorization)
-    """List recently submitted ideas in the guest moderation inbox.
+    """List ccm:io nodes in the moderation inbox.
 
-    Only shows nodes that carry our keyword convention (phase:/event:/
-    target-topic:) so unrelated legacy uploads don't pollute the view.
-    Uses the guest credentials — anyone can call this; the inbox content is
-    not secret, and login gating is handled on the frontend side.
+    Vier Sichten via `?filter=`:
+      - `uncategorized` (Default): noch keiner Sammlung als Reference zugeordnet.
+        Das ist die operative Arbeitsliste — diese Items müssen einsortiert werden.
+      - `all`: alle ccm:io der Inbox, unabhängig vom Sammlungs-Status.
+      - `categorized`: nur die schon als Reference irgendwo gelandet sind
+        (Übersicht über das, was bereits eingepflegt wurde).
+      - `app-submits`: nur Items mit `phase:`/`event:`/`target-topic:`-
+        Keywords aus dem App-Einreichungs-Pfad.
     """
     # Fetch up to 3 pages of 200 newest-first nodes to surface our recent
     # submissions in an inbox that contains lots of legacy uploads.
@@ -1412,20 +1602,24 @@ async def list_inbox(
         if n.get("type") != "ccm:io":
             continue
         node_id = (n.get("ref") or {}).get("id")
-        if node_id and node_id in cataloged:
-            # Schon einsortiert — gehört nicht ins Postfach
-            continue
+        is_cataloged = bool(node_id and node_id in cataloged)
         props = n.get("properties") or {}
         kws = props.get("cclom:general_keyword") or []
         if isinstance(kws, str):
             kws = [kws]
-        # Only show our submissions
-        if not any(
+        has_marker = any(
             str(k).lower().startswith(p)
             for k in kws
             for p in ("phase:", "event:", "target-topic:")
-        ):
+        )
+        # Sichtfilter anwenden
+        if filter == "uncategorized" and is_cataloged:
             continue
+        if filter == "categorized" and not is_cataloged:
+            continue
+        if filter == "app-submits" and not has_marker:
+            continue
+        # filter == "all" → kein zusätzliches Skip
 
         phase = next(
             (k[len("phase:") :] for k in kws if str(k).lower().startswith("phase:")),
@@ -1458,11 +1652,22 @@ async def list_inbox(
                 "event": event,
                 "target_topic": target_topic,
                 "created_at": n.get("createdAt"),
+                "in_collection": is_cataloged,
+                "has_app_marker": has_marker,
             }
         )
     # Newest first
     items.sort(key=lambda x: x["created_at"] or "", reverse=True)
-    return {"count": len(items), "items": items[:limit]}
+    sliced = items[:limit]
+    return {
+        # `count` = Anzahl tatsächlich zurückgegebener Items (post-slice).
+        # `total` = wieviele matchen den Filter überhaupt (pre-slice).
+        # Bei Konsumenten wie der Mod-UI kann so „N von M" angezeigt werden.
+        "count": len(sliced),
+        "total": len(items),
+        "items": sliced,
+        "filter": filter,
+    }
 
 
 @router.delete("/inbox/{node_id}", tags=["moderation"])
@@ -1498,7 +1703,7 @@ async def upload_idea_content(
     Auth wird durchgereicht — Schreibrechte muss edu-sharing prüfen."""
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
-    data = await file.read()
+    data = await _read_upload_capped(file, settings.upload_content_max_bytes)
     if not data:
         raise HTTPException(400, "Leere Datei")
     try:
@@ -1529,7 +1734,7 @@ async def upload_idea_preview(
         raise HTTPException(401, "Anmeldung erforderlich")
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(400, "Vorschaubild muss ein Bild sein (image/*).")
-    data = await file.read()
+    data = await _read_upload_capped(file, settings.upload_image_max_bytes)
     if not data:
         raise HTTPException(400, "Leere Datei")
     try:
@@ -1587,62 +1792,174 @@ class BulkMoveRequest(BaseModel):
     target_topic_id: str
 
 
-async def _move_or_reference(
+async def _reference_into_collection(
     source_id: str, target_topic_id: str, *, authorization: str,
-) -> tuple[str, str | None]:
-    """Hängt eine Inbox-Idee an eine Ziel-Sammlung. Versucht zuerst die
-    HackathOERn-Standardvorgehensweise (Reference: Original bleibt in
-    Inbox, Sammlung kriegt einen Reference-Knoten). Wenn ES das wegen
-    Tool-Permission/ACL ablehnt (403/500), fällt auf das alte Verhalten
-    zurück (`_move`: Knoten wird relocated, wird zu Direct-Child).
-    Der Sync findet beide Varianten (siehe sync.py).
+) -> str:
+    """Hängt eine Inbox-Idee als Reference an eine Ziel-Sammlung
+    (HackathOERn-Standardvorgehensweise — Original bleibt in der Inbox,
+    Sammlung bekommt einen Reference-Knoten). Wirft den ES-HTTPError weiter,
+    wenn ES den Reference-Pfad ablehnt — kein stillschweigender Fallback
+    auf `_move`, damit Permission-Probleme früh sichtbar werden.
 
-    Returns: (mode, ref_or_node_id) — mode ist 'reference' oder 'move'.
-    Wirft den ursprünglichen httpx-Error weiter, wenn beide Wege fehlschlagen.
+    Idempotent: wenn die Idee bereits in der Ziel-Sammlung referenziert ist,
+    wird der bestehende Reference-Knoten zurückgegeben, statt einen 409
+    DuplicateNodeName-Fehler an den Caller durchzureichen.
+
+    Returns: die ID des Reference-Knotens (neu oder bereits vorhanden).
     """
-    # 1. Reference-Pfad — saubere Standard-Variante
     try:
         result = await edu_sharing.client.add_collection_reference(
             collection_id=target_topic_id,
             node_id=source_id,
             auth_header=authorization,
         )
-        ref_node = (result or {}).get("node") or {}
-        ref_id = (ref_node.get("ref") or {}).get("id")
-        if ref_id:
-            try:
-                with connect() as con:
-                    await sync_mod._upsert_idea(
-                        con, ref_node,
-                        kind="io",
-                        topic_id=target_topic_id,
-                        main_content_id=ref_id,
-                    )
-            except Exception as e:
-                log.warning("upsert nach addReference für %s: %s", ref_id, e)
-            return ("reference", ref_id)
     except httpx.HTTPStatusError as e:
-        # 403/500/405 → kein Reference-Recht. Versuche _move als Fallback.
-        if e.response.status_code not in (403, 405, 500):
-            raise
-        log.info(
-            "addReference verwehrt (%s) für %s → fallback auf _move",
-            e.response.status_code, source_id,
+        # 409 = DuplicateNodeName → in der Ziel-Sammlung gibt's schon eine
+        # Reference auf diese Idee. Wir suchen sie nach und geben deren ID
+        # zurück, damit der Caller einen no-op-Erfolg sieht.
+        if e.response.status_code == 409:
+            existing = await _find_existing_reference(
+                source_id, target_topic_id, authorization
+            )
+            if existing:
+                log.info(
+                    "addReference: %s war bereits in %s referenziert (no-op)",
+                    source_id, target_topic_id,
+                )
+                return existing
+        raise
+
+    ref_node = (result or {}).get("node") or {}
+    ref_id = (ref_node.get("ref") or {}).get("id")
+    if ref_id:
+        try:
+            with connect() as con:
+                await sync_mod._upsert_idea(
+                    con, ref_node,
+                    kind="io",
+                    topic_id=target_topic_id,
+                    main_content_id=ref_id,
+                )
+        except Exception as e:
+            log.warning("upsert nach addReference für %s: %s", ref_id, e)
+    return ref_id or source_id
+
+
+async def _find_existing_reference(
+    source_id: str, target_topic_id: str, authorization: str | None,
+) -> str | None:
+    """Sucht eine bereits existierende Reference auf `source_id` in der
+    Sammlung `target_topic_id`. Wird vom Idempotenz-Pfad von
+    `_reference_into_collection` genutzt (siehe 409-Behandlung dort)."""
+    try:
+        refs = await edu_sharing.client.collection_references(
+            target_topic_id, max_items=500, auth_header=authorization,
+        )
+    except Exception as e:
+        log.warning("collection_references-Lookup fehlgeschlagen: %s", e)
+        return None
+    for r in (refs.get("references") or []):
+        props = r.get("properties") or {}
+        orig_field = props.get("ccm:original") or props.get("sys:node-uuid")
+        if isinstance(orig_field, list) and orig_field:
+            orig_field = orig_field[0]
+        # Fallback: in den Reference-Eigenschaften steht oft `ccm:original_id`
+        if not orig_field:
+            orig_field = (props.get("ccm:original_id") or [None])[0] \
+                if isinstance(props.get("ccm:original_id"), list) \
+                else props.get("ccm:original_id")
+        # Manche ES-Versionen liefern `originalId` direkt auf Top-Level
+        if not orig_field:
+            orig_field = r.get("originalId")
+        if orig_field and str(orig_field) == source_id:
+            return (r.get("ref") or {}).get("id")
+    return None
+
+
+class ChangeTopicRequest(BaseModel):
+    new_topic_id: str
+
+
+@router.post("/moderation/ideas/{idea_id}/change-topic", tags=["moderation"])
+async def change_idea_topic(
+    idea_id: str,
+    body: ChangeTopicRequest,
+    authorization: str | None = Header(None),
+):
+    """Wechselt die Herausforderung einer Idee. Praktisch: löscht die alte
+    Reference und legt eine neue im Ziel-Topic an. Original bleibt in der
+    Community-Inbox unangetastet.
+
+    Idempotent: ist die Idee bereits im Ziel-Topic, passiert nichts.
+    Nur Moderatoren — Herausforderungs-Zuordnung ist redaktioneller Akt.
+    """
+    await _require_moderator(authorization)
+    with connect() as con:
+        row = con.execute(
+            "SELECT id, original_id, topic_id, title FROM idea WHERE id = ?",
+            (idea_id,),
+        ).fetchone()
+        target = con.execute(
+            "SELECT id, title FROM topic WHERE id = ?", (body.new_topic_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Idee nicht im Cache — unbekannte ID")
+    if not target:
+        raise HTTPException(404, f"Ziel-Herausforderung {body.new_topic_id} nicht gefunden")
+
+    current_topic = row["topic_id"]
+    if current_topic == body.new_topic_id:
+        return {"ok": True, "message": "Idee ist bereits in dieser Herausforderung",
+                "result_id": idea_id, "no_op": True}
+
+    # `original_id` zeigt auf den Inbox-Knoten. Falls die Row selbst das
+    # Original ist (z.B. neu eingereicht, noch nirgends referenziert),
+    # nehmen wir die Row-ID als Source.
+    source_id = row["original_id"] or row["id"]
+
+    # 1. Neue Reference im Ziel-Topic
+    try:
+        new_ref_id = await _reference_into_collection(
+            source_id, body.new_topic_id, authorization=authorization,
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            e.response.status_code,
+            f"edu-sharing: {e.response.text[:200]}",
         )
 
-    # 2. Fallback: echtes Move (Direct-Child der Challenge)
-    await edu_sharing.client.move_node(
-        source_id=source_id,
-        target_parent_id=target_topic_id,
-        auth_header=authorization,
+    # 2. Alte Reference löschen — aber nur wenn die App-Row tatsächlich eine
+    #    Reference war (original_id gesetzt). Sonst (Original direkt unter
+    #    altem Topic) würden wir den Inhalt verlieren.
+    deleted_old = False
+    if row["original_id"] and row["id"] != new_ref_id:
+        try:
+            await edu_sharing.client.delete_collection_reference(
+                row["id"], auth_header=authorization,
+            )
+            with connect() as con:
+                con.execute("DELETE FROM idea WHERE id = ?", (row["id"],))
+                con.execute("DELETE FROM idea_fts WHERE id = ?", (row["id"],))
+            deleted_old = True
+        except Exception as e:
+            log.warning("change-topic: alte Reference %s nicht gelöscht: %s",
+                        row["id"], e)
+
+    _log_activity(
+        action="idea_topic_changed", authorization=authorization, is_mod=True,
+        target_type="idea", target_id=idea_id, target_label=row["title"],
+        detail={
+            "from_topic_id": current_topic, "to_topic_id": body.new_topic_id,
+            "to_topic_title": target["title"], "new_ref_id": new_ref_id,
+            "old_ref_deleted": deleted_old,
+        },
     )
-    # Cache: refresh_idea liest neue parent.id aus ES und schreibt sie ins
-    # idea-Row. topic_id wird damit korrekt gesetzt.
-    try:
-        await sync_mod.refresh_idea(source_id, auth_header=authorization)
-    except Exception:
-        pass
-    return ("move", source_id)
+    return {
+        "ok": True,
+        "moved_to": target["title"],
+        "result_id": new_ref_id,
+        "old_ref_deleted": deleted_old,
+    }
 
 
 @router.post("/moderation/bulk_move", tags=["moderation"])
@@ -1650,13 +1967,7 @@ async def bulk_move_to_topic(
     body: BulkMoveRequest,
     authorization: str | None = Header(None),
 ):
-    """Hängt mehrere Inbox-Ideen an eine Ziel-Herausforderung.
-
-    Bevorzugt das **Reference**-Pattern (Original in Inbox, Reference in
-    Sammlung — HackathOERn-Standard). Bei fehlender Tool-Permission
-    fallback auf **Move** (Direct-Child der Sammlung). Beide Patterns
-    werden vom Sync erkannt.
-
+    """Referenziert mehrere Inbox-Ideen in eine Ziel-Herausforderung.
     Pro-Item-Fehler werden gesammelt; der Gesamtaufruf bricht nicht ab.
     """
     await _require_moderator(authorization)
@@ -1669,10 +1980,9 @@ async def bulk_move_to_topic(
 
     succeeded: list[str] = []
     failed: list[dict] = []
-    modes: dict[str, int] = {"reference": 0, "move": 0}
     for nid in body.node_ids:
         try:
-            mode, new_id = await _move_or_reference(
+            new_id = await _reference_into_collection(
                 nid, body.target_topic_id, authorization=authorization,
             )
         except httpx.HTTPStatusError as e:
@@ -1682,8 +1992,7 @@ async def bulk_move_to_topic(
         except Exception as e:
             failed.append({"id": nid, "status": 0, "detail": str(e)[:160]})
             continue
-        modes[mode] = modes.get(mode, 0) + 1
-        # Titel für Log (aus Cache nach Upsert/Refresh)
+        # Titel für Log (aus Cache nach Upsert)
         with connect() as con:
             r = con.execute(
                 "SELECT title FROM idea WHERE id=? OR original_id=?",
@@ -1695,7 +2004,7 @@ async def bulk_move_to_topic(
             target_type="idea", target_id=nid, target_label=moved_title,
             detail={"to_topic_id": body.target_topic_id,
                     "to_topic_title": t["title"],
-                    "mode": mode, "result_id": new_id,
+                    "result_id": new_id,
                     "bulk": True},
         )
         succeeded.append(nid)
@@ -1707,7 +2016,6 @@ async def bulk_move_to_topic(
         "failed": failed,
         "succeeded_count": len(succeeded),
         "failed_count": len(failed),
-        "modes": modes,
     }
 
 
@@ -1716,10 +2024,10 @@ async def move_to_topic(
     body: MoveRequest,
     authorization: str | None = Header(None),
 ):
-    """Hängt eine Inbox-Idee an eine Herausforderung. Versucht zuerst
-    den HackathOERn-Standard (Reference: Original bleibt in Inbox), fällt
-    bei fehlender Tool-Permission auf das alte Move-Verhalten zurück.
-    Caller muss Moderator sein."""
+    """Referenziert eine Inbox-Idee in eine Herausforderung. Caller muss
+    Moderator sein. Original bleibt in der Inbox — die Sammlung bekommt
+    einen Reference-Knoten dazu (HackathOERn-Standard).
+    Der Endpoint heißt aus historischen Gründen weiterhin /move."""
     await _require_moderator(authorization)
     with connect() as con:
         t = con.execute(
@@ -1729,7 +2037,7 @@ async def move_to_topic(
         raise HTTPException(404, f"Unknown target topic {body.target_topic_id}")
 
     try:
-        mode, new_id = await _move_or_reference(
+        new_id = await _reference_into_collection(
             body.node_id, body.target_topic_id, authorization=authorization,
         )
     except httpx.HTTPStatusError as e:
@@ -1751,10 +2059,10 @@ async def move_to_topic(
         authorization=authorization, is_mod=True,
         target_type="idea", target_id=body.node_id, target_label=moved_title,
         detail={"to_topic_id": body.target_topic_id, "to_topic_title": t["title"],
-                "mode": mode, "result_id": new_id},
+                "result_id": new_id},
     )
 
-    return {"ok": True, "moved_to": t["title"], "mode": mode, "result_id": new_id}
+    return {"ok": True, "moved_to": t["title"], "result_id": new_id}
 
 
 # Selbstregistrierung läuft extern über https://wirlernenonline.de/register/.
@@ -1952,7 +2260,13 @@ async def edit_idea(
     if body.author is not None:
         props["ccm:author_freetext"] = [body.author]
     if body.project_url is not None:
-        props["ccm:wwwurl"] = [body.project_url]
+        # Leerstring = explizites Entfernen, ansonsten http(s)-validieren.
+        if body.project_url.strip() == "":
+            props["ccm:wwwurl"] = []
+        else:
+            props["ccm:wwwurl"] = [
+                _validate_external_url(body.project_url, field="Projekt-URL")
+            ]
     # Keywords-Merge: bestehende Keywords aus edu-sharing erhalten,
     # nur phase: und event: gezielt austauschen.
     #
@@ -2568,7 +2882,11 @@ async def list_activity(
     if action:
         where.append("action = ?"); params.append(action)
     if actor:
-        where.append("actor LIKE ?"); params.append(f"%{actor}%")
+        # SQL-LIKE-Wildcards (% / _) aus dem User-Input neutralisieren,
+        # damit z.B. `actor=%` nicht zur Voll-Liste degeneriert und
+        # Ressourcen-/Pattern-DoS via `%%%%…` ausgeschlossen ist.
+        where.append("actor LIKE ? ESCAPE '\\'")
+        params.append(f"%{_escape_like(actor)}%")
     if target_id:
         where.append("target_id = ?"); params.append(target_id)
     if since:
@@ -2891,7 +3209,7 @@ async def upload_attachment(
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
 
-    data = await file.read()
+    data = await _read_upload_capped(file, settings.upload_attachment_max_bytes)
     if not data:
         raise HTTPException(400, "Leere Datei")
     filename = file.filename or "upload.bin"
@@ -3160,11 +3478,9 @@ async def admin_backup_restore(
     Backups zurückgesetzt. edu-sharing-Daten werden nicht angefasst, der
     nächste Voll-Sync zieht den aktuellen Stand vom Repo nach."""
     await _require_moderator(authorization)
-    data = await file.read()
+    data = await _read_upload_capped(file, settings.upload_restore_max_bytes)
     if not data:
         raise HTTPException(400, "Leere Datei")
-    if len(data) > 200 * 1024 * 1024:  # 200 MB Hard-Cap
-        raise HTTPException(413, "Backup-Datei zu groß (max 200 MB)")
     try:
         result = await backup_mod.restore_backup(data)
     except ValueError as e:
@@ -3343,6 +3659,13 @@ async def bulk_resolve_reports(
     raw = body.get("ids") or []
     if not isinstance(raw, list) or not raw:
         raise HTTPException(400, "Liste 'ids' erforderlich")
+    # Hartes Limit, um SQLite-Parameter-Limit (999) zu unterbieten und
+    # einen großen IN-Cluster zu vermeiden.
+    BULK_MAX = 500
+    if len(raw) > BULK_MAX:
+        raise HTTPException(
+            413, f"Zu viele IDs in 'ids' (max {BULK_MAX} pro Aufruf)"
+        )
     # Strikte Validierung: nur Integers ≥1. Schützt gegen Strings,
     # Floats, gemischte Arrays oder Manipulationsversuche.
     safe_ids: list[int] = []

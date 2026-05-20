@@ -562,14 +562,31 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
+    # WICHTIG: nginx-Default ist 1 MB. Reicht nicht für Backup-Restore
+    # (bis 200 MB), Idee-Anhänge (bis 50 MB) und Vorschaubilder (bis 10 MB).
+    # Diese Schwelle MUSS größer sein als die kombinierten Cap-Werte in
+    # `backend/app/config.py` (`upload_*_max_bytes`).
+    client_max_body_size 200m;
+
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # Großzügige Timeouts für VACUUM INTO / lange Sync-Antworten
+        proxy_read_timeout 300s;
     }
 }
+```
+
+**TLS-Zertifikats-Renewal** nicht vergessen — Let's Encrypt-Zertifikate
+laufen alle 90 Tage ab. Auf Debian/Ubuntu wird der Renewal-Timer mit dem
+`certbot`-Paket automatisch installiert. Verifizieren:
+
+```bash
+systemctl status certbot.timer    # sollte "active (waiting)" sein
+certbot renew --dry-run            # Test ohne echte Erneuerung
 ```
 
 #### 2. Zusätzliche Basic-Auth auf `/admin/*` (empfohlen)

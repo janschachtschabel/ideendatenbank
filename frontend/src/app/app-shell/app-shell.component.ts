@@ -552,6 +552,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
             [ideaId]="currentIdeaId()!"
             [apiBase]="apiBase"
             (back)="go('browser')"
+            (openTopic)="openTopicById($event)"
             (requestLogin)="showLogin = true">
           </ideendb-idea-detail>
         }

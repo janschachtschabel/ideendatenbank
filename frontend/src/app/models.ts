@@ -125,4 +125,8 @@ export interface InboxItem {
   event: string | null;
   target_topic: string | null;
   created_at: string | null;
+  /** true wenn die ID schon als Reference in einer Sammlung liegt */
+  in_collection?: boolean;
+  /** true wenn die Idee phase:/event:/target-topic:-Marker aus dem App-Submit trägt */
+  has_app_marker?: boolean;
 }

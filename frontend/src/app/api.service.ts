@@ -109,10 +109,19 @@ export class ApiService {
     phase?: string | null;
     event?: string | null;
     events?: string[];
+    captcha_token?: string | null;
+    captcha_answer?: string | null;
   }): Observable<{ ok: boolean; moderation: string; node_id: string; message: string }> {
     return this.http.post<any>(`${this.base}/ideas`, payload, {
       headers: this.authHeaders(),
     });
+  }
+
+  /** Holt eine frische Mathe-Captcha-Aufgabe für anonyme Submits.
+   * Token + erwartete Antwort liegen serverseitig; das Frontend gibt
+   * nur `question` (Klartext) aus und sendet `token + answer` zurück. */
+  getCaptcha(): Observable<{ token: string; question: string; ttl_seconds: number }> {
+    return this.http.get<any>(`${this.base}/captcha`);
   }
 
   getInteractions(ideaId: string): Observable<{
@@ -136,10 +145,12 @@ export class ApiService {
     });
   }
 
-  inbox(): Observable<{ count: number; items: InboxItem[] }> {
+  inbox(filter: 'uncategorized' | 'all' | 'categorized' | 'app-submits' = 'uncategorized'):
+    Observable<{ count: number; items: InboxItem[]; filter: string }> {
     // Auth-Header ist Pflicht — _require_moderator gated den Endpoint.
     return this.http.get<any>(`${this.base}/inbox`, {
       headers: this.authHeaders(),
+      params: { filter },
     });
   }
 
@@ -529,6 +540,19 @@ export class ApiService {
     return this.http.post<any>(`${this.base}/ideas/${ideaId}/refresh`, null, {
       headers: this.authHeaders(),
     });
+  }
+
+  /** Wechselt die Herausforderung einer Idee (Reference umhängen).
+   *  Nur für Mods. Idempotent bei gleichbleibendem Topic. */
+  changeIdeaTopic(ideaId: string, newTopicId: string): Observable<{
+    ok: boolean; moved_to?: string; result_id?: string; old_ref_deleted?: boolean;
+    no_op?: boolean; message?: string;
+  }> {
+    return this.http.post<any>(
+      `${this.base}/moderation/ideas/${ideaId}/change-topic`,
+      { new_topic_id: newTopicId },
+      { headers: this.authHeaders() },
+    );
   }
 
   /** Pflicht-Metadaten (Lizenz/Sprache/...) für die WLO-Freischaltung

@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { ApiService } from '../api.service';
 import { Idea } from '../models';
+import { ShareDialogComponent } from './share-dialog.component';
 
 type SortKey = 'rating' | 'comments' | 'interest';
 
@@ -31,7 +32,7 @@ interface RankItem {
 @Component({
   standalone: true,
   selector: 'ideendb-ranking',
-  imports: [CommonModule],
+  imports: [CommonModule, ShareDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host { display: block; }
@@ -58,6 +59,21 @@ interface RankItem {
     .meta {
       font-size: .82rem; color: var(--wlo-muted, #6b7280);
       margin-left: auto;
+    }
+    /* Snapshot-Info als schlanke Zeile knapp über den Buttons, links. */
+    .snapshot-line {
+      font-size: .82rem; color: var(--wlo-muted, #6b7280);
+      margin-bottom: 6px;
+    }
+    /* Teilen-Button in der Buttons-Zeile, ans rechte Ende. */
+    .share-rank-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-left: auto;
+      padding: 8px 14px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--wlo-border, #d8dde6);
+      background: var(--wlo-surface, #fff); color: var(--wlo-text, #1a2334);
+      font: inherit; font-size: .9rem; font-weight: 600;
+      &:hover { border-color: var(--wlo-primary); color: var(--wlo-primary); }
     }
 
     .top-chart-card {
@@ -187,6 +203,11 @@ interface RankItem {
     }
   `],
   template: `
+    <div class="snapshot-line">
+      @if (data()?.snapshot_at) {
+        Letzter Snapshot: {{ formatDate(data()!.snapshot_at!) }}
+      } @else { Noch kein Snapshot vorhanden. }
+    </div>
     <div class="controls">
       <div class="seg">
         <button [class.on]="sortKey()==='rating'"   (click)="setSort('rating')">
@@ -229,12 +250,27 @@ interface RankItem {
         </div>
       }
 
-      <span class="meta">
-        @if (data()?.snapshot_at) {
-          Letzter Snapshot: {{ formatDate(data()!.snapshot_at!) }}
-        } @else { Noch kein Snapshot vorhanden. }
-      </span>
+      <button class="share-rank-btn" (click)="shareOpen = true" title="Rangliste teilen">
+        <svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/>
+          <circle cx="18" cy="19" r="3"/>
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+        </svg>
+        Teilen
+      </button>
     </div>
+
+    <ideendb-share-dialog
+      [open]="shareOpen"
+      [title]="shareTitle()"
+      [intro]="'Direkter Link + QR-Code zur aktuellen Rangliste. Ideal, um zur Abstimmung aufzurufen.'"
+      [url]="shareUrl()"
+      [qrFilename]="'qr-rangliste' + (eventFilter() ? '-' + eventFilter() : '') + '.png'"
+      (closed)="shareOpen = false">
+    </ideendb-share-dialog>
 
     @if (chartSeries().length > 0) {
       <div class="top-chart-card">
@@ -383,9 +419,14 @@ export class RankingComponent implements OnChanges {
   @Input() apiBase = '';
   @Input() events: { value: string; count: number }[] | null = null;
   @Input() eventLabels = new Map<string, string>();
+  /** Optionaler Start-Event-Filter (aus URL ?view=ranking&event=…). */
+  @Input() initialEvent: string | null = null;
   @Output() ideaSelected = new EventEmitter<Idea>();
   /** Bubbelt hoch, wenn ein nicht eingeloggter User voten will. */
   @Output() requireLogin = new EventEmitter<void>();
+
+  // Share-Dialog state
+  shareOpen = false;
 
   sortKey = signal<SortKey>('rating');
   eventFilter = signal<string | null>(null);
@@ -443,6 +484,10 @@ export class RankingComponent implements OnChanges {
 
   ngOnChanges(ch: SimpleChanges) {
     if (ch['apiBase']) this.api.setBase(this.apiBase);
+    // Start-Event-Filter aus URL übernehmen (einmalig, wenn gesetzt).
+    if (ch['initialEvent'] && this.initialEvent) {
+      this.eventFilter.set(this.initialEvent);
+    }
     this.load();
   }
 
@@ -451,6 +496,20 @@ export class RankingComponent implements OnChanges {
 
   eventLabel(slug: string): string {
     return this.eventLabels.get(slug) || slug;
+  }
+
+  /** Teilbarer Link zur aktuellen Rangliste — mit Event-Filter, falls aktiv. */
+  shareUrl(): string {
+    const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+    const ev = this.eventFilter();
+    return ev
+      ? `${base}?view=ranking&event=${encodeURIComponent(ev)}`
+      : `${base}?view=ranking`;
+  }
+
+  shareTitle(): string {
+    const ev = this.eventFilter();
+    return ev ? `Rangliste: ${this.eventLabel(ev)} teilen` : 'Rangliste teilen';
   }
 
   load(silent = false) {

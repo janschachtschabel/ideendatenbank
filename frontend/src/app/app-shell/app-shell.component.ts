@@ -477,33 +477,61 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
 
                 @if (shareOpen()) {
                   <div class="event-share">
-                    <p class="share-intro">
-                      Mit diesem Link landen Teilnehmende direkt im Einreichungs-Formular —
-                      die Veranstaltung ist vorausgewählt. Ideal für Plakate, Folien
-                      oder Workshop-Tische.
-                    </p>
+                    <div class="share-cols">
+                      <!-- Spalte 1: Direkt zur Idee-Einreichung -->
+                      <div class="share-col">
+                        <h4>📝 Idee einreichen</h4>
+                        <p class="share-intro">
+                          Teilnehmende landen direkt im Einreich-Formular — die
+                          Veranstaltung ist vorausgewählt. Ideal für den Aufruf
+                          „Reicht eure Ideen ein!".
+                        </p>
+                        <label>Link</label>
+                        <div class="share-link-row">
+                          <input type="text" [value]="eventShareUrl(eventDrill()!)" readonly
+                                 #submitLink (click)="submitLink.select()" />
+                          <button class="btn-copy" (click)="copyEventShareLink(eventDrill()!)">
+                            {{ shareCopied ? '✓' : '📋' }}
+                          </button>
+                        </div>
+                        <label>QR-Code</label>
+                        <div class="share-qr-row">
+                          <img [src]="eventQrUrl(eventDrill()!)" alt="QR-Code Einreichung"
+                               width="160" height="160" />
+                          <div class="qr-actions">
+                            <a [href]="eventQrUrl(eventDrill()!, 600)" target="_blank" rel="noopener">↗ Groß öffnen</a>
+                            <a [href]="eventQrUrl(eventDrill()!, 600)"
+                               [attr.download]="'qr-einreichen-' + eventDrill() + '.png'">⬇ PNG</a>
+                          </div>
+                        </div>
+                      </div>
 
-                    <label>Share-Link</label>
-                    <div class="share-link-row">
-                      <input type="text" [value]="eventShareUrl(eventDrill()!)" readonly
-                             #linkInput (click)="linkInput.select()" />
-                      <button class="btn-copy" (click)="copyEventShareLink(eventDrill()!)">
-                        {{ shareCopied ? '✓ Kopiert' : '📋 Kopieren' }}
-                      </button>
-                    </div>
-
-                    <label>QR-Code</label>
-                    <div class="share-qr-row">
-                      <img [src]="eventQrUrl(eventDrill()!)" alt="QR-Code"
-                           width="180" height="180" />
-                      <div class="qr-actions">
-                        <a [href]="eventQrUrl(eventDrill()!, 600)" target="_blank" rel="noopener">
-                          ↗ Hochauflösend (600×600) öffnen
-                        </a>
-                        <a [href]="eventQrUrl(eventDrill()!, 600)"
-                           [attr.download]="'qr-' + eventDrill() + '.png'">
-                          ⬇ Als PNG herunterladen
-                        </a>
+                      <!-- Spalte 2: Zur Eventseite (Stöbern + Voten) -->
+                      <div class="share-col">
+                        <h4>📅 Eventseite</h4>
+                        <p class="share-intro">
+                          Teilnehmende landen auf der Veranstaltungs-Seite mit
+                          allen Ideen, Voting-Verlauf und Schnellvoting. Ideal
+                          zum Stöbern und Abstimmen.
+                        </p>
+                        <label>Link</label>
+                        <div class="share-link-row">
+                          <input type="text" [value]="eventPageUrl(eventDrill()!)" readonly
+                                 #pageLink (click)="pageLink.select()" />
+                          <button class="btn-copy" (click)="copyEventPageLink(eventDrill()!)">
+                            {{ sharePageCopied ? '✓' : '📋' }}
+                          </button>
+                        </div>
+                        <label>QR-Code</label>
+                        <div class="share-qr-row">
+                          <img [src]="eventPageQrUrl(eventDrill()!)" alt="QR-Code Eventseite"
+                               width="160" height="160" />
+                          <div class="qr-actions">
+                            <a [href]="eventPageQrUrl(eventDrill()!, 600)" target="_blank" rel="noopener">↗ Groß öffnen</a>
+                            <a [href]="eventPageQrUrl(eventDrill()!, 600)"
+                               [attr.download]="'qr-eventseite-' + eventDrill() + '.png'">⬇ PNG</a>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -599,6 +627,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               [apiBase]="apiBase"
               [events]="allAvailableEvents()"
               [eventLabels]="eventLabels"
+              [initialEvent]="rankingInitialEvent"
               (ideaSelected)="openIdea($event)"
               (requireLogin)="showLogin = true">
             </ideendb-ranking>
@@ -703,6 +732,8 @@ export class AppShellComponent implements OnInit {
   currentIdeaId = signal<string | null>(null);
   /** Aus URL-Query gelesener Event-Slug, der ans Submit-Formular durchgereicht wird. */
   presetEventForSubmit: string | null = null;
+  /** Start-Event-Filter für die Rangliste (aus ?view=ranking&event=…). */
+  rankingInitialEvent: string | null = null;
   /** Username für `?view=user&u=<name>`-Aufrufe. */
   profileUsername = '';
   /** Anzahl ungelesener Feed-Events (Polling alle 60s im Hintergrund). */
@@ -876,6 +907,15 @@ export class AppShellComponent implements OnInit {
       if (view === 'user' && userParam) {
         this.profileUsername = userParam;
         setTimeout(() => this.view.set('user'), 0);
+        return;
+      }
+      // Rangliste mit Event-Filter: ?view=ranking&event=<slug>
+      if (view === 'ranking' && event) {
+        this.rankingInitialEvent = event;
+      }
+      // Eventseite direkt zu einer Veranstaltung: ?view=events&event=<slug>
+      if (view === 'events' && event) {
+        setTimeout(() => { this.view.set('events'); this.eventDrill.set(event); }, 0);
         return;
       }
       if (view && ['home','browser','topics','events','ranking','submit','profile','moderation','imprint','privacy','embed','help'].includes(view)) {
@@ -1152,6 +1192,8 @@ export class AppShellComponent implements OnInit {
   shareOpen = signal(false);
   shareCopied = false;
   private shareCopiedTimer?: number;
+  sharePageCopied = false;
+  private sharePageCopiedTimer?: number;
 
   toggleShare() {
     this.shareOpen.set(!this.shareOpen());
@@ -1174,6 +1216,24 @@ export class AppShellComponent implements OnInit {
     this.shareCopied = true;
     if (this.shareCopiedTimer) window.clearTimeout(this.shareCopiedTimer);
     this.shareCopiedTimer = window.setTimeout(() => (this.shareCopied = false), 2000);
+  }
+
+  /** Deeplink zur Eventseite (Stöbern + Voten) statt zum Submit-Formular. */
+  eventPageUrl(slug: string): string {
+    const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+    return `${base}?view=events&event=${encodeURIComponent(slug)}`;
+  }
+
+  eventPageQrUrl(slug: string, size = 240): string {
+    const data = encodeURIComponent(this.eventPageUrl(slug));
+    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}`;
+  }
+
+  copyEventPageLink(slug: string) {
+    navigator.clipboard?.writeText(this.eventPageUrl(slug));
+    this.sharePageCopied = true;
+    if (this.sharePageCopiedTimer) window.clearTimeout(this.sharePageCopiedTimer);
+    this.sharePageCopiedTimer = window.setTimeout(() => (this.sharePageCopied = false), 2000);
   }
 
   /** Click on event card from anywhere else → browser with filter (legacy). */

@@ -560,7 +560,17 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
     margin-top: 18px; padding: 18px 20px;
     background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
     border-radius: 10px;
-    .share-intro { margin: 0 0 14px; max-width: none; }
+    /* Zwei Spalten: links Idee-Einreichung, rechts Eventseite. */
+    .share-cols {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+    }
+    .share-col h4 {
+      margin: 0 0 6px; font-size: 1rem; color: var(--wlo-primary);
+    }
+    .share-intro { margin: 0 0 14px; max-width: none; font-size: .85rem;
+                   color: var(--wlo-muted); }
     label { display: block; font-size: .82rem; font-weight: 600;
             color: var(--wlo-text); margin: 12px 0 6px; }
     .share-link-row {

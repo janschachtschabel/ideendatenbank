@@ -15,6 +15,7 @@ in **edu-sharing** (`redaktion.openeduhub.net`).
 - [Architektur](#architektur) — wie die Komponenten zusammenspielen
 - [Features](#features) — was die App kann
 - [Web Components](#web-components) — Einbettung auf eigenen Seiten
+- [Teilen- & Direkt-Links](#teilen---direkt-links) — verlinkbare Ansichten + QR-Codes
 - [Setup (Development)](#setup-development) — lokal entwickeln
 - [Deployment](#deployment) — Produktiv-Betrieb
 - [Verzeichnis](#verzeichnis) — Code-Karte
@@ -169,6 +170,40 @@ Themengebiet (ccm:map)              ← Top-Level-Sammlungen
 User-Wechsel über die Topbar landet in `localStorage` (Schlüssel
 `ideendb-theme`) und gilt für alle Web-Components im selben DOM-Scope —
 auch eingebettete Komponenten auf Drittseiten ohne sichtbare Topbar.
+
+---
+
+## Teilen- & Direkt-Links
+
+Alle Ansichten sind über `?view=…`-Query-Parameter direkt verlinkbar — ideal
+für QR-Codes auf Plakaten, Einladungs-Mails oder Folien. Die App stellt an
+mehreren Stellen fertige „Teilen"-Dialoge mit Link + QR-Code bereit
+(Idee-Detailseite, öffentliches Profil, Veranstaltungs-Seite, Rangliste).
+
+Basis ist die Instanz-URL (z.B. `https://<deine-domain>/`):
+
+| Zweck | Link-Muster |
+|---|---|
+| **Idee einreichen** (allgemein) | `?view=submit` |
+| **Idee einreichen, Event vorgewählt** | `?view=submit&event=<slug>` |
+| **Einzelne Idee** öffnen | `?view=detail&id=<UUID>` |
+| **Veranstaltungs-Seite** (Ideen + Voting-Verlauf + Schnellvoting) | `?view=events&event=<slug>` |
+| **Rangliste** (alle Ideen, live) | `?view=ranking` |
+| **Rangliste, nach Event gefiltert** | `?view=ranking&event=<slug>` |
+| **Öffentliches Profil** | `?view=user&u=<username>` |
+| **Themen-/Herausforderungs-Übersicht** | `?view=topics` |
+| **Hilfe / Einbinden / Impressum / Datenschutz** | `?view=help` ⋅ `?view=embed` ⋅ `?view=imprint` ⋅ `?view=privacy` |
+
+**Drei sinnvolle Teilen-Wege pro Veranstaltung** (alle im „Teilen"-Dialog der
+Event-Seite mit eigenem QR-Code):
+
+- `?view=submit&event=<slug>` — „Reicht eure Ideen ein!"
+- `?view=events&event=<slug>` — „Stöbert & stimmt ab" (Event-Hub)
+- `?view=ranking&event=<slug>` — „Schaut euch den Live-Stand an"
+
+> Die QR-Codes werden clientseitig über einen öffentlichen QR-Dienst
+> (`api.qrserver.com`) erzeugt — es werden ausschließlich die öffentlichen
+> Deep-Link-URLs übergeben, keine personenbezogenen Daten.
 
 ---
 

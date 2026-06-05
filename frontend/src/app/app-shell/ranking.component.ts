@@ -81,14 +81,33 @@ interface RankItem {
     .rank-list {
       display: flex; flex-direction: column; gap: 8px;
     }
+    .list-hint { margin: 0 0 12px; color: var(--wlo-muted); font-size: .88rem; }
     .rank-row {
       display: grid;
-      grid-template-columns: 56px 1fr 100px 110px 80px;
+      grid-template-columns: 52px 1fr auto 92px 92px 70px;
       gap: 14px; align-items: center;
       background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
       border-radius: 10px; padding: 12px 16px;
-      cursor: pointer; transition: box-shadow .15s, transform .15s;
+      transition: box-shadow .15s, transform .15s;
       &:hover { box-shadow: 0 4px 16px rgba(0,0,0,.08); transform: translateY(-1px); }
+    }
+    .rank-title, .rank-score, .spark { cursor: pointer; }
+    /* Inline-Voting im Balken */
+    .rank-vote {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      .vote-stars { display: inline-flex; gap: 1px; }
+      .star-btn {
+        background: none; border: none; padding: 0 1px; cursor: pointer;
+        font-size: 1.15rem; line-height: 1;
+        color: var(--wlo-border, #c8cfdb);
+        transition: color .1s, transform .1s;
+        &:hover:not(:disabled) { transform: scale(1.15); }
+        &.filled { color: var(--wlo-accent, #f5b600); }
+        &:disabled { cursor: default; opacity: .7; }
+      }
+      .vote-stars:hover .star-btn { color: var(--wlo-accent, #f5b600); }
+      .vote-stars .star-btn:hover ~ .star-btn { color: var(--wlo-border, #c8cfdb); }
+      .vote-msg { font-size: .7rem; color: var(--wlo-primary, #1d3a6e); font-weight: 600; }
     }
     .rank-num {
       font-size: 1.4rem; font-weight: 700; color: var(--wlo-primary);
@@ -123,12 +142,14 @@ interface RankItem {
 
     @media (max-width: 720px) {
       .rank-row {
-        grid-template-columns: 48px 1fr;
+        grid-template-columns: 44px 1fr auto;
         grid-template-rows: auto auto;
-        gap: 6px 12px;
+        gap: 4px 10px;
       }
       .rank-num { grid-row: 1 / span 2; align-self: center;
                   font-size: 1.2rem; }
+      /* Voting bleibt auch mobil sichtbar (rechts neben dem Titel) */
+      .rank-vote { grid-row: 1 / span 2; align-self: center; }
       .rank-score, .delta, .spark { display: none; }
     }
 
@@ -283,14 +304,18 @@ interface RankItem {
     @if (loading()) {
       <div class="empty">Lade Rangliste …</div>
     } @else if (!data()?.items?.length) {
-      <div class="empty">Noch keine Trend-Daten. Sobald der Sync mehrfach gelaufen ist,
-        erscheinen hier Bewegungspfeile und Verläufe.</div>
+      <div class="empty">Noch keine Ideen in dieser Auswahl.</div>
     } @else {
+      <p class="list-hint">
+        Vergib direkt Sterne in der Liste — jede Stimme verändert die
+        Reihenfolge sofort. Mit WLO-Login zählt deine Bewertung.
+      </p>
       <div class="rank-list">
         @for (item of data()!.items; track item.idea?.id) {
-          <div class="rank-row" (click)="select(item)">
+          <div class="rank-row">
             <div class="rank-num">#{{ item.rank }}</div>
-            <div class="rank-title" [title]="item.idea?.title">
+            <div class="rank-title" [title]="item.idea?.title"
+                 (click)="select(item)">
               {{ item.idea?.title || '(Idee gelöscht)' }}
               <span class="meta-line">
                 @if (item.idea?.author) { von {{ item.idea?.author }} · }
@@ -307,10 +332,27 @@ interface RankItem {
                 }
               </span>
             </div>
-            <div class="rank-score">
+
+            <!-- Inline-Schnellvoting direkt im Balken -->
+            <div class="rank-vote" (click)="$event.stopPropagation()">
+              <div class="vote-stars" role="radiogroup" aria-label="Bewerten">
+                @for (s of [1,2,3,4,5]; track s) {
+                  <button type="button" class="star-btn"
+                          [class.filled]="(voteValue[item.idea!.id] || 0) >= s"
+                          [disabled]="voteBusy[item.idea!.id]"
+                          (click)="vote(item, s)"
+                          [attr.aria-label]="s + ' von 5 Sternen'">★</button>
+                }
+              </div>
+              @if (voteMsg[item.idea!.id]) {
+                <span class="vote-msg">{{ voteMsg[item.idea!.id] }}</span>
+              }
+            </div>
+
+            <div class="rank-score" (click)="select(item)">
               {{ formatScore(item.score) }}<span class="unit">{{ scoreUnit() }}</span>
             </div>
-            <div>
+            <div (click)="select(item)">
               <span class="delta"
                     [class.up]="(item.delta || 0) > 0"
                     [class.down]="(item.delta || 0) < 0"
@@ -322,7 +364,8 @@ interface RankItem {
                 @else { — }
               </span>
             </div>
-            <svg class="spark" width="80" height="28" [attr.viewBox]="'0 0 80 28'">
+            <svg class="spark" width="80" height="28" [attr.viewBox]="'0 0 80 28'"
+                 (click)="select(item)">
               @if (sparklinePoints(item); as pts) {
                 <polyline fill="none" [attr.stroke]="sparklineColor(item)"
                           stroke-width="1.5" [attr.points]="pts" />
@@ -341,6 +384,8 @@ export class RankingComponent implements OnChanges {
   @Input() events: { value: string; count: number }[] | null = null;
   @Input() eventLabels = new Map<string, string>();
   @Output() ideaSelected = new EventEmitter<Idea>();
+  /** Bubbelt hoch, wenn ein nicht eingeloggter User voten will. */
+  @Output() requireLogin = new EventEmitter<void>();
 
   sortKey = signal<SortKey>('rating');
   eventFilter = signal<string | null>(null);
@@ -357,9 +402,44 @@ export class RankingComponent implements OnChanges {
   readonly chartW = 600;
   readonly chartH = 160;
 
-  // Top-N für Gesamt-Chart
-  private readonly TOP_FOR_CHART = 5;
+  // Top-N für Gesamt-Chart — auf 3 begrenzt für Übersichtlichkeit.
+  private readonly TOP_FOR_CHART = 3;
   private readonly PALETTE = ['#1d3a6e', '#d97706', '#0b7a4f', '#9333ea', '#dc2626'];
+
+  // Inline-Voting-State pro Idee-ID
+  voteValue: Record<string, number> = {};
+  voteBusy: Record<string, boolean> = {};
+  voteMsg: Record<string, string> = {};
+
+  vote(item: RankItem, stars: number) {
+    const idea = item.idea;
+    if (!idea) return;
+    if (!this.api.hasCredentials()) {
+      this.requireLogin.emit();
+      return;
+    }
+    this.voteBusy[idea.id] = true;
+    this.voteMsg[idea.id] = '';
+    const prev = this.voteValue[idea.id] || 0;
+    this.voteValue[idea.id] = stars;  // optimistisch
+    this.api.rateIdea(idea.id, stars).subscribe({
+      next: () => {
+        this.voteBusy[idea.id] = false;
+        this.voteMsg[idea.id] = '✓';
+        // Liste silent neu laden → Live-Umsortierung + neuer Score (Backend
+        // hat den Cache via refresh_idea bereits aktualisiert). Fördert den
+        // kompetitiven Charakter, weil die Stimme sofort die Rangfolge
+        // verändert — ohne Flacker (kein loading-Spinner).
+        this.load(true);
+        setTimeout(() => (this.voteMsg[idea.id] = ''), 2000);
+      },
+      error: (e) => {
+        this.voteBusy[idea.id] = false;
+        this.voteValue[idea.id] = prev;  // Rollback
+        this.voteMsg[idea.id] = e?.error?.detail ? '✗' : '✗';
+      },
+    });
+  }
 
   ngOnChanges(ch: SimpleChanges) {
     if (ch['apiBase']) this.api.setBase(this.apiBase);
@@ -373,15 +453,15 @@ export class RankingComponent implements OnChanges {
     return this.eventLabels.get(slug) || slug;
   }
 
-  load() {
-    this.loading.set(true);
+  load(silent = false) {
+    if (!silent) this.loading.set(true);
     this.api.ranking({
       sort: this.sortKey(),
       event: this.eventFilter(),
-      limit: 20,
+      limit: 50,
     }).subscribe({
       next: (r) => { this.data.set(r as any); this.loading.set(false); },
-      error: () => { this.data.set(null); this.loading.set(false); },
+      error: () => { if (!silent) this.data.set(null); this.loading.set(false); },
     });
     // Top-Steiger separat laden — passt zu Sort + Event-Filter.
     this.api.rankingRisers({
@@ -429,18 +509,23 @@ export class RankingComponent implements OnChanges {
     if (item.idea) this.ideaSelected.emit(item.idea);
   }
 
-  // ---- Sparkline (kleine Linie pro Zeile, basiert auf Score-Verlauf) ----
+  // ---- Sparkline (kleine Linie pro Zeile, basiert auf RANG-Verlauf) ----
+  // Bewusst Rang statt Score: so passt die Mini-Kurve zum Delta-Pfeil und
+  // zum großen Verlaufs-Chart. Score allein wäre irreführend — eine Idee
+  // kann im Rang fallen, obwohl ihr Score gleich bleibt (weil andere
+  // aufgestiegen sind). Kleinerer Rang = besser = Linie oben.
   sparklinePoints(item: RankItem): string {
     const h = item.history || [];
     if (h.length < 2) return '';
-    const w = 80, hh = 28, pad = 2;
+    const w = 80, hh = 28, pad = 3;
     const xs = h.map((_, i) => pad + (i * (w - 2 * pad)) / (h.length - 1));
-    const vals = h.map((p) => p.score);
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
+    const ranks = h.map((p) => p.rank);
+    const min = Math.min(...ranks);
+    const max = Math.max(...ranks);
     const range = max - min || 1;
     return h.map((p, i) => {
-      const y = (hh - pad) - ((p.score - min) / range) * (hh - 2 * pad);
+      // Rang 1 (min) oben → kleiner y-Wert; hoher Rang unten.
+      const y = pad + ((p.rank - min) / range) * (hh - 2 * pad);
       return `${xs[i].toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
   }
@@ -453,7 +538,8 @@ export class RankingComponent implements OnChanges {
 
   // ---- Großer Chart: Rang-Verlauf der aktuellen Top-N ----
   snapshotCount(): number {
-    return this.data()?.snapshots.length || 0;
+    // Live-Marker nicht als „Snapshot" zählen.
+    return (this.data()?.snapshots || []).filter((s) => s !== 'live').length;
   }
 
   chartViewBox(): string {

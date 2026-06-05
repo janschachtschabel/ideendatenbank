@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { ApiService } from '../api.service';
 import { Idea } from '../models';
+import { ShareDialogComponent } from './share-dialog.component';
 
 /**
  * Öffentliches Profil eines Idee-Autors. Erreichbar über `?view=user&u=<username>`
@@ -21,7 +22,7 @@ import { Idea } from '../models';
 @Component({
   standalone: true,
   selector: 'ideendb-public-profile',
-  imports: [CommonModule],
+  imports: [CommonModule, ShareDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host { display: block; }
@@ -41,7 +42,35 @@ import { Idea } from '../models';
       font-size: 1.8rem; font-weight: 700; flex-shrink: 0;
     }
     .head-info { flex: 1; }
-    .head-info h1 { margin: 0 0 2px; font-size: 1.4rem; color: var(--wlo-text); }
+    .head-info h1 {
+      margin: 0 0 2px; font-size: 1.4rem; color: var(--wlo-text);
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    }
+    .head-info .username-suffix {
+      color: var(--wlo-muted); font-size: .9rem; font-weight: 400;
+    }
+    .head-info .role-pill {
+      display: inline-block;
+      padding: 3px 10px; border-radius: 999px;
+      background: var(--wlo-primary-soft, #e6edf7);
+      color: var(--wlo-primary);
+      font-size: .72rem; font-weight: 700;
+      letter-spacing: .03em; text-transform: uppercase;
+    }
+    .head-info .bio {
+      margin: 8px 0 4px;
+      color: var(--wlo-text);
+      font-size: .92rem; line-height: 1.5;
+      max-width: 60ch;
+    }
+    .head-info .website {
+      display: inline-block;
+      margin: 2px 0 4px;
+      color: var(--wlo-primary);
+      font-size: .85rem;
+      text-decoration: none;
+      &:hover { text-decoration: underline; }
+    }
     .head-info .sub { color: var(--wlo-muted); font-size: .88rem; }
     .stats {
       display: flex; flex-wrap: wrap; gap: 24px; margin-top: 12px;
@@ -193,9 +222,25 @@ import { Idea } from '../models';
     <div class="wrap">
     @if (profile(); as p) {
       <div class="head">
-        <div class="avatar">{{ initials(p.username) }}</div>
+        <div class="avatar">{{ initials(p.profile?.display_name || p.username) }}</div>
         <div class="head-info">
-          <h1>{{ p.username }}</h1>
+          <h1>
+            {{ p.profile?.display_name || p.username }}
+            @if (p.profile?.display_name) {
+              <span class="username-suffix">&middot; &#64;{{ p.username }}</span>
+            }
+            @if (roleLabel(p.profile?.role)) {
+              <span class="role-pill">{{ roleLabel(p.profile?.role) }}</span>
+            }
+          </h1>
+          @if (p.profile?.bio) {
+            <p class="bio">{{ p.profile?.bio }}</p>
+          }
+          @if (p.profile?.website) {
+            <a class="website" [href]="p.profile?.website" target="_blank" rel="noopener nofollow">
+              🔗 {{ shortWebsite(p.profile?.website) }}
+            </a>
+          }
           <div class="sub">
             @if (p.last_activity) {
               Letzte Aktivität: {{ formatDate(p.last_activity) }}
@@ -274,48 +319,16 @@ import { Idea } from '../models';
       <div class="empty">Lade Profil…</div>
     }
 
-    @if (shareOpen && profile(); as p) {
-      <div class="share-overlay" (click)="closeShare($event)">
-        <div class="share-box" (click)="$event.stopPropagation()">
-          <div class="share-head">
-            <h2>Profil von {{ p.username }} teilen</h2>
-            <button class="x" (click)="shareOpen = false">×</button>
-          </div>
-          <p style="margin: 0 0 14px; color: var(--wlo-muted); font-size: .9rem;">
-            Direkter Link zum Profil oder als Webkomponente in eine andere Seite einbetten.
-          </p>
-
-          <label>Profil-Link</label>
-          <div class="share-link">
-            <input type="text" [value]="shareUrl()" readonly
-                   #linkInput (click)="linkInput.select()" />
-            <button (click)="copyShareLink()" [class.ok]="copied">
-              @if (copied) {
-                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                Kopiert
-              } @else {
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                </svg>
-                Kopieren
-              }
-            </button>
-          </div>
-
-          <label style="margin-top: 18px">Als Webkomponente einbetten</label>
-          <pre class="embed-snippet">{{ embedSnippet() }}</pre>
-          <div class="embed-actions">
-            <button (click)="copyEmbed()" [class.ok]="embedCopied">
-              {{ embedCopied ? '✓ Code kopiert' : 'Code kopieren' }}
-            </button>
-          </div>
-          <p class="share-note">
-            Das Snippet lädt das App-Bundle und rendert das Profil als eigenständige
-            Webkomponente — funktioniert auf jeder Seite, die das Bundle einbindet.
-          </p>
-        </div>
-      </div>
+    @if (profile(); as p) {
+      <ideendb-share-dialog
+        [open]="shareOpen"
+        [title]="'Profil von ' + p.username + ' teilen'"
+        [intro]="'Direkter Link zum Profil oder als Webkomponente in eine andere Seite einbetten.'"
+        [url]="shareUrl()"
+        [embedSnippet]="embedSnippet()"
+        [qrFilename]="'qr-profil-' + p.username + '.png'"
+        (closed)="shareOpen = false">
+      </ideendb-share-dialog>
     }
     </div>
   `,
@@ -372,6 +385,25 @@ export class PublicProfileComponent implements OnChanges {
         day: '2-digit', month: '2-digit', year: 'numeric',
       });
     } catch { return iso; }
+  }
+
+  shortWebsite(url: string | null | undefined): string {
+    if (!url) return '';
+    try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+  }
+
+  roleLabel(role: string | null | undefined): string {
+    if (!role) return '';
+    const map: Record<string, string> = {
+      'schule': 'Schule',
+      'hochschule': 'Hochschule',
+      'bibliothek': 'Bibliothek',
+      'ngo': 'NGO / Verein',
+      'verlag': 'Verlag / Anbieter',
+      'freie-bildung': 'Freie Bildung',
+      'sonstiges': 'Sonstiges',
+    };
+    return map[role] ?? role;
   }
 
   shareUrl(): string {

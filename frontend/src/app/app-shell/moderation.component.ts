@@ -502,6 +502,43 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       &.on  { background: #e6f4ea; color: #0f5b24; }
       &.off { background: var(--wlo-bg); color: var(--wlo-muted); }
     }
+    .tax-row .status-pill {
+      display: inline-flex; align-items: center;
+      padding: 2px 10px; border-radius: 999px; font-size: .72rem;
+      font-weight: 600; letter-spacing: .02em;
+      background: var(--wlo-bg); color: var(--wlo-muted);
+      &[data-status="live"] {
+        background: var(--wlo-primary-soft, #e6edf7);
+        color: var(--wlo-primary, #1d3a6e);
+      }
+      &[data-status="draft"] {
+        background: #fff8db; color: #5c4a00;
+      }
+      &[data-status="archived"] {
+        background: var(--wlo-bg); color: var(--wlo-muted);
+        text-decoration: line-through;
+      }
+      &.featured {
+        background: var(--wlo-accent, #f5b600); color: #1a2235;
+      }
+    }
+    .event-edit-stack {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .event-edit-meta {
+      display: flex; gap: 10px; align-items: end; flex-wrap: wrap;
+      label.micro {
+        display: flex; flex-direction: column; gap: 2px;
+        font-size: .72rem; color: var(--wlo-muted); text-transform: uppercase; letter-spacing: .04em;
+        select, input { font: inherit; padding: 4px 6px;
+                        border: 1px solid var(--wlo-border); border-radius: 6px;
+                        background: var(--wlo-surface, #fff); color: var(--wlo-text); }
+      }
+      .link-btn {
+        background: none; border: none; cursor: pointer;
+        color: var(--wlo-muted); font-size: 1.1rem;
+      }
+    }
     .tax-empty { padding: 30px; text-align: center; color: var(--wlo-muted);
                  background: var(--wlo-surface, #fff); border: 1px dashed var(--wlo-border);
                  border-radius: 10px; }
@@ -1584,7 +1621,9 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       @if (tab === 'events') {
         <div class="intro">
           Veranstaltungen für die Auswahl im Einreichungsformular. Slug ist intern
-          (kleinbuchstaben, Bindestriche), Label ist die Anzeige.
+          (kleinbuchstaben, Bindestriche), Label ist die Anzeige. Status steuert
+          die Sichtbarkeit (Entwurf = nur Mod, Live = wählbar, Archiv = abgeschlossen).
+          Wenn „Featured bis" gesetzt ist, erscheint das Event prominent auf der Startseite.
         </div>
         <div class="tax-toolbar">
           <strong>{{ events().length }} Veranstaltungen</strong>
@@ -1592,7 +1631,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         <div class="tax-list">
           <div class="tax-row header">
             <span>Slug</span>
-            <span>Label</span>
+            <span>Label / Status</span>
             <span>Beschreibung</span>
             <span>Sort</span>
             <span></span>
@@ -1601,8 +1640,28 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
             <div class="tax-row" [class.editing]="editingEvent?.slug === e.slug">
               @if (editingEvent?.slug === e.slug) {
                 <span class="slug">{{ e.slug }}</span>
-                <input type="text" [(ngModel)]="editingEvent!.label" />
-                <input type="text" [(ngModel)]="editingEvent!.description" />
+                <div class="event-edit-stack">
+                  <input type="text" [(ngModel)]="editingEvent!.label" placeholder="Label" />
+                  <div class="event-edit-meta">
+                    <label class="micro">Status
+                      <select [(ngModel)]="editingEvent!.status">
+                        <option value="draft">Entwurf</option>
+                        <option value="live">Live</option>
+                        <option value="archived">Archiv</option>
+                      </select>
+                    </label>
+                    <label class="micro">Featured bis
+                      <input type="datetime-local"
+                             [ngModel]="featuredUntilLocal(editingEvent!.featured_until)"
+                             (ngModelChange)="editingEvent!.featured_until = $any($event) ? toIsoUtc($any($event)) : null" />
+                    </label>
+                    @if (editingEvent!.featured_until) {
+                      <button type="button" class="link-btn"
+                              (click)="editingEvent!.featured_until = null">×</button>
+                    }
+                  </div>
+                </div>
+                <input type="text" [(ngModel)]="editingEvent!.description" placeholder="Aufruftext (für Startseite)" />
                 <input type="number" [(ngModel)]="editingEvent!.sort_order" />
                 <span class="row-actions">
                   <button class="btn primary-move" (click)="saveEvent()">Speichern</button>
@@ -1610,9 +1669,16 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                 </span>
               } @else {
                 <span class="slug">{{ e.slug }}</span>
-                <span><strong>{{ e.label }}</strong>
+                <span>
+                  <strong>{{ e.label }}</strong>
                   <span class="pill" [class.on]="e.active" [class.off]="!e.active"
                         style="margin-left:8px">{{ e.active ? 'aktiv' : 'inaktiv' }}</span>
+                  <span class="status-pill" [attr.data-status]="e.status || 'live'"
+                        style="margin-left:6px">{{ statusLabel(e.status) }}</span>
+                  @if (isFeatured(e)) {
+                    <span class="status-pill featured" style="margin-left:6px"
+                          title="Bis {{ e.featured_until }}">⭐ Featured</span>
+                  }
                 </span>
                 <span style="color: var(--wlo-muted); font-size: .88rem">{{ e.description || '—' }}</span>
                 <span style="color: var(--wlo-muted)">{{ e.sort_order }}</span>
@@ -2382,7 +2448,7 @@ export class ModerationComponent implements OnInit {
   phases = signal<TaxonomyEntry[]>([]);
   editingEvent: TaxonomyEntry | null = null;
   editingPhase: TaxonomyEntry | null = null;
-  newEvent: TaxonomyEntry = this.blankEntry();
+  newEvent: TaxonomyEntry = this.blankEventEntry();
   newPhase: TaxonomyEntry = this.blankEntry();
 
   // Moderatoren-Anzeige (read-only)
@@ -2542,28 +2608,90 @@ export class ModerationComponent implements OnInit {
     return { slug: '', label: '', description: '', sort_order: 100, active: true };
   }
 
+  blankEventEntry(): TaxonomyEntry {
+    return { ...this.blankEntry(), status: 'live', featured_until: null };
+  }
+
   loadEvents() {
-    this.api.listEvents(true).subscribe((es) => this.events.set(es));
+    // Mod sieht ALLES — drafts + archived inkl. inaktiv
+    this.api.listEvents({ includeInactive: true, includeDrafts: true, includeArchived: true })
+      .subscribe((es) => this.events.set(es));
   }
   loadPhases() {
     this.api.listPhases(true).subscribe((ps) => this.phases.set(ps));
   }
 
+  /** Lifecycle-Label für die Status-Pille. */
+  statusLabel(s: string | undefined | null): string {
+    switch (s) {
+      case 'draft': return 'Entwurf';
+      case 'archived': return 'Archiv';
+      default: return 'Live';
+    }
+  }
+
+  isFeatured(e: TaxonomyEntry): boolean {
+    if (!e.featured_until) return false;
+    const ts = new Date(e.featured_until).getTime();
+    return !isNaN(ts) && ts > Date.now();
+  }
+
+  /** Konvertiert ISO-UTC nach <input type="datetime-local">-Format (lokale TZ). */
+  featuredUntilLocal(iso: string | null | undefined): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  /** Konvertiert <input type="datetime-local">-Wert (lokal) nach ISO UTC. */
+  toIsoUtc(local: string): string {
+    if (!local) return '';
+    const d = new Date(local);
+    return isNaN(d.getTime()) ? '' : d.toISOString();
+  }
+
   startEditEvent(e: TaxonomyEntry) {
-    this.editingEvent = { ...e };
+    // Defensiv: alte API-Antworten ohne `status`/`featured_until`
+    // bekommen sinnvolle Defaults, damit der Save-PUT die Pydantic-
+    // Validierung passiert (Literal[draft|live|archived] erlaubt kein null).
+    this.editingEvent = {
+      ...e,
+      status: e.status ?? 'live',
+      featured_until: e.featured_until ?? null,
+    };
   }
   saveEvent() {
     if (!this.editingEvent) return;
-    this.api.upsertEvent(this.editingEvent).subscribe(() => {
-      this.editingEvent = null;
-      this.loadEvents();
+    // Normalisieren: leere Strings → null, damit Pydantic nicht meckert.
+    const payload: TaxonomyEntry = {
+      ...this.editingEvent,
+      description: this.editingEvent.description?.trim() || null,
+      status: this.editingEvent.status ?? 'live',
+      featured_until: this.editingEvent.featured_until || null,
+    };
+    this.api.upsertEvent(payload).subscribe({
+      next: () => {
+        this.editingEvent = null;
+        this.loadEvents();
+      },
+      error: (e) => {
+        const msg = e?.error?.detail || `Speichern fehlgeschlagen (HTTP ${e?.status})`;
+        alert(msg);
+      },
     });
   }
   addEvent() {
     const slug = this.normalizeSlug(this.newEvent.slug);
-    const entry: TaxonomyEntry = { ...this.newEvent, slug };
+    const entry: TaxonomyEntry = {
+      ...this.newEvent,
+      slug,
+      status: this.newEvent.status ?? 'live',
+      featured_until: this.newEvent.featured_until ?? null,
+    };
     this.api.upsertEvent(entry).subscribe(() => {
-      this.newEvent = this.blankEntry();
+      this.newEvent = this.blankEventEntry();
       this.loadEvents();
     });
   }

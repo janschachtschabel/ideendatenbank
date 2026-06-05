@@ -14,8 +14,8 @@ import { ApiService } from '../api.service';
   imports: [CommonModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
-    :host { display: block; max-width: 980px;
-            margin: 32px auto 64px; padding: 0 20px;
+    :host { display: block; max-width: 1200px;
+            margin: 32px auto 64px; padding: 0 24px;
             line-height: 1.6; color: var(--wlo-text); }
     h1 { font-size: 1.85rem; margin: 0 0 6px; color: var(--wlo-primary); }
     h2 { font-size: 1.3rem; margin: 32px 0 8px; color: var(--wlo-primary); }
@@ -177,7 +177,7 @@ import { ApiService } from '../api.service';
           </tr>
           <tr>
             <td><code class="inline">view</code></td>
-            <td><code class="inline">home</code> | <code class="inline">detail</code> | <code class="inline">user</code> | <code class="inline">browser</code> | <code class="inline">ranking</code> | <code class="inline">topics</code> | <code class="inline">events</code></td>
+            <td><code class="inline">home</code> | <code class="inline">detail</code> | <code class="inline">user</code> | <code class="inline">browser</code> | <code class="inline">ranking</code> | <code class="inline">topics</code> | <code class="inline">events</code> | <code class="inline">submit</code> | <code class="inline">imprint</code> | <code class="inline">privacy</code> | <code class="inline">embed</code> | <code class="inline">help</code></td>
             <td>Initiale Seite. Ohne Angabe startet die Startseite.</td>
           </tr>
           <tr>

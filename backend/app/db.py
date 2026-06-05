@@ -86,13 +86,19 @@ CREATE TABLE IF NOT EXISTS taxonomy_event (
     -- Kuratierte Event-Liste (z.B. "HackathOERn 3", "OER-Camp 2026").
     -- Wird im Submit-Form als Dropdown angeboten und ans cclom:general_keyword
     -- als `event:<slug>` angehängt.
-    slug        TEXT PRIMARY KEY,
-    label       TEXT NOT NULL,
-    description TEXT,
-    sort_order  INTEGER DEFAULT 100,
-    active      INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL,
-    created_by  TEXT
+    slug          TEXT PRIMARY KEY,
+    label         TEXT NOT NULL,
+    description   TEXT,
+    sort_order    INTEGER DEFAULT 100,
+    active        INTEGER NOT NULL DEFAULT 1,
+    -- Lifecycle-Status: 'draft' (Mod sichtbar, Submitter nicht),
+    -- 'live' (aktuell laufend, Default), 'archived' (abgelaufen).
+    status        TEXT NOT NULL DEFAULT 'live',
+    -- Wenn gesetzt + Zeitstempel in der Zukunft: Event taucht im
+    -- "Featured"-Slot auf der Startseite auf.
+    featured_until TEXT,
+    created_at    TEXT NOT NULL,
+    created_by    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS taxonomy_phase (
@@ -227,6 +233,21 @@ def init_db() -> None:
             con.execute("ALTER TABLE idea ADD COLUMN hidden_reason TEXT")
         except sqlite3.OperationalError:
             pass
+        # Event-Lifecycle: Status + Featured-Slot (Mai 2026).
+        # Bestehende Events bekommen status='live' (Default) — keine
+        # User-sichtbare Änderung.
+        try:
+            con.execute(
+                "ALTER TABLE taxonomy_event ADD COLUMN status TEXT NOT NULL DEFAULT 'live'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.execute(
+                "ALTER TABLE taxonomy_event ADD COLUMN featured_until TEXT"
+            )
+        except sqlite3.OperationalError:
+            pass
         # User-Notification-Cursor: wann hat der User seinen Feed zuletzt
         # angesehen? Aktivitäten danach gelten als „neu" und werden im
         # Profil-Tab "Was ist neu" mit Badge gezählt.
@@ -234,6 +255,19 @@ def init_db() -> None:
             """CREATE TABLE IF NOT EXISTS user_feed_seen (
                  user_key TEXT PRIMARY KEY,
                  last_seen TEXT NOT NULL
+               )"""
+        )
+        # User-Profil-Felder (App-seitig, NICHT in edu-sharing). Pflegbar
+        # über "Mein Bereich → Profil bearbeiten". Werden im öffentlichen
+        # Profil angezeigt.
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS user_profile_meta (
+                 username        TEXT PRIMARY KEY,
+                 display_name    TEXT,
+                 bio             TEXT,
+                 website         TEXT,
+                 role            TEXT,
+                 updated_at      TEXT NOT NULL
                )"""
         )
         con.execute(
@@ -268,17 +302,20 @@ def connect():
     die ständigen `database is locked`-Fehler, wenn der 5-Minuten-Sync
     parallel zu User-Aktionen (rate, comment, refresh_idea) schreibt.
 
-    `busy_timeout=10000` lässt SQLite bis zu 10 Sekunden auf einen
+    `busy_timeout=30000` lässt SQLite bis zu 30 Sekunden auf einen
     Lock warten, statt sofort mit `database is locked` abzubrechen.
-    Das fängt den verbleibenden Rest-Konflikte zwischen zwei Writern auf.
+    Der Sync committet inzwischen inkrementell (pro Herausforderung),
+    sodass der Lock nicht mehr über die ganze Sync-Laufzeit gehalten
+    wird — der 30s-Timeout ist nur noch das Sicherheitsnetz für den
+    seltenen Fall, dass ein Writer in ein langes Schreibfenster läuft.
     """
     _ensure_dir()
-    con = sqlite3.connect(settings.sqlite_path, timeout=10.0)
+    con = sqlite3.connect(settings.sqlite_path, timeout=30.0)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = WAL")
     con.execute("PRAGMA synchronous = NORMAL")
-    con.execute("PRAGMA busy_timeout = 10000")
+    con.execute("PRAGMA busy_timeout = 30000")
     try:
         yield con
         con.commit()

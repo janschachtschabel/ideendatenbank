@@ -744,6 +744,47 @@ async def get_ranking(
 
     ev = event or ""
     with connect() as con:
+        # --- 1. LIVE-Rangliste aus der idea-Tabelle (ALLE Ideen) ---------
+        # Anders als früher (nur Snapshot-Einträge mit score>0) zeigt die
+        # Liste jetzt jede Idee — auch unbewertete und neue. So sind auch
+        # Bewegungen in unteren Rängen sichtbar, und ein frischer Vote
+        # wirkt sofort (refresh_idea hat den Cache schon aktualisiert).
+        where = ["COALESCE(hidden,0)=0"]
+        params: list = []
+        if ev:
+            where.append("events LIKE ?")
+            params.append(f'%"{ev}"%')
+        sql_where = " WHERE " + " AND ".join(where)
+
+        interest_map = {
+            r["idea_id"]: r["c"]
+            for r in con.execute(
+                "SELECT idea_id, COUNT(*) AS c FROM idea_interaction "
+                "WHERE kind='interest' GROUP BY idea_id"
+            ).fetchall()
+        }
+
+        all_ideas = con.execute(
+            f"SELECT * FROM idea{sql_where}", params
+        ).fetchall()
+
+        def _score(r) -> tuple[float, float]:
+            """(primär, sekundär) je nach Sort — höher = besser."""
+            if sort == "comments":
+                return (float(r["comment_count"] or 0), float(r["rating_avg"] or 0))
+            if sort == "interest":
+                return (float(interest_map.get(r["id"], 0)),
+                        float(r["comment_count"] or 0))
+            # rating (default): Schnitt, Tie-Break Anzahl Bewertungen
+            return (float(r["rating_avg"] or 0), float(r["rating_count"] or 0))
+
+        scored = sorted(
+            all_ideas,
+            key=lambda r: (_score(r)[0], _score(r)[1], (r["title"] or "")),
+            reverse=True,
+        )[:limit]
+
+        # --- 2. Snapshot-Daten für Delta + Verlauf ----------------------
         snaps = [
             r["snapshot_at"]
             for r in con.execute(
@@ -752,76 +793,69 @@ async def get_ranking(
                 (ev, sort),
             ).fetchall()
         ]
-        if not snaps:
-            return {"sort": sort, "event": event, "items": [], "snapshots": []}
-
-        latest = snaps[0]
-        prev = snaps[1] if len(snaps) > 1 else None
-
-        # Defensiv: nur Einträge mit echtem Score zeigen. Falls je 0-Werte
-        # in die Snapshots eingeschlichen sind (alte Daten, künftige Bugs
-        # in der Capture-Logik), würden sie sonst die Liste mit Karteileichen
-        # füllen und das Verlaufs-Chart unnötig stauchen.
-        rows = con.execute(
-            "SELECT rank, idea_id, score FROM ranking_snapshot "
-            "WHERE event=? AND sort=? AND snapshot_at=? AND score > 0 "
-            "ORDER BY rank ASC LIMIT ?",
-            (ev, sort, latest, limit),
-        ).fetchall()
+        latest = snaps[0] if snaps else None
 
         prev_ranks: dict[str, int] = {}
-        if prev:
+        if latest:
+            # Delta = aktuelle Live-Position vs. Rang im jüngsten Snapshot.
             for r in con.execute(
                 "SELECT idea_id, rank FROM ranking_snapshot "
-                "WHERE event=? AND sort=? AND snapshot_at=? AND score > 0",
-                (ev, sort, prev),
+                "WHERE event=? AND sort=? AND snapshot_at=?",
+                (ev, sort, latest),
             ).fetchall():
                 prev_ranks[r["idea_id"]] = r["rank"]
 
-        # Sparkline-History — alle Snapshots in chronologischer Reihenfolge.
-        history_rows = con.execute(
-            "SELECT idea_id, snapshot_at, score, rank FROM ranking_snapshot "
-            "WHERE event=? AND sort=? AND score > 0 ORDER BY snapshot_at ASC",
-            (ev, sort),
-        ).fetchall()
         history_by_idea: dict[str, list[dict]] = {}
-        for hr in history_rows:
-            history_by_idea.setdefault(hr["idea_id"], []).append({
-                "at": hr["snapshot_at"],
-                "score": hr["score"],
-                "rank": hr["rank"],
-            })
-
-        # Idea-Stammdaten dazuholen.
-        ids = [r["idea_id"] for r in rows]
-        idea_map: dict[str, dict] = {}
-        if ids:
-            placeholders = ",".join(["?"] * len(ids))
-            for ir in con.execute(
-                f"SELECT * FROM idea WHERE id IN ({placeholders})", ids
+        if snaps:
+            for hr in con.execute(
+                "SELECT idea_id, snapshot_at, score, rank FROM ranking_snapshot "
+                "WHERE event=? AND sort=? AND score > 0 ORDER BY snapshot_at ASC",
+                (ev, sort),
             ).fetchall():
-                idea_map[ir["id"]] = _row_to_idea(ir)
+                history_by_idea.setdefault(hr["idea_id"], []).append({
+                    "at": hr["snapshot_at"],
+                    "score": hr["score"],
+                    "rank": hr["rank"],
+                })
+
+    # Synthetischer „Jetzt"-Punkt: Damit Verlaufs-Chart + Zeilen-Sparklines
+    # zum LIVE-Rang der Tabelle passen, hängen wir den aktuellen Stand als
+    # letzten Stützpunkt an. Ohne ihn würden die Kurven beim letzten
+    # stündlichen Snapshot „hängen bleiben", während Tabelle/Delta schon
+    # den Live-Stand zeigen (Inkonsistenz nach einem frischen Vote).
+    # Nur anhängen, wenn es bereits echte Snapshots gibt — sonst gäbe es
+    # nur einen Einzelpunkt und keinen sinnvollen „Verlauf".
+    LIVE_MARKER = "live"
+    has_snaps = bool(snaps)
 
     items = []
-    for r in rows:
-        prev_rank = prev_ranks.get(r["idea_id"])
-        delta = (prev_rank - r["rank"]) if prev_rank is not None else None
-        # delta > 0 → nach oben gewandert (kleinere rank-Zahl), delta < 0 → gefallen
+    for idx, r in enumerate(scored):
+        rank = idx + 1
+        iid = r["id"]
+        prev_rank = prev_ranks.get(iid)
+        delta = (prev_rank - rank) if prev_rank is not None else None
+        live_score = _score(r)[0]
+        history = list(history_by_idea.get(iid, []))
+        if has_snaps:
+            history.append({"at": LIVE_MARKER, "score": live_score, "rank": rank})
         items.append({
-            "rank": r["rank"],
+            "rank": rank,
             "prev_rank": prev_rank,
             "delta": delta,
-            "score": r["score"],
-            "idea": idea_map.get(r["idea_id"]),
-            "history": history_by_idea.get(r["idea_id"], []),
+            "score": live_score,
+            "idea": _row_to_idea(r),
+            "history": history,
         })
+
+    snapshots_out = list(reversed(snaps))  # alt → neu (für Chart-X-Achse)
+    if has_snaps:
+        snapshots_out.append(LIVE_MARKER)
 
     return {
         "sort": sort,
         "event": event,
         "snapshot_at": latest,
-        "previous_snapshot_at": prev,
-        "snapshots": list(reversed(snaps)),  # alt → neu
+        "snapshots": snapshots_out,
         "items": items,
     }
 
@@ -2085,7 +2119,17 @@ class TaxonomyEntry(BaseModel):
     active: bool = True
 
 
+class EventEntry(TaxonomyEntry):
+    """Erweitert TaxonomyEntry um Event-spezifische Lifecycle-Felder."""
+    # Lifecycle: draft (Mod sichtbar, Submitter nicht), live (Default),
+    # archived (abgelaufen — taucht im UI ausgegraut auf).
+    status: Literal["draft", "live", "archived"] = "live"
+    # ISO-Zeitstempel; bis dahin im Featured-Slot auf der Startseite.
+    featured_until: str | None = None
+
+
 def _list_taxonomy(table: str) -> list[dict]:
+    """Schlanke Variante für Phases — ohne Event-spezifische Felder."""
     with connect() as con:
         rows = con.execute(
             f"SELECT slug,label,description,sort_order,active,created_at,created_by "
@@ -2096,6 +2140,28 @@ def _list_taxonomy(table: str) -> list[dict]:
     ]
 
 
+def _list_events(include_drafts: bool = False, include_archived: bool = False) -> list[dict]:
+    """Event-Listing mit status + featured_until. include_drafts/archived
+    sind Mod-Optionen; Default-Anzeige zeigt nur `live`-Events."""
+    with connect() as con:
+        rows = con.execute(
+            "SELECT slug,label,description,sort_order,active,status,"
+            "featured_until,created_at,created_by "
+            "FROM taxonomy_event ORDER BY sort_order, label"
+        ).fetchall()
+    items: list[dict] = []
+    for r in rows:
+        d = {**dict(r), "active": bool(r["active"])}
+        status = d.get("status") or "live"
+        d["status"] = status
+        if status == "draft" and not include_drafts:
+            continue
+        if status == "archived" and not include_archived:
+            continue
+        items.append(d)
+    return items
+
+
 @router.get("/phases", tags=["taxonomy"])
 def list_phases(only_active: bool = True):
     items = _list_taxonomy("taxonomy_phase")
@@ -2103,9 +2169,58 @@ def list_phases(only_active: bool = True):
 
 
 @router.get("/events", tags=["taxonomy"])
-def list_events(only_active: bool = True):
-    items = _list_taxonomy("taxonomy_event")
-    return [i for i in items if i["active"]] if only_active else items
+def list_events(
+    only_active: bool = True,
+    include_drafts: bool = False,
+    include_archived: bool = True,
+):
+    """Default-Sicht: live + archived (Übersicht zeigt auch alte Events,
+    Submit-Form filtert clientseitig auf nur live). Drafts nur, wenn der
+    Aufrufer Mod ist und das Flag explizit setzt."""
+    items = _list_events(
+        include_drafts=include_drafts, include_archived=include_archived,
+    )
+    if only_active:
+        items = [i for i in items if i["active"]]
+    return items
+
+
+@router.get("/events/featured", tags=["taxonomy"])
+def featured_event():
+    """Liefert ALLE aktuell für die Startseite hervorgehobenen Events.
+
+    Auswahl: status='live', featured_until in der Zukunft. Sortiert nach
+    der Endzeit aufsteigend (das am ehesten auslaufende zuerst). Pro Event
+    wird der Idee-Zähler mitgegeben, damit das Frontend keinen zweiten
+    Roundtrip braucht.
+
+    Rückgabe ist eine LISTE — das Frontend stapelt mehrere Featured-Events
+    untereinander. Leere Liste, wenn keins featured ist.
+    """
+    now_iso = datetime.now(UTC).isoformat()
+    out: list[dict] = []
+    with connect() as con:
+        rows = con.execute(
+            "SELECT slug,label,description,sort_order,featured_until,status "
+            "FROM taxonomy_event "
+            "WHERE status='live' AND active=1 "
+            "  AND featured_until IS NOT NULL AND featured_until > ? "
+            "ORDER BY featured_until ASC",
+            (now_iso,),
+        ).fetchall()
+        for row in rows:
+            ev = {**dict(row), "active": True}
+            # Event-Zugehörigkeit liegt in der JSON-Spalte `events` als
+            # blanker Slug (z.B. "hackathoern-3") — NICHT als `event:`-Keyword
+            # und NICHT in der `keywords`-Spalte. Gleiches LIKE-Muster wie
+            # der Listen-Filter (siehe list_ideas, i.events LIKE '%"slug"%').
+            ev["idea_count"] = con.execute(
+                "SELECT COUNT(*) FROM idea "
+                "WHERE COALESCE(hidden,0)=0 AND events LIKE ?",
+                (f'%"{row["slug"]}"%',),
+            ).fetchone()[0]
+            out.append(ev)
+    return out
 
 
 def _upsert_taxonomy(table: str, body: TaxonomyEntry, user: str | None) -> dict:
@@ -2132,17 +2247,45 @@ def _upsert_taxonomy(table: str, body: TaxonomyEntry, user: str | None) -> dict:
     return {"ok": True, "slug": body.slug}
 
 
+def _upsert_event(body: EventEntry, user: str | None) -> dict:
+    """Upsert mit Event-spezifischen Feldern (Status + Featured)."""
+    with connect() as con:
+        existing = con.execute(
+            "SELECT slug FROM taxonomy_event WHERE slug=?", (body.slug,)
+        ).fetchone()
+        if existing:
+            con.execute(
+                "UPDATE taxonomy_event SET label=?, description=?, sort_order=?, "
+                "active=?, status=?, featured_until=? WHERE slug=?",
+                (body.label, body.description, body.sort_order,
+                 1 if body.active else 0,
+                 body.status, body.featured_until, body.slug),
+            )
+        else:
+            con.execute(
+                "INSERT INTO taxonomy_event "
+                "(slug,label,description,sort_order,active,status,featured_until,"
+                "created_at,created_by) VALUES (?,?,?,?,?,?,?,?,?)",
+                (body.slug, body.label, body.description, body.sort_order,
+                 1 if body.active else 0, body.status, body.featured_until,
+                 datetime.now(UTC).isoformat(), user or "anonymous"),
+            )
+    return {"ok": True, "slug": body.slug}
+
+
 @router.put("/admin/events/{slug}", tags=["taxonomy"])
-async def upsert_event(slug: str, body: TaxonomyEntry, authorization: str | None = Header(None)):
+async def upsert_event(slug: str, body: EventEntry, authorization: str | None = Header(None)):
     user = await _require_moderator(authorization)
     if slug != body.slug:
         raise HTTPException(400, "URL-Slug und Body-Slug stimmen nicht überein")
-    res = _upsert_taxonomy("taxonomy_event", body, user)
+    res = _upsert_event(body, user)
     _log_activity(
         action="taxonomy_event_changed",
         authorization=authorization, is_mod=True,
         target_type="taxonomy", target_id=slug, target_label=body.label,
-        detail={"active": body.active, "sort_order": body.sort_order},
+        detail={"active": body.active, "sort_order": body.sort_order,
+                "status": body.status,
+                "featured_until": body.featured_until},
     )
     return res
 
@@ -3791,7 +3934,8 @@ def ranking_risers(
 
 @router.get("/users/{username}", tags=["users"])
 def public_user_profile(username: str):
-    """Öffentliches Profil — listet die Ideen eines Users + Aggregat-Stats.
+    """Öffentliches Profil — listet die Ideen eines Users + Aggregat-Stats
+    + optionale Profil-Felder (display_name, bio, website, role).
     Keine private Information (Mitmachen/Folgen anderer Ideen, eigene
     Meldungen) — die liegen unter /me/*."""
     uname = (username or "").strip()
@@ -3805,7 +3949,6 @@ def public_user_profile(username: str):
                 ORDER BY modified_at DESC""",
             (uname,),
         ).fetchall()
-        # Aggregat: Anzahl Kommentare + Bewertungen gesamt
         agg = con.execute(
             """SELECT
                  COUNT(*) AS ideas,
@@ -3816,13 +3959,20 @@ def public_user_profile(username: str):
                   AND COALESCE(hidden,0) = 0""",
             (uname,),
         ).fetchone()
-        # Letzte Aktivität
         last_act = con.execute(
             "SELECT MAX(modified_at) FROM idea WHERE owner_username = ?",
             (uname,),
         ).fetchone()[0]
-    if not rows and not last_act:
+        meta_row = con.execute(
+            "SELECT display_name, bio, website, role "
+            "FROM user_profile_meta WHERE username=?",
+            (uname,),
+        ).fetchone()
+    if not rows and not last_act and not meta_row:
         raise HTTPException(404, "Kein öffentliches Profil vorhanden")
+    meta = dict(meta_row) if meta_row else {
+        "display_name": None, "bio": None, "website": None, "role": None,
+    }
     return {
         "username": uname,
         "stats": {
@@ -3832,8 +3982,95 @@ def public_user_profile(username: str):
             "avg_rating": round(float(agg["avg_rating"] or 0.0), 2),
         },
         "last_activity": last_act,
+        "profile": meta,
         "ideas": [_row_to_idea(r) for r in rows],
     }
+
+
+# ===== Eigene Profil-Felder pflegen (App-seitig) ===================
+
+class ProfileMetaPatch(BaseModel):
+    """Optional editable Profil-Felder (alle nullable / leer = entfernen)."""
+    display_name: str | None = Field(default=None, max_length=80)
+    bio: str | None = Field(default=None, max_length=280)
+    website: str | None = Field(default=None, max_length=2000)
+    # Vordefinierte Rollen-Whitelist; Frontend rendert das als Dropdown.
+    role: Literal[
+        "schule", "hochschule", "bibliothek", "ngo", "verlag",
+        "freie-bildung", "sonstiges", ""
+    ] | None = None
+
+
+@router.get("/me/profile-meta", tags=["me"])
+def get_my_profile_meta(authorization: str | None = Header(None)):
+    """Lädt die eigenen Profil-Felder zum Bearbeiten."""
+    if not authorization:
+        raise HTTPException(401, "Anmeldung erforderlich")
+    me = _user_key_from_auth(authorization)
+    if not me:
+        raise HTTPException(401, "Username konnte nicht ermittelt werden")
+    with connect() as con:
+        row = con.execute(
+            "SELECT display_name, bio, website, role, updated_at "
+            "FROM user_profile_meta WHERE username=?",
+            (me,),
+        ).fetchone()
+    if not row:
+        return {"display_name": None, "bio": None, "website": None,
+                "role": None, "updated_at": None}
+    return dict(row)
+
+
+@router.put("/me/profile-meta", tags=["me"])
+def update_my_profile_meta(
+    body: ProfileMetaPatch,
+    authorization: str | None = Header(None),
+):
+    """Speichert die eigenen Profil-Felder. Wirft 400 bei ungültiger URL."""
+    if not authorization:
+        raise HTTPException(401, "Anmeldung erforderlich")
+    me = _user_key_from_auth(authorization)
+    if not me:
+        raise HTTPException(401, "Username konnte nicht ermittelt werden")
+
+    # URL absichern (http(s)-only)
+    safe_url = _validate_external_url(body.website, field="Website")
+
+    # Leere Strings → NULL
+    def _norm(v: str | None) -> str | None:
+        if v is None:
+            return None
+        s = v.strip()
+        return s or None
+
+    display = _norm(body.display_name)
+    bio = _norm(body.bio)
+    role = _norm(body.role)
+    now = datetime.now(UTC).isoformat()
+
+    with connect() as con:
+        con.execute(
+            "INSERT INTO user_profile_meta "
+            "(username, display_name, bio, website, role, updated_at) "
+            "VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(username) DO UPDATE SET "
+            "  display_name=excluded.display_name, "
+            "  bio=excluded.bio, "
+            "  website=excluded.website, "
+            "  role=excluded.role, "
+            "  updated_at=excluded.updated_at",
+            (me, display, bio, safe_url, role, now),
+        )
+    _log_activity(
+        action="profile_meta_updated",
+        authorization=authorization, is_mod=False,
+        target_type="user", target_id=me,
+        detail={"fields": [k for k, v in {
+            "display_name": display, "bio": bio,
+            "website": safe_url, "role": role,
+        }.items() if v is not None]},
+    )
+    return {"ok": True, "username": me, "updated_at": now}
 
 
 # ===== Hidden-Verwaltung (Mod-only) ===============================

@@ -661,6 +661,53 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
     transition: transform .15s ease, opacity .15s ease;
     opacity: .6;
   }
+
+  /* Optional sichtbare Beschreibung (Aufruftext des Events). */
+  .ev-description {
+    margin: 4px 0 6px;
+    font-size: .82rem;
+    color: var(--wlo-muted);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Status-Pille (Featured / Archiv) im Titel. */
+  .ev-pill {
+    display: inline-flex; align-items: center;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    background: var(--wlo-bg);
+    color: var(--wlo-muted);
+    vertical-align: middle;
+    &.featured {
+      background: var(--wlo-accent, #f5b600);
+      color: #1a2235;
+    }
+    &.archived {
+      background: var(--wlo-bg);
+      color: var(--wlo-muted);
+    }
+  }
+
+  /* Visuelles Dimming für archivierte Events — bleibt klickbar. */
+  &.event-archived {
+    opacity: 0.75;
+    .body h3 { color: var(--wlo-muted); }
+  }
+
+  /* Featured-Events bekommen einen dezenten Akzent-Ring. */
+  &.event-featured {
+    border-color: var(--wlo-accent, #f5b600);
+    box-shadow: 0 0 0 1px var(--wlo-accent, #f5b600) inset;
+  }
 }
 
 /* === Themen-Karten mit eingebetteten Herausforderungs-Pillen === */
@@ -742,6 +789,93 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
       color: #fff;
     }
   }
+}
+
+/* ===== Featured-Event-Slot auf der Startseite ===== */
+.featured-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.featured-event {
+  background: linear-gradient(135deg,
+    var(--wlo-primary-soft, #e6edf7) 0%,
+    var(--wlo-accent-soft, #fff8db) 100%);
+  border: 1px solid var(--wlo-accent, #f5b600);
+  border-radius: 14px;
+  padding: 22px 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  box-shadow: 0 4px 18px rgba(0, 40, 85, .06);
+}
+.featured-event .fe-head {
+  flex: 1; min-width: 280px;
+}
+.featured-event .fe-pill {
+  display: inline-block;
+  background: var(--wlo-accent, #f5b600);
+  color: #1a2235;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.featured-event h2 {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+  color: var(--wlo-text);
+}
+/* Event-Titel als klickbarer Link → führt zur Event-Ideenliste.
+   Sieht aus wie der Titel, bekommt aber Hover-Affordance. */
+.featured-event .fe-title-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--wlo-text);
+  cursor: pointer;
+  text-align: left;
+  &:hover { text-decoration: underline; text-decoration-thickness: 2px; }
+}
+/* „Jetzt voten" — transparenter Umriss-Button. Rahmen + Schrift in der
+   normalen Textfarbe (--wlo-text), damit er in JEDEM Theme zur „Ideen
+   stöbern"-Sekundärschaltfläche passt und auf dem hellen Featured-
+   Gradient gut lesbar bleibt (der globale .btn.ghost nutzt hero-text =
+   im default weiß, daher hier nicht verwendbar). */
+.featured-event .fe-vote {
+  background: transparent;
+  color: var(--wlo-text, #1a2235);
+  border: 1.5px solid var(--wlo-text, #1a2235);
+  &:hover {
+    background: var(--wlo-text, #1a2235);
+    color: var(--wlo-surface, #fff);
+  }
+}
+.featured-event .fe-desc {
+  margin: 0 0 8px;
+  color: var(--wlo-text);
+  opacity: .85;
+  line-height: 1.4;
+}
+.featured-event .fe-meta {
+  margin: 0;
+  font-size: .85rem;
+  color: var(--wlo-muted);
+}
+.featured-event .fe-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 /* ===== Veranstaltungen ===== */

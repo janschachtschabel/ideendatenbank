@@ -1,7 +1,7 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { Idea, IdeaList, InboxItem, SortBy, TaxonomyEntry, Topic } from './models';
+import { FeaturedEvent, Idea, IdeaList, InboxItem, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
 
 /**
  * Default API base. Relative so the web component works out-of-the-box when
@@ -184,10 +184,23 @@ export class ApiService {
       params: { only_active: includeInactive ? 'false' : 'true' },
     });
   }
-  listEvents(includeInactive = false): Observable<TaxonomyEntry[]> {
+  /** Endnutzer-Sicht: live + archived. Mod kann via includeDrafts=true
+   * auch Entwürfe sehen. */
+  listEvents(opts: { includeInactive?: boolean; includeDrafts?: boolean; includeArchived?: boolean } = {}): Observable<TaxonomyEntry[]> {
+    const params: Record<string, string> = {
+      only_active: opts.includeInactive ? 'false' : 'true',
+      include_archived: opts.includeArchived === false ? 'false' : 'true',
+    };
+    if (opts.includeDrafts) params['include_drafts'] = 'true';
     return this.http.get<TaxonomyEntry[]>(`${this.base}/events`, {
-      params: { only_active: includeInactive ? 'false' : 'true' },
+      params,
+      headers: this.authHeaders(),  // optional, nötig für include_drafts
     });
+  }
+
+  /** Alle aktuell auf der Startseite hervorgehobenen Events (Liste). */
+  featuredEvents(): Observable<FeaturedEvent[]> {
+    return this.http.get<FeaturedEvent[]>(`${this.base}/events/featured`);
   }
 
   upsertEvent(entry: TaxonomyEntry): Observable<unknown> {
@@ -197,6 +210,18 @@ export class ApiService {
   }
   deleteEvent(slug: string): Observable<unknown> {
     return this.http.delete(`${this.base}/admin/events/${slug}`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  // ---- Profil-Meta (App-seitige Felder pro User) ----
+  getMyProfileMeta(): Observable<UserProfileMeta> {
+    return this.http.get<UserProfileMeta>(`${this.base}/me/profile-meta`, {
+      headers: this.authHeaders(),
+    });
+  }
+  updateMyProfileMeta(body: Partial<UserProfileMeta>): Observable<unknown> {
+    return this.http.put(`${this.base}/me/profile-meta`, body, {
       headers: this.authHeaders(),
     });
   }

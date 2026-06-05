@@ -279,7 +279,7 @@ Befehle:
 ```bash
 # 1. (Optional, empfohlen) Vorher manuell ein Sicherheits-Backup ziehen
 curl -s -u '<mod-username>:<passwort>' \
-  -X POST http://127.0.0.1:8000/api/v1/admin/backups
+  -X POST http://127.0.0.1:8000/api/v1/admin/backup
 
 # 2. Image pullen + Container ersetzen
 docker pull ghcr.io/janschachtschabel/ideendatenbank:main
@@ -497,11 +497,22 @@ docker logs --since 1h ideendb | grep ERROR  # letzte Stunde, nur Fehler
 Direkt im Container via API:
 
 ```bash
+# Backup erstellen (Singular: /admin/backup)
 curl -s -u '<mod-username>:<passwort>' \
-  -X POST http://127.0.0.1:8000/api/v1/admin/backups
+  -X POST http://127.0.0.1:8000/api/v1/admin/backup
+
+# Liste aller Backups (Plural: /admin/backups)
+curl -s -u '<mod-username>:<passwort>' \
+  http://127.0.0.1:8000/api/v1/admin/backups | python3 -m json.tool
+
+# Ein Backup herunterladen (Export — z.B. zum Übertragen auf einen
+# anderen Server)
+curl -s -u '<mod-username>:<passwort>' \
+  -o ideendb-backup.zip \
+  http://127.0.0.1:8000/api/v1/admin/backups/ideendb-backup-YYYYMMDD-HHMM.zip
 ```
 
-Oder über das Mod-UI → Tab **Backup**.
+Oder über das Mod-UI → Tab **Backup** (Erstellen / Download / Restore).
 
 ### Volume-Snapshot (außerhalb der App, z.B. vor riskantem Schritt)
 

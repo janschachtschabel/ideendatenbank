@@ -67,7 +67,7 @@ import { TaxonomyEntry, Topic } from '../models';
     }
     .event-chips {
       display: flex; flex-wrap: wrap; gap: 6px;
-      input[type=checkbox] { display: none; }
+      input[type=checkbox], input[type=radio] { display: none; }
     }
     .event-chip {
       display: inline-flex; align-items: center; cursor: pointer;
@@ -82,6 +82,19 @@ import { TaxonomyEntry, Topic } from '../models';
         border-color: var(--wlo-primary, #1d3a6e);
         color: #fff;
       }
+      &.none {
+        font-style: italic;
+        border-style: dashed;
+        &.on {
+          background: var(--wlo-muted, #6a7184);
+          border-color: var(--wlo-muted, #6a7184);
+        }
+      }
+    }
+    .req {
+      color: #b00020;
+      font-weight: 700;
+      margin-left: 2px;
     }
     .preset-event {
       background: var(--wlo-accent-soft, #fff8db); border: 1px solid #f5b600; border-radius: 8px;
@@ -155,7 +168,7 @@ import { TaxonomyEntry, Topic } from '../models';
             </select>
           </div>
           <div>
-            <label>Veranstaltung</label>
+            <label>Veranstaltung <span class="req">*</span></label>
             @if (isPreset()) {
               <div class="preset-event">
                 📅 <strong>{{ presetLabel() }}</strong>
@@ -163,7 +176,13 @@ import { TaxonomyEntry, Topic } from '../models';
               </div>
             } @else {
               <div class="event-chips">
-                @for (e of events; track e.slug) {
+                <label class="event-chip none" [class.on]="noEvent">
+                  <input type="radio" name="event-none"
+                         [checked]="noEvent"
+                         (change)="setNoEvent()" />
+                  Keine Veranstaltungs­zugehörigkeit
+                </label>
+                @for (e of liveEvents(); track e.slug) {
                   <label class="event-chip" [class.on]="selectedEvents.has(e.slug)">
                     <input type="checkbox"
                            [checked]="selectedEvents.has(e.slug)"
@@ -172,13 +191,13 @@ import { TaxonomyEntry, Topic } from '../models';
                   </label>
                 }
               </div>
-              @if (!events.length) {
-                <small style="display:block; color: var(--wlo-muted); font-size:.78rem; margin-top:-6px">
-                  Noch keine Veranstaltungen kuratiert. Das Team kann sie unter „Moderation" anlegen.
+              @if (!liveEvents().length) {
+                <small style="display:block; color: var(--wlo-muted); font-size:.78rem; margin-top:6px">
+                  Noch keine laufenden Veranstaltungen. Wähle „Keine Veranstaltungs­zugehörigkeit".
                 </small>
               } @else {
                 <small style="display:block; color: var(--wlo-muted); font-size:.78rem; margin-top:6px">
-                  Mehrfachauswahl möglich — Idee taucht in jeder gewählten Veranstaltung auf.
+                  Bitte mindestens eine Auswahl. Mehrfachauswahl möglich — Idee taucht in jeder gewählten Veranstaltung auf.
                 </small>
               }
             }
@@ -287,13 +306,30 @@ export class SubmitIdeaComponent implements OnInit {
   phase = '';
   event = '';  // wird automatisch gesynced auf erstes selectedEvents
   selectedEvents = new Set<string>();
+  // True, wenn der User explizit „keine Veranstaltung" gewählt hat.
+  // Auswahl ist exklusiv: entweder noEvent ODER mindestens ein selectedEvent.
+  noEvent = false;
   busy = false;
 
   toggleEvent(slug: string) {
     if (this.selectedEvents.has(slug)) this.selectedEvents.delete(slug);
     else this.selectedEvents.add(slug);
+    // Wenn der User irgendein Event wählt, ist „keine Veranstaltung" aus
+    if (this.selectedEvents.size > 0) this.noEvent = false;
     // legacy event-Feld auf erste Auswahl setzen für Backward-Compat
     this.event = this.selectedEvents.values().next().value || '';
+  }
+
+  setNoEvent() {
+    this.noEvent = true;
+    this.selectedEvents.clear();
+    this.event = '';
+  }
+
+  /** Nur 'live'-Events für die Auswahl im Submit-Form anzeigen.
+   * Archivierte Events werden NICHT als wählbare Optionen geboten. */
+  liveEvents(): TaxonomyEntry[] {
+    return this.events.filter((e) => (e.status ?? 'live') === 'live');
   }
   error = '';
   uploadStatus = '';
@@ -338,13 +374,17 @@ export class SubmitIdeaComponent implements OnInit {
       this.challenges = ts.filter((t) => t.parent_id); // only challenge-level
     });
     this.api.listPhases().subscribe((ps) => (this.phases = ps));
-    this.api.listEvents().subscribe((es) => {
+    // Nur live-Events fürs Submit-Dropdown; archivierte werden im
+    // Backend bereits ausgeliefert, aber wir filtern für den Submit
+    // clientseitig auf liveEvents().
+    this.api.listEvents({ includeArchived: false }).subscribe((es) => {
       this.events = es;
       // Wenn die App mit ?event=<slug>-Query gestartet wurde und der Slug
       // existiert, vorbelegen + UI sperrt das Dropdown auf diesen Wert.
       if (this.presetEvent && es.some((e) => e.slug === this.presetEvent)) {
         this.event = this.presetEvent;
         this.selectedEvents.add(this.presetEvent);
+        this.noEvent = false;
       }
     });
     // Captcha lazy laden — nur, wenn der User nicht eingeloggt ist.
@@ -393,6 +433,12 @@ export class SubmitIdeaComponent implements OnInit {
         this.error = 'Bitte beantworte die Rechenaufgabe (Spam-Schutz).';
         return;
       }
+    }
+    // Event-Pflichtfeld: entweder explizit "keine" oder mindestens eine
+    // Auswahl. Bei Preset (Submit via Share-Link) ist event schon gesetzt.
+    if (!this.isPreset() && !this.noEvent && this.selectedEvents.size === 0) {
+      this.error = 'Bitte eine Veranstaltung wählen — oder „Keine Veranstaltungs­zugehörigkeit".';
+      return;
     }
     this.busy = true;
     this.error = '';

@@ -28,9 +28,12 @@ log = logging.getLogger(__name__)
 # laufen und die SQLite mit „database is locked" abschießen.
 _sync_lock = asyncio.Lock()
 
-# Mindestabstand zwischen zwei Trend-Snapshots — verhindert, dass das 30er-
-# Limit der ranking_snapshot-Tabelle bei 5-min-Sync nach 2.5h voll ist.
-SNAPSHOT_MIN_INTERVAL = timedelta(hours=1)
+# Mindestabstand zwischen zwei Trend-Snapshot-VERSUCHEN (Debounce-Floor).
+# Option B: Es wird höchstens alle 5 Min geprüft, ob sich etwas geändert
+# hat — und nur dann tatsächlich ein Snapshot geschrieben (siehe
+# _capture_ranking_snapshot, Top-N-Order-Vergleich). So entsteht pro echter
+# Rang-Änderung ein Punkt, ohne dass identische Stände den Chart zumüllen.
+SNAPSHOT_MIN_INTERVAL = timedelta(minutes=5)
 PHASE_PREFIX = "phase:"
 EVENT_PREFIX = "event:"
 TOPIC_PREFIX = "topic:"
@@ -514,6 +517,14 @@ async def _run_sync_locked() -> dict:
                             (sub_id, attach_of),
                         )
 
+                    # Schreibsperre nach jeder Herausforderung freigeben.
+                    # Sonst hält der Sync den SQLite-Write-Lock über die
+                    # gesamte Laufzeit (~25s) und blockiert parallele
+                    # Mod-Schreibvorgänge (Event speichern etc.) bis zum
+                    # Timeout → 500 "database is locked". Mit dem Commit
+                    # entstehen Fenster, in denen andere Writer drankommen.
+                    con.commit()
+
             # Trend-Snapshot: aktuellen Stand der Top-Listen je Event/Sort
             # persistieren. Throttled auf SNAPSHOT_MIN_INTERVAL, damit das
             # 30er-Limit der ranking_snapshot-Tabelle nicht in 2.5h voll ist.
@@ -653,19 +664,48 @@ def _capture_ranking_snapshot(con, ts: str) -> None:
         ).fetchall()
         return [(r["id"], float(r["p"] or 0)) for r in ideas]
 
-    # Schreiben — overall + pro Event.
+    def _latest_order(ev: str, sort_key: str) -> list[str]:
+        """Idee-IDs in Rang-Reihenfolge des jüngsten Snapshots für
+        (event, sort) — für den Änderungs-Vergleich."""
+        last = con.execute(
+            "SELECT MAX(snapshot_at) AS m FROM ranking_snapshot "
+            "WHERE event=? AND sort=?",
+            (ev, sort_key),
+        ).fetchone()
+        last_at = last["m"] if last else None
+        if not last_at:
+            return []
+        return [
+            r["idea_id"]
+            for r in con.execute(
+                "SELECT idea_id FROM ranking_snapshot "
+                "WHERE event=? AND sort=? AND snapshot_at=? ORDER BY rank ASC",
+                (ev, sort_key, last_at),
+            ).fetchall()
+        ]
+
+    # Schreiben — overall + pro Event. Pro (event, sort) NUR wenn sich die
+    # Top-N-Reihenfolge gegenüber dem letzten Snapshot geändert hat (Option B:
+    # jeder gespeicherte Punkt = eine echte Rang-Änderung). Verhindert
+    # identische Wiederholungen, die den Verlauf-Chart zumüllen würden.
     targets = [""] + sorted(event_slugs)
+    wrote_any = False
     for ev in targets:
         for sort_key, primary, secondary in SNAPSHOT_SORTS:
             ranking = _rank_for(ev or None, sort_key, primary, secondary)
+            new_order = [idea_id for idea_id, _ in ranking]
+            if new_order and new_order == _latest_order(ev, sort_key):
+                continue  # unverändert → kein neuer Snapshot für dieses Board
             for rank, (idea_id, score) in enumerate(ranking, start=1):
                 con.execute(
                     "INSERT OR REPLACE INTO ranking_snapshot "
                     "(snapshot_at,event,sort,idea_id,rank,score) VALUES (?,?,?,?,?,?)",
                     (ts, ev, sort_key, idea_id, rank, score),
                 )
+                wrote_any = True
 
-    _prune_snapshots(con)
+    if wrote_any:
+        _prune_snapshots(con)
 
 
 ACTIVITY_LOG_KEEP_DAYS = 90
@@ -690,10 +730,12 @@ def _prune_activity_log(con) -> None:
 
 
 def _prune_snapshots(con) -> None:
-    """Behalte die jüngsten 60 Snapshots — alles ältere wegwerfen, damit die
-    Tabelle nicht ausufert. Bei SNAPSHOT_MIN_INTERVAL=1h sind das ~2.5 Tage
-    Trend-Historie; bei 4h-Intervall ~10 Tage."""
-    keep = 60
+    """Behalte die jüngsten 200 Snapshot-Zeitpunkte — alles ältere wegwerfen.
+    Mit Option B (nur bei Rang-Änderung, 5-Min-Floor) ist ein Zeitpunkt eine
+    echte Änderung; 200 decken bei sehr aktivem Event mind. ~16h dichte
+    Änderungs-Historie ab, bei ruhigem Betrieb deutlich länger — genug für
+    die 7-Tage-Steiger-Auswertung."""
+    keep = 200
     rows = con.execute(
         "SELECT DISTINCT snapshot_at FROM ranking_snapshot "
         "ORDER BY snapshot_at DESC LIMIT ?",

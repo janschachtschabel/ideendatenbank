@@ -12,8 +12,8 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
   imports: [CommonModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
-    :host { display: block; max-width: 860px;
-            margin: 32px auto 64px; padding: 0 20px;
+    :host { display: block; max-width: 1200px;
+            margin: 32px auto 64px; padding: 0 24px;
             line-height: 1.65; color: var(--wlo-text); }
     h1 { font-size: 1.85rem; margin: 0 0 6px; color: var(--wlo-primary); }
     h2 { font-size: 1.3rem; margin: 28px 0 8px; color: var(--wlo-primary); }
@@ -107,6 +107,14 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
         Zeigt die zuletzt geänderten Ideen, die aktuellen Herausforderungen
         und einen Schnelleinstieg zur Rangliste.
       </p>
+      <p>
+        Läuft gerade eine Veranstaltung (z.B. ein „Call for Ideas"), erscheint
+        oben ein hervorgehobener <strong>Aktuelle-Veranstaltung-Block</strong>
+        mit der Anzahl bereits eingereichter Ideen sowie den Buttons
+        <strong>„+ Idee einreichen"</strong> (Veranstaltung vorausgewählt) und
+        <strong>„Jetzt voten"</strong> (springt zur Voting-Ansicht der
+        Veranstaltung).
+      </p>
 
       <h3>Ideen-Übersicht</h3>
       <ul>
@@ -133,16 +141,31 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
 
       <h3>Rangliste</h3>
       <p>
-        Top-Ideen nach Bewertung, Kommentaren oder „Mitmachen". Inkl. einer
-        „Top-Steiger der letzten 7 Tage"-Sektion: welche Ideen haben durch
-        Engagement zuletzt an Position gewonnen.
+        Sortierbar nach Bewertung, Kommentaren oder „Mitmachen". Die Liste
+        zeigt <strong>alle Ideen</strong> — auch noch unbewertete, damit auch
+        Bewegungen in unteren Rängen sichtbar bleiben. Oben ein
+        Verlaufs-Chart der Top-3 plus eine „Top-Steiger der letzten 7 Tage"-
+        Sektion.
       </p>
+      <div class="tip">
+        <strong>Direkt abstimmen:</strong> In jeder Ranglisten-Zeile kannst du
+        direkt Sterne vergeben. Deine Stimme verändert die Reihenfolge
+        <strong>sofort</strong> — Anmeldung erforderlich.
+      </div>
 
       <h3>Veranstaltungen</h3>
       <p>
-        Pro Veranstaltung eine eigene Hub-Seite mit zugeordneten Ideen.
-        Der „Teilen"-Button rechts oben liefert einen QR-Code für Plakate
-        und Folien — ideal für offline-Werbung am Workshop-Tisch.
+        Pro Veranstaltung eine eigene Hub-Seite mit zugeordneten Ideen. Jede
+        Veranstaltung hat einen <strong>Status</strong> (in Vorbereitung,
+        läuft, archiviert); laufende erscheinen prominent auf der Startseite.
+        Über den Kacheln zeigt ein <strong>Voting-Verlauf</strong> der Top-3,
+        und an jeder Kachel kannst du direkt Sterne vergeben.
+      </p>
+      <p>
+        Der „Teilen"-Button rechts oben liefert einen Link + QR-Code für
+        Plakate und Folien — ideal für offline-Werbung am Workshop-Tisch.
+        Über einen solchen Link landen Teilnehmende direkt im
+        Einreich-Formular mit vorausgewählter Veranstaltung.
       </p>
     </section>
 
@@ -151,14 +174,17 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
       <h2>Idee einreichen</h2>
       <ol>
         <li><span class="step">Schritt 1</span> — Auf den gelben „+ Idee einreichen"-Button klicken (Topbar oder Startseite-Hero).</li>
-        <li><span class="step">Schritt 2</span> — <strong>Titel</strong> eingeben (mindestens 3 Zeichen). Optional Beschreibung, Bereich/Herausforderung, Phase, Veranstaltung.</li>
-        <li><span class="step">Schritt 3</span> — Abschicken. Deine Idee landet in der <strong>Moderations-Inbox</strong>.</li>
-        <li><span class="step">Schritt 4</span> — Das Mod-Team prüft und ordnet sie der passenden Herausforderung zu. Danach erscheint sie öffentlich.</li>
+        <li><span class="step">Schritt 2</span> — <strong>Titel</strong> eingeben (mindestens 3 Zeichen). Optional Beschreibung, Bereich/Herausforderung, Phase. <strong>Veranstaltung ist Pflicht</strong> — wähle eine laufende Veranstaltung oder „Keine Veranstaltungszugehörigkeit".</li>
+        <li><span class="step">Schritt 3</span> — Bei anonymer Einreichung kurz die <strong>Rechenaufgabe (Spam-Schutz)</strong> lösen. Angemeldete überspringen das.</li>
+        <li><span class="step">Schritt 4</span> — Abschicken. Deine Idee landet in der <strong>Moderations-Inbox</strong>.</li>
+        <li><span class="step">Schritt 5</span> — Das Mod-Team prüft und ordnet sie der passenden Herausforderung zu. Danach erscheint sie öffentlich.</li>
       </ol>
       <div class="tip">
-        Anonyme Einreichungen sind möglich. Wenn du angemeldet bist, wirst
-        du als <strong>Eigentümer:in</strong> hinterlegt und kannst die Idee
-        später selbst bearbeiten oder löschen.
+        Anonyme Einreichungen sind möglich (mit kurzer Rechenaufgabe als
+        Spam-Schutz — kein Drittanbieter, kein Tracking). Wenn du angemeldet
+        bist, entfällt die Aufgabe, und du wirst als
+        <strong>Eigentümer:in</strong> hinterlegt — du kannst die Idee später
+        selbst bearbeiten oder löschen.
       </div>
       <h3>Anhänge hinzufügen</h3>
       <p>
@@ -203,9 +229,16 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
       <h2>Kommentieren &amp; Bewerten</h2>
       <h3>Bewertung (Sterne)</h3>
       <p>
-        Klick einen Stern unter „Bewertung" auf der Idee-Detailseite — wertet
-        die Idee zwischen 1★ und 5★. Du kannst deine Bewertung jederzeit
-        zurücknehmen.
+        Du kannst eine Idee zwischen 1★ und 5★ bewerten — an mehreren Stellen:
+      </p>
+      <ul>
+        <li>auf der <strong>Idee-Detailseite</strong> unter „Bewertung",</li>
+        <li>direkt in jeder Zeile der <strong>Rangliste</strong>,</li>
+        <li>an den Kacheln auf den <strong>Veranstaltungs-Seiten</strong>.</li>
+      </ul>
+      <p>
+        Die Reihenfolge aktualisiert sich nach deiner Stimme sofort.
+        Bewerten erfordert eine Anmeldung.
       </p>
       <h3>Kommentare</h3>
       <ul>
@@ -236,12 +269,19 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
         <li><strong>Meine Ideen</strong>: alle von dir eingereichten Ideen.</li>
         <li><strong>Gefolgt</strong>: alle Ideen, denen du folgst.</li>
         <li><strong>Mitmachen</strong>: Ideen, bei denen du mitmachst.</li>
+        <li>
+          <strong>Profil &amp; Teilen</strong>: pflege optionale Profil-Felder
+          (Anzeigename, Kurzbeschreibung, Website, Rolle) und teile dein
+          öffentliches Profil per Link oder QR-Code.
+        </li>
       </ul>
       <h3>Öffentliches Profil</h3>
       <p>
         Klick auf einen Autor-Namen (z.B. in der Idee-Detailseite) öffnet
-        sein/ihr öffentliches Profil mit allen eingereichten Ideen und
-        Stats (Anzahl Ideen, Kommentare gesamt, Schnittbewertung).
+        sein/ihr öffentliches Profil mit allen eingereichten Ideen, den
+        gepflegten Profil-Feldern und Stats (Anzahl Ideen, Kommentare
+        gesamt, Schnittbewertung). Über den „Teilen"-Button gibt's auch hier
+        Link + QR-Code zum Weitergeben.
       </p>
       <h3>Konto neu anlegen</h3>
       <p>
@@ -303,11 +343,13 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
             zieht die frischen Daten manuell, statt auf den 5-Minuten-
             Hintergrund-Sync zu warten.</dd>
 
-        <dt>Wie teile ich eine Idee?</dt>
-        <dd>In der Sidebar einer Idee „🔗 Link kopieren" für den
-            Direktlink oder einen der Sharing-Buttons (E-Mail, WhatsApp,
-            X, Mastodon, …). Für Veranstalter gibt's QR-Codes auf der
-            Veranstaltungs-Hub-Seite.</dd>
+        <dt>Wie teile ich eine Idee, ein Profil oder eine Veranstaltung?</dt>
+        <dd>In der Sidebar einer Idee „🔗 Link kopieren" für den Direktlink
+            oder einen der Sharing-Buttons (E-Mail, WhatsApp, X, Mastodon, …).
+            Über „🔲 QR-Code / Link für Plakate" gibt's zusätzlich einen
+            QR-Code samt Embed-Snippet. Dasselbe Teilen-Fenster (Link + QR +
+            Embed) gibt es auch für <strong>öffentliche Profile</strong> und
+            für die <strong>Veranstaltungs-Hub-Seiten</strong>.</dd>
 
         <dt>Ich möchte eine Idee in meiner eigenen Webseite einbetten.</dt>
         <dd>Siehe <a href="?view=embed">Einbinden in eigene Webseiten</a>

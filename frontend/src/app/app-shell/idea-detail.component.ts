@@ -3,12 +3,13 @@ import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { Attachment, Idea, TaxonomyEntry, Topic } from '../models';
+import { ShareDialogComponent } from './share-dialog.component';
 import { ShareMenuComponent } from './share-menu.component';
 
 @Component({
   selector: 'ideendb-idea-detail',
   standalone: true,
-  imports: [CommonModule, FormsModule, ShareMenuComponent],
+  imports: [CommonModule, FormsModule, ShareMenuComponent, ShareDialogComponent],
   styles: [`
     :host { display: block; }
 
@@ -950,6 +951,9 @@ import { ShareMenuComponent } from './share-menu.component';
               [url]="shareUrl"
               [title]="i.title">
             </ideendb-share-menu>
+            <button class="embed-toggle" type="button" (click)="qrOpen = true">
+              🔲 QR-Code generieren
+            </button>
             <button class="embed-toggle" type="button" (click)="toggleEmbed()">
               {{ embedOpen ? 'Embed-Code ausblenden' : embedLabel }}
             </button>
@@ -964,6 +968,15 @@ import { ShareMenuComponent } from './share-menu.component';
               </p>
             }
           </div>
+          <ideendb-share-dialog
+            [open]="qrOpen"
+            [title]="'Idee teilen: ' + i.title"
+            [intro]="'Direkter Link plus QR-Code — ideal für Plakate, Slides oder Workshop-Tische.'"
+            [url]="shareUrl"
+            [embedSnippet]="embedSnippet"
+            [qrFilename]="'qr-idee-' + i.id + '.png'"
+            (closed)="qrOpen = false">
+          </ideendb-share-dialog>
 
           @if (api.hasCredentials() && (canEditIdea(i) || api.isModerator())) {
             <div class="side-card quick-edit">
@@ -1595,6 +1608,7 @@ export class IdeaDetailComponent implements OnChanges {
 
   embedOpen = false;
   embedCopied = false;
+  qrOpen = false;
   embedLabel = '</> Als Webkomponente einbetten';
   toggleEmbed() { this.embedOpen = !this.embedOpen; }
   copyEmbed() {

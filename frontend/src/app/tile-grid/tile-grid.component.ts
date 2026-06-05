@@ -66,6 +66,26 @@ import { Idea, SortBy } from '../models';
                 <span class="date">{{ formatDate(i.modified_at) }}</span>
               }
             </div>
+
+            @if (enableVoting) {
+              <!-- Inline-Voting: stoppt die Klick-Weiterleitung zur Detailseite,
+                   damit man direkt an der Kachel bewerten kann. -->
+              <div class="vote-row" (click)="$event.stopPropagation()">
+                <span class="vote-label">Deine Stimme:</span>
+                <div class="vote-stars" role="radiogroup" aria-label="Bewerten">
+                  @for (s of [1,2,3,4,5]; track s) {
+                    <button type="button" class="star-btn"
+                            [class.filled]="(voteValue[i.id] || 0) >= s"
+                            [disabled]="voteBusy[i.id]"
+                            (click)="vote(i, s)"
+                            [attr.aria-label]="s + ' von 5 Sternen'">★</button>
+                  }
+                </div>
+                @if (voteMsg[i.id]) {
+                  <span class="vote-msg">{{ voteMsg[i.id] }}</span>
+                }
+              </div>
+            }
           </div>
         </article>
       } @empty {
@@ -138,13 +158,69 @@ export class TileGridComponent implements OnInit, OnChanges {
    *  `<ideendb-tile-grid ids="abc,def,...">` rendert nur diese Ideen. */
   @Input() ids: string | null = null;
 
+  /** Aktiviert das Inline-Sterne-Voting direkt an jeder Kachel
+   * (z.B. in der Event-/Voting-Ansicht). Default aus — Embeds und
+   * normale Listen bleiben unverändert read-only. */
+  @Input() enableVoting = false;
+
   @Output() ideaSelected = new EventEmitter<Idea>();
   @Output() searchAlt = new EventEmitter<string>();
+  /** Wird ausgelöst, wenn ein nicht eingeloggter User voten will. */
+  @Output() requireLogin = new EventEmitter<void>();
 
   ideas: Idea[] = [];
   total = 0;
   loading = false;
   suggestions: { alt_terms: string[]; recent: Idea[] } | null = null;
+
+  // Inline-Voting-State pro Idee-ID
+  voteValue: Record<string, number> = {};   // gewählte Sterne (optimistisch)
+  voteBusy: Record<string, boolean> = {};
+  voteMsg: Record<string, string> = {};
+
+  vote(idea: Idea, stars: number) {
+    if (!this.api.hasCredentials()) {
+      this.requireLogin.emit();
+      return;
+    }
+    this.voteBusy[idea.id] = true;
+    this.voteMsg[idea.id] = '';
+    const prev = this.voteValue[idea.id] || 0;
+    this.voteValue[idea.id] = stars;  // optimistisch
+    this.api.rateIdea(idea.id, stars).subscribe({
+      next: () => {
+        this.voteBusy[idea.id] = false;
+        this.voteMsg[idea.id] = '✓ Danke!';
+        // Cache-Anzeige grob aktualisieren (genauer Wert kommt beim Sync)
+        const n = (idea.rating_count || 0);
+        idea.rating_avg = ((idea.rating_avg || 0) * n + stars) / (n + 1);
+        idea.rating_count = n + 1;
+        // Live-Umsortierung: wenn nach Bewertung sortiert wird, soll die
+        // Kachel sofort an ihre neue Position rücken (sonst erst nach dem
+        // nächsten Reload / 5-Min-Sync sichtbar).
+        if (this.sort === 'rating') this.resortByRating();
+        setTimeout(() => (this.voteMsg[idea.id] = ''), 2500);
+      },
+      error: (e) => {
+        this.voteBusy[idea.id] = false;
+        this.voteValue[idea.id] = prev;  // Rollback
+        this.voteMsg[idea.id] = e?.error?.detail || 'Fehler beim Bewerten';
+      },
+    });
+  }
+
+  /** Sortiert das aktuell geladene Array clientseitig nach Bewertung,
+   * passend zur aktiven order-Richtung. Hält die Anzeige nach einem
+   * Vote konsistent, ohne einen vollen Reload auszulösen. */
+  private resortByRating() {
+    const dir = this.order === 'asc' ? 1 : -1;
+    this.ideas = [...this.ideas].sort((a, b) => {
+      const av = a.rating_avg || 0, bv = b.rating_avg || 0;
+      if (av !== bv) return (av - bv) * dir;
+      // Gleichstand: nach Anzahl Bewertungen (mehr = stabiler oben)
+      return ((a.rating_count || 0) - (b.rating_count || 0)) * dir;
+    });
+  }
 
   ngOnInit() {
     this.api.setBase(this.apiBase);

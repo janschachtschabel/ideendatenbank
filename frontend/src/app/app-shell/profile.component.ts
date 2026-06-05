@@ -1,15 +1,28 @@
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnInit, Output, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
-import { Idea } from '../models';
+import { Idea, UserProfileMeta } from '../models';
+import { ShareDialogComponent } from './share-dialog.component';
 import { TileGridComponent } from '../tile-grid/tile-grid.component';
 
-type Tab = 'feed' | 'mine' | 'follows' | 'interest';
+type Tab = 'feed' | 'mine' | 'follows' | 'interest' | 'settings';
+
+const ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '— keine Angabe —' },
+  { value: 'schule', label: 'Schule' },
+  { value: 'hochschule', label: 'Hochschule' },
+  { value: 'bibliothek', label: 'Bibliothek' },
+  { value: 'ngo', label: 'NGO / Verein' },
+  { value: 'verlag', label: 'Verlag / Anbieter' },
+  { value: 'freie-bildung', label: 'Freie Bildung' },
+  { value: 'sonstiges', label: 'Sonstiges' },
+];
 
 @Component({
   selector: 'ideendb-profile',
   standalone: true,
-  imports: [CommonModule, TileGridComponent],
+  imports: [CommonModule, FormsModule, TileGridComponent, ShareDialogComponent],
   styles: [`
     :host { display: block; }
     .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
@@ -90,6 +103,63 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
       font-size: .7rem; font-weight: 600; text-transform: uppercase;
       letter-spacing: .04em; margin-bottom: 8px;
     }
+    /* Settings-Tab (Profil bearbeiten + Teilen) */
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }
+    .card-form {
+      background: var(--wlo-surface, #fff);
+      border: 1px solid var(--wlo-border);
+      border-radius: 12px;
+      padding: 22px 24px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .card-form h2 {
+      margin: 0; font-size: 1.05rem; color: var(--wlo-primary);
+    }
+    .card-form .hint {
+      margin: -4px 0 6px;
+      font-size: .82rem; color: var(--wlo-muted);
+      line-height: 1.4;
+    }
+    .card-form label {
+      display: flex; flex-direction: column; gap: 4px;
+      font-size: .82rem; font-weight: 600; color: var(--wlo-text);
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    .card-form input, .card-form textarea, .card-form select {
+      font: inherit; font-weight: normal; text-transform: none;
+      padding: 9px 12px;
+      border: 1px solid var(--wlo-border); border-radius: 8px;
+      background: var(--wlo-bg);
+      color: var(--wlo-text);
+      letter-spacing: 0;
+    }
+    .card-form textarea { resize: vertical; min-height: 64px; }
+    .card-form .counter {
+      align-self: flex-end;
+      font-size: .72rem; font-weight: 400; color: var(--wlo-muted);
+      text-transform: none; letter-spacing: 0;
+      margin-top: -4px;
+    }
+    .card-form .actions {
+      display: flex; gap: 12px; align-items: center; margin-top: 6px;
+      .ok { color: #1a7f37; font-size: .85rem; font-weight: 600; text-transform: none; letter-spacing: 0; }
+      .err { color: #b00020; font-size: .85rem; text-transform: none; letter-spacing: 0; }
+    }
+    .card-form .btn {
+      padding: 9px 18px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--wlo-border); background: var(--wlo-surface, #fff);
+      color: var(--wlo-text); font: inherit; font-weight: 600;
+      &:hover:not(:disabled) { background: var(--wlo-bg); }
+      &:disabled { opacity: .6; cursor: not-allowed; }
+      &.primary {
+        background: var(--wlo-primary); border-color: var(--wlo-primary); color: #fff;
+        &:hover:not(:disabled) { background: #142f5d; }
+      }
+    }
   `],
   template: `
     <div class="wrap">
@@ -128,6 +198,13 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
             <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
           </svg>
           Mitmachen <span class="badge">{{ interest().length }}</span>
+        </button>
+        <button [class.active]="tab() === 'settings'" (click)="setTab('settings')">
+          <svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          Profil &amp; Teilen
         </button>
       </div>
 
@@ -283,6 +360,74 @@ type Tab = 'feed' | 'mine' | 'follows' | 'interest';
             </div>
           }
         }
+
+        @case ('settings') {
+          <div class="settings-grid">
+            <section class="card-form">
+              <h2>Profil-Felder</h2>
+              <p class="hint">
+                Diese Angaben sind sichtbar auf deinem öffentlichen Profil
+                ({{ profileShareUrl() }}). Alle Felder sind optional.
+              </p>
+
+              <label>Anzeigename
+                <input type="text" maxlength="80" [(ngModel)]="meta.display_name"
+                       placeholder="z.B. Anna Beispiel" />
+              </label>
+
+              <label>Kurzbeschreibung
+                <textarea maxlength="280" rows="3"
+                          [(ngModel)]="meta.bio"
+                          placeholder="Ein bis zwei Sätze zu dir oder deiner Arbeit."></textarea>
+                <span class="counter">{{ (meta.bio || '').length }} / 280</span>
+              </label>
+
+              <label>Website
+                <input type="url" maxlength="2000" [(ngModel)]="meta.website"
+                       placeholder="https://…" />
+              </label>
+
+              <label>Rolle / Kontext
+                <select [(ngModel)]="meta.role">
+                  @for (r of roleOptions; track r.value) {
+                    <option [value]="r.value">{{ r.label }}</option>
+                  }
+                </select>
+              </label>
+
+              <div class="actions">
+                <button class="btn primary"
+                        [disabled]="savingMeta()"
+                        (click)="saveMeta()">
+                  {{ savingMeta() ? 'Speichern…' : 'Speichern' }}
+                </button>
+                @if (metaSaved()) { <span class="ok">✓ Gespeichert</span> }
+                @if (metaError()) { <span class="err">{{ metaError() }}</span> }
+              </div>
+            </section>
+
+            <section class="card-form">
+              <h2>Profil teilen</h2>
+              <p class="hint">
+                Direktlink + QR-Code für dein öffentliches Profil — funktioniert
+                auch ohne Login der Besucher:innen.
+              </p>
+              <button class="btn" (click)="shareOpen = true">
+                🔲 Link &amp; QR-Code öffnen
+              </button>
+            </section>
+          </div>
+
+          <ideendb-share-dialog
+            [open]="shareOpen"
+            [title]="'Dein Profil teilen'"
+            [intro]="'Direkter Link plus QR-Code zu deinem öffentlichen Profil.'"
+            [url]="profileShareUrl()"
+            [embedSnippet]="profileEmbedSnippet()"
+            [qrFilename]="'qr-profil-' + currentUser + '.png'"
+            (closed)="shareOpen = false">
+          </ideendb-share-dialog>
+        }
       }
     </div>
   `,
@@ -304,9 +449,75 @@ export class ProfileComponent implements OnInit {
     target_id: string | null; target_label: string | null; detail: any;
   }[]>([]);
 
+  // ----- Profil-Felder (settings-Tab) -----
+  meta: UserProfileMeta = {
+    display_name: '', bio: '', website: '', role: '',
+  };
+  roleOptions = ROLE_OPTIONS;
+  savingMeta = signal(false);
+  metaSaved = signal(false);
+  metaError = signal<string>('');
+  private metaSavedTimer?: number;
+
+  // ----- Share-Dialog state -----
+  shareOpen = false;
+
   ngOnInit() {
     this.api.setBase(this.apiBase);
     this.reloadAll();
+    this.loadMeta();
+  }
+
+  loadMeta() {
+    this.api.getMyProfileMeta().subscribe({
+      next: (m) => {
+        this.meta = {
+          display_name: m.display_name ?? '',
+          bio: m.bio ?? '',
+          website: m.website ?? '',
+          role: m.role ?? '',
+        };
+      },
+      error: () => { /* unangemeldet — Felder bleiben leer */ },
+    });
+  }
+
+  saveMeta() {
+    this.savingMeta.set(true);
+    this.metaError.set('');
+    this.metaSaved.set(false);
+    this.api.updateMyProfileMeta({
+      display_name: this.meta.display_name || null,
+      bio: this.meta.bio || null,
+      website: this.meta.website || null,
+      role: this.meta.role || null,
+    }).subscribe({
+      next: () => {
+        this.savingMeta.set(false);
+        this.metaSaved.set(true);
+        if (this.metaSavedTimer) window.clearTimeout(this.metaSavedTimer);
+        this.metaSavedTimer = window.setTimeout(() => this.metaSaved.set(false), 2500);
+      },
+      error: (e) => {
+        this.savingMeta.set(false);
+        this.metaError.set(e?.error?.detail || `Fehler (HTTP ${e?.status})`);
+      },
+    });
+  }
+
+  profileShareUrl(): string {
+    const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+    return `${base}?view=user&u=${encodeURIComponent(this.currentUser)}`;
+  }
+
+  profileEmbedSnippet(): string {
+    const origin = window.location.origin;
+    return [
+      `<script type="module" src="${origin}/main.js"></script>`,
+      `<ideendb-app api-base="${origin}/api/v1"`,
+      `             view="user"`,
+      `             u="${this.currentUser}"></ideendb-app>`,
+    ].join('\n');
   }
 
   setTab(t: Tab) {

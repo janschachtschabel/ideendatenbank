@@ -16,9 +16,9 @@ import { Component, Input } from '@angular/core';
   styles: [`
     :host {
       display: block;
-      max-width: 860px;
+      max-width: 1200px;
       margin: 32px auto 64px;
-      padding: 0 20px;
+      padding: 0 24px;
       line-height: 1.65;
       color: var(--wlo-text, #222);
     }

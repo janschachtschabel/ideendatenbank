@@ -3,7 +3,7 @@ import { Component, HostListener, Input, OnInit, inject, signal } from '@angular
 import { FormsModule } from '@angular/forms';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { ThemeService, ThemeKey } from '../theme.service';
-import { Idea, Topic } from '../models';
+import { FeaturedEvent, Idea, SortBy, TaxonomyEntry, Topic } from '../models';
 import { TileGridComponent } from '../tile-grid/tile-grid.component';
 import { IdeaDetailComponent } from './idea-detail.component';
 import { SubmitIdeaComponent } from './submit-idea.component';
@@ -12,6 +12,7 @@ import { ModerationComponent } from './moderation.component';
 import { ProfileComponent } from './profile.component';
 import { PublicProfileComponent } from './public-profile.component';
 import { RankingComponent } from './ranking.component';
+import { RankTrendComponent } from './rank-trend.component';
 import { LegalComponent } from './legal.component';
 import { EmbedComponent } from './embed.component';
 import { HelpComponent } from './help.component';
@@ -32,6 +33,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
     ProfileComponent,
     PublicProfileComponent,
     RankingComponent,
+    RankTrendComponent,
     LegalComponent,
     EmbedComponent,
     HelpComponent,
@@ -42,10 +44,10 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
       <div class="container bar">
         <button class="brand" (click)="go('home')" aria-label="HackathOERn Ideendatenbank — Startseite">
           <!-- Logo-Variante folgt dem Theme: das hackathoern-Theme hat eine
-               helle Topbar mit dunkler Schrift, dort braucht das Logo eine
-               eigene Variante (dunkler Schriftzug); die anderen Themes
-               (default, dark) nutzen das Standard-Logo auf dunkler Topbar. -->
-          <img [src]="themeSvc.current() === 'hackathoern' ? 'logo-hackathoern.png' : 'logo.png'"
+               helle Topbar mit dunkler Schrift → eigene Logo-Variante.
+               Die dunklen Topbars (default = dunkelblau, dark) nutzen das
+               invertierte Logo (heller Schriftzug). -->
+          <img [src]="themeSvc.current() === 'hackathoern' ? 'logo-hackathoern.png' : 'logo-invertiert.png'"
                alt="HackathOERn Ideendatenbank"
                class="brand-logo" width="123" height="44" />
         </button>
@@ -163,6 +165,39 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               </div>
             </div>
           </section>
+
+          @if (featuredEvents().length) {
+            <section class="container section featured-stack">
+              @for (fe of featuredEvents(); track fe.slug) {
+                <div class="featured-event">
+                  <div class="fe-head">
+                    <span class="fe-pill">⭐ Aktuelle Veranstaltung</span>
+                    <h2>
+                      <button type="button" class="fe-title-link"
+                              (click)="enterEventDrillFromHome(fe.slug)">
+                        {{ fe.label }}
+                      </button>
+                    </h2>
+                    @if (fe.description) { <p class="fe-desc">{{ fe.description }}</p> }
+                    <p class="fe-meta">
+                      {{ fe.idea_count }} {{ fe.idea_count === 1 ? 'Idee bereits eingereicht' : 'Ideen bereits eingereicht' }}
+                      @if (fe.featured_until) {
+                        · läuft bis {{ formatFeaturedUntil(fe.featured_until) }}
+                      }
+                    </p>
+                  </div>
+                  <div class="fe-actions">
+                    <button class="btn primary" (click)="goSubmitForEvent(fe.slug)">
+                      + Idee einreichen
+                    </button>
+                    <button class="btn fe-vote" (click)="goVoteForEvent(fe.slug)">
+                      Jetzt voten
+                    </button>
+                  </div>
+                </div>
+              }
+            </section>
+          }
 
           <section class="container section">
             <div class="section-head">
@@ -474,12 +509,19 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                   </div>
                 }
               </div>
+              <ideendb-rank-trend
+                [apiBase]="apiBase"
+                [event]="eventDrill()"
+                [topN]="3">
+              </ideendb-rank-trend>
               <ideendb-tile-grid-inner
                 [apiBase]="apiBase"
                 [event]="eventDrill()"
-                [sort]="'modified'"
+                [sort]="eventVotingSort"
                 [limit]="48"
-                (ideaSelected)="openIdea($event)">
+                [enableVoting]="true"
+                (ideaSelected)="openIdea($event)"
+                (requireLogin)="showLogin = true">
               </ideendb-tile-grid-inner>
             } @else {
               <div class="topics-hero">
@@ -489,15 +531,17 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                    einer Veranstaltung.</p>
               </div>
 
-              @if (!allAvailableEvents().length) {
+              @if (!eventsForDisplay().length) {
                 <div class="empty-state">
-                  <p>Noch keine Veranstaltungen mit Ideen verknüpft.</p>
+                  <p>Noch keine Veranstaltungen kuratiert. Die Mod-Verwaltung kann unter „Moderation → Veranstaltungen" welche anlegen.</p>
                 </div>
               } @else {
                 <div class="topic-grid-compact">
-                  @for (e of allAvailableEvents(); track e.value; let i = $index) {
+                  @for (e of eventsForDisplay(); track e.slug) {
                     <button class="topic-card-compact"
-                            (click)="enterEventDrill(e.value)">
+                            [class.event-archived]="e.status === 'archived'"
+                            [class.event-featured]="e.featured"
+                            (click)="enterEventDrill(e.slug)">
                       <span class="lead-icon" aria-hidden="true">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
                              stroke="currentColor" stroke-width="2" stroke-linecap="round"
@@ -509,8 +553,21 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                         </svg>
                       </span>
                       <div class="body">
-                        <h3>{{ eventLabel(e.value) }}</h3>
-                        <span class="count">{{ e.count }} {{ e.count === 1 ? 'Idee' : 'Ideen' }}</span>
+                        <h3>
+                          {{ e.label }}
+                          @if (e.featured) { <span class="ev-pill featured">⭐ Featured</span> }
+                          @if (e.status === 'archived') { <span class="ev-pill archived">Archiv</span> }
+                        </h3>
+                        @if (e.description) {
+                          <p class="ev-description">{{ e.description }}</p>
+                        }
+                        <span class="count">
+                          @if (e.count === 0) {
+                            Noch keine Ideen — sei der/die Erste!
+                          } @else {
+                            {{ e.count }} {{ e.count === 1 ? 'Idee' : 'Ideen' }}
+                          }
+                        </span>
                       </div>
                       <span class="arrow">→</span>
                     </button>
@@ -542,7 +599,8 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               [apiBase]="apiBase"
               [events]="allAvailableEvents()"
               [eventLabels]="eventLabels"
-              (ideaSelected)="openIdea($event)">
+              (ideaSelected)="openIdea($event)"
+              (requireLogin)="showLogin = true">
             </ideendb-ranking>
           </section>
         }
@@ -684,6 +742,12 @@ export class AppShellComponent implements OnInit {
   eventDrill = signal<string | null>(null);
   /** slug → label aus der kuratierten Event-Taxonomie. */
   eventLabels = new Map<string, string>();
+  /** Volle Event-Taxonomie inklusive Status / sort_order / Featured —
+   * für die Veranstaltungs-Übersicht. */
+  eventMeta = signal<TaxonomyEntry[]>([]);
+  /** Alle aktuell auf der Startseite hervorgehobenen Events (Liste).
+   * Wird im ngOnInit einmalig geladen. */
+  featuredEvents = signal<FeaturedEvent[]>([]);
   phaseLabels = new Map<string, string>();
   currentTopic = signal<Topic | null>(null);
   topicParent = signal<Topic | null>(null);
@@ -748,9 +812,17 @@ export class AppShellComponent implements OnInit {
     }
     this.loadFacets();
     // Event-Slug → Label aus kuratierter Taxonomie für hübschere Anzeige
-    this.api.listEvents(true).subscribe((events) => {
+    // (inkl. archivierter — die werden auf der Übersicht ausgegraut gezeigt)
+    this.api.listEvents({ includeInactive: true, includeArchived: true }).subscribe((events) => {
       this.eventLabels.clear();
       for (const e of events) this.eventLabels.set(e.slug, e.label);
+      this.eventMeta.set(events);
+    });
+    // Featured-Events für die Startseite separat — bewusst kein Failure-
+    // Mode-Handling, wenn der Endpoint fehlt erscheint kein Slot.
+    this.api.featuredEvents().subscribe({
+      next: (fe) => this.featuredEvents.set(fe || []),
+      error: () => this.featuredEvents.set([]),
     });
     // Analog Phasen
     this.api.listPhases().subscribe((phases) => {
@@ -977,6 +1049,56 @@ export class AppShellComponent implements OnInit {
   }
 
 
+  /** Featured-Slot: Klick auf „+ Idee einreichen" — landet im Submit
+   * mit vorgewähltem Event-Slug (via URL-Parameter). */
+  goSubmitForEvent(slug: string) {
+    this.presetEventForSubmit = slug;
+    this.go('submit');
+    // URL aktualisieren, damit Reload/Share-Link den Slug behält
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set('view', 'submit');
+      u.searchParams.set('event', slug);
+      window.history.replaceState({}, '', u.toString());
+    } catch { /* iframe / sandbox */ }
+  }
+
+  /** Featured-Slot: „Jetzt voten" → Event-Ansicht (Drill) mit Rating-Sort
+   * und aktiviertem Inline-Voting an den Kacheln. */
+  goVoteForEvent(slug: string) {
+    this.eventVotingSort = 'rating';
+    this.go('events');
+    this.enterEventDrill(slug);
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set('view', 'events');
+      u.searchParams.set('event', slug);
+      window.history.replaceState({}, '', u.toString());
+    } catch { /* iframe / sandbox */ }
+  }
+  /** Sortierung der Event-Drill-Ideenliste (rating beim Voten-Einstieg). */
+  eventVotingSort: SortBy = 'modified';
+
+  /** Featured-Slot: Klick auf den Event-Titel → Events-Tab + Drill in
+   * dieses Event (zeigt die Ideen-Liste der Veranstaltung). */
+  enterEventDrillFromHome(slug: string) {
+    this.go('events');
+    this.enterEventDrill(slug);
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set('view', 'events');
+      u.searchParams.set('event', slug);
+      window.history.replaceState({}, '', u.toString());
+    } catch { /* iframe / sandbox */ }
+  }
+
+  /** Featured-Slot: hübsches Datums-Label aus ISO-Zeitstempel. */
+  formatFeaturedUntil(iso: string): string {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
+  }
+
   /** Drill in einen Event direkt im Events-Tab — zeigt Ideen-Grid in-place. */
   enterEventDrill(slug: string) {
     this.eventDrill.set(slug);
@@ -988,6 +1110,35 @@ export class AppShellComponent implements OnInit {
   /** Slug → Anzeige-Label aus Taxonomie, fallback auf Slug selbst. */
   eventLabel(slug: string): string {
     return this.eventLabels.get(slug) || slug;
+  }
+
+  /** Vollständige Anzeige-Liste für die Veranstaltungs-Übersicht:
+   * - sortiert nach `sort_order` aus der Taxonomie
+   * - Status `draft` wird ausgeblendet (nur Mod-Tab sichtbar)
+   * - Events ohne Ideen erscheinen mit count=0 (statt versteckt)
+   * - jeder Eintrag bringt status + featured-Flag mit fürs UI
+   */
+  eventsForDisplay(): { slug: string; label: string; count: number; status: string; featured: boolean; description: string | null }[] {
+    const counts = new Map<string, number>();
+    for (const e of this.allAvailableEvents()) counts.set(e.value, e.count);
+    const now = Date.now();
+    return this.eventMeta()
+      .filter((e) => (e.status ?? 'live') !== 'draft' && e.active !== false)
+      .map((e) => ({
+        slug: e.slug,
+        label: e.label,
+        count: counts.get(e.slug) ?? 0,
+        status: e.status ?? 'live',
+        featured: !!(e.featured_until && new Date(e.featured_until).getTime() > now),
+        description: e.description ?? null,
+      }))
+      .sort((a, b) => {
+        // sort_order aus eventMeta zur Sortierung (Mods bestimmen Reihenfolge)
+        const am = this.eventMeta().find((x) => x.slug === a.slug)?.sort_order ?? 100;
+        const bm = this.eventMeta().find((x) => x.slug === b.slug)?.sort_order ?? 100;
+        if (am !== bm) return am - bm;
+        return a.label.localeCompare(b.label);
+      });
   }
   /** Analog für Phasen — slug → kuratiertes Label. */
   phaseLabel(slug: string): string {

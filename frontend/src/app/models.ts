@@ -112,7 +112,26 @@ export interface TaxonomyEntry {
   active: boolean;
   created_at?: string;
   created_by?: string | null;
+  // Nur bei Events befüllt — Lifecycle-Status + Featured-Slot-Endzeit.
+  status?: 'draft' | 'live' | 'archived';
+  featured_until?: string | null;
 }
+
+export interface FeaturedEvent extends TaxonomyEntry {
+  idea_count: number;
+}
+
+export interface UserProfileMeta {
+  display_name: string | null;
+  bio: string | null;
+  website: string | null;
+  role: string | null;
+  updated_at?: string | null;
+}
+
+export type UserProfileRole =
+  | 'schule' | 'hochschule' | 'bibliothek' | 'ngo'
+  | 'verlag' | 'freie-bildung' | 'sonstiges';
 
 export interface InboxItem {
   id: string;

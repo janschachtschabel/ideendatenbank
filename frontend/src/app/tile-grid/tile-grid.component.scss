@@ -113,6 +113,48 @@
   small { opacity: .7; }
 }
 
+/* Inline-Voting an der Kachel (nur in der Event-/Voting-Ansicht aktiv). */
+.vote-row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--wlo-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+
+  .vote-label {
+    font-size: .78rem;
+    color: var(--wlo-muted);
+  }
+  .vote-stars {
+    display: inline-flex;
+    gap: 1px;
+  }
+  .star-btn {
+    background: none;
+    border: none;
+    padding: 0 2px;
+    cursor: pointer;
+    font-size: 1.25rem;
+    line-height: 1;
+    color: var(--wlo-border, #c8cfdb);
+    transition: color .1s, transform .1s;
+    &:hover:not(:disabled) { transform: scale(1.15); }
+    &.filled { color: var(--wlo-accent, #f5b600); }
+    &:disabled { cursor: default; opacity: .7; }
+  }
+  /* Hover-Vorschau: alle Sterne bis zum gehoverten einfärben */
+  .vote-stars:hover .star-btn { color: var(--wlo-accent, #f5b600); }
+  .vote-stars .star-btn:hover ~ .star-btn { color: var(--wlo-border, #c8cfdb); }
+
+  .vote-msg {
+    font-size: .76rem;
+    color: var(--wlo-primary, #1d3a6e);
+    font-weight: 600;
+  }
+}
+
 .empty {
   grid-column: 1 / -1;
   padding: 48px 16px;

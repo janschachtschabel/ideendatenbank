@@ -5,6 +5,7 @@ Backend in **FastAPI**, Frontend als **Angular Web Components**, Persistenz
 in **edu-sharing** (`redaktion.openeduhub.net`).
 
 > 📦 **Installation auf einem Server** → [`docs/INSTALL-DOCKER.md`](docs/INSTALL-DOCKER.md)
+> 🔄 **Docker-Update (Schnellreferenz)** → [`docs/DOCKER-UPDATE.md`](docs/DOCKER-UPDATE.md)
 > 📖 **Bedienung (Endnutzer)** → [`docs/benutzerhandbuch/`](docs/benutzerhandbuch/)
 > 🛠 **Bedienung (Moderation)** → [`docs/moderation/`](docs/moderation/)
 
@@ -242,9 +243,17 @@ Kürzeste Zusammenfassung:
 | `EDU_GUEST_INBOX_ID` | ✅ | UUID der Community-Inbox im Repo |
 | `IDEENDB_ROOT_COLLECTION_ID` | ✅ | UUID der obersten Themen-Sammlung |
 | `APP_CORS_ORIGINS` | ✅ | erlaubte Browser-Origins (kommagetrennt) |
+| `EDU_REPO_BASE_URL` | optional | Repo-Host; steuert API **und** „im Repo öffnen"-/Registrierungs-Links. Für ein anderes Repo **nur diese** Zeile ändern |
+| `EDU_REPO_API` | optional | API-Basis; leer = automatisch aus `EDU_REPO_BASE_URL` abgeleitet (`<base>/edu-sharing/rest`) |
 | `MODERATION_FALLBACK_GROUPS` | optional | edu-sharing-Gruppen mit Mod-Rechten |
 | `MODERATION_BOOTSTRAP_USERS` | optional | Notnagel-Mods per Username |
-| `BACKUP_*` / `SYNC_INTERVAL_SECONDS` / `UPLOAD_*_MAX_BYTES` | optional | sinnvolle Defaults vorhanden |
+| `BACKUP_*` / `BACKUP_AUTO_RESTORE_MARKER` | optional | Auto-Backup-Intervall, Retention, Auto-Restore-Marker |
+| `SYNC_INTERVAL_SECONDS` / `UPLOAD_*_MAX_BYTES` | optional | sinnvolle Defaults vorhanden |
+| `B_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | optional | reserviert für künftige LLM-Funktionen |
+
+> Das **Bewertungssystem** (Sterne vs. Daumen hoch) ist **keine** Env-Variable,
+> sondern wird zur Laufzeit im Moderationsbereich umgeschaltet — global und
+> optional pro Veranstaltung.
 
 > **Secrets niemals** ins Git-Repo. `.env` ist gitignored. Backup-ZIPs
 > enthalten bewusst keine Konfig — die liegt ausschließlich in

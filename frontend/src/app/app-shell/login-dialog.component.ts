@@ -1,9 +1,10 @@
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Component, EventEmitter, Output, inject } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { ApiService } from '../api.service';
 
-const REGISTER_URL = 'https://ideenbank.hackathoern.de/edu-sharing/components/register';
+/** Fallback, falls keine Repo-Basis-URL übergeben wird. */
+const DEFAULT_REPO_BASE = 'https://redaktion.openeduhub.net';
 
 type Mode = 'login' | 'register';
 
@@ -169,8 +170,14 @@ export class LoginDialogComponent {
   api = inject(ApiService);
 
   @Output() closed = new EventEmitter<void>();
+  /** Repo-Basis-URL aus der Backend-Config; die Registrierungsseite liegt
+   * im edu-sharing-Repo, nicht auf dem App-Host. */
+  @Input() repoBaseUrl = DEFAULT_REPO_BASE;
 
-  registerUrl = REGISTER_URL;
+  /** Registrierungs-URL aus der Repo-Basis abgeleitet. */
+  get registerUrl(): string {
+    return `${(this.repoBaseUrl || DEFAULT_REPO_BASE).replace(/\/+$/, '')}/edu-sharing/components/register`;
+  }
   mode: Mode = 'login';
   error = '';
 

@@ -265,11 +265,52 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
 
 /* ===== Hero ===== */
 .hero {
-  background: linear-gradient(135deg,
-    var(--wlo-hero-bg-from, #002855) 0%,
-    var(--wlo-hero-bg-to,   #003c7e) 100%);
+  position: relative;
+  /* Nur der Verlauf liegt direkt auf .hero. Das Punktraster kommt als
+     ::before-Ebene darüber und wird nach unten ausgeblendet (mask). */
+  background:
+    linear-gradient(135deg,
+      var(--wlo-hero-bg-from, #002855) 0%,
+      var(--wlo-hero-bg-to,   #003c7e) 100%);
   color: var(--wlo-hero-text, #fff);
   padding: 64px 0 72px;
+
+  /* Punktraster (CSS-radial-gradient, sauber kachelnd) als Overlay, das
+     nach unten hin transparent ausläuft. Punktfarbe pro Theme via
+     --wlo-hero-dot. */
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(var(--wlo-hero-dot, rgba(255,255,255,.12)) 1.3px, transparent 1.6px)
+        0 0 / 20px 20px;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 92%);
+            mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 92%);
+  }
+  /* Inhalt über dem Raster. */
+  > .container { position: relative; z-index: 1; }
+
+  /* Zwei-Spalten-Layout: Text links, Hero-Bild rechts. */
+  .hero-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .hero-text { flex: 1 1 420px; min-width: 0; }
+  .hero-art {
+    flex: 0 1 380px;
+    display: flex; justify-content: flex-end;
+    img { width: 100%; max-width: 380px; height: auto; }
+  }
+  @media (max-width: 760px) {
+    .hero-art { display: none; }  /* auf Mobile nur Text */
+  }
+
   h1 {
     margin: 0 0 16px;
     font-size: clamp(1.8rem, 3vw, 2.6rem);
@@ -698,8 +739,8 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
     color: var(--wlo-muted);
     vertical-align: middle;
     &.featured {
-      background: var(--wlo-accent, #f5b600);
-      color: #1a2235;
+      background: var(--wlo-cta-bg, #27ABE2);
+      color: var(--wlo-cta-text, #fff);
     }
     &.archived {
       background: var(--wlo-bg);
@@ -713,10 +754,10 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
     .body h3 { color: var(--wlo-muted); }
   }
 
-  /* Featured-Events bekommen einen dezenten Akzent-Ring. */
+  /* Featured-Events bekommen einen Logo-blauen Akzent-Ring. */
   &.event-featured {
-    border-color: var(--wlo-accent, #f5b600);
-    box-shadow: 0 0 0 1px var(--wlo-accent, #f5b600) inset;
+    border-color: var(--wlo-cta-bg, #27ABE2);
+    box-shadow: 0 0 0 1px var(--wlo-cta-bg, #27ABE2) inset;
   }
 }
 
@@ -810,8 +851,8 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
 .featured-event {
   background: linear-gradient(135deg,
     var(--wlo-primary-soft, #e6edf7) 0%,
-    var(--wlo-accent-soft, #fff8db) 100%);
-  border: 1px solid var(--wlo-accent, #f5b600);
+    var(--wlo-accent-soft, #e0f3fb) 100%);
+  border: 1px solid var(--wlo-cta-bg, #27ABE2);
   border-radius: 14px;
   padding: 22px 26px;
   display: flex;
@@ -826,8 +867,8 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
 }
 .featured-event .fe-pill {
   display: inline-block;
-  background: var(--wlo-accent, #f5b600);
-  color: #1a2235;
+  background: var(--wlo-cta-bg, #27ABE2);
+  color: var(--wlo-cta-text, #fff);
   padding: 4px 12px;
   border-radius: 999px;
   font-size: .72rem;

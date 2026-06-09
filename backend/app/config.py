@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +15,17 @@ class Settings(BaseSettings):
 
     # edu-sharing
     edu_repo_base_url: str = "https://redaktion.openeduhub.net"
-    edu_repo_api: str = "https://redaktion.openeduhub.net/edu-sharing/rest"
+    # API-Basis. Wenn leer gelassen, wird sie automatisch aus
+    # `edu_repo_base_url` abgeleitet (`<base>/edu-sharing/rest`) — so muss man
+    # bei einem anderen Repo nur EDU_REPO_BASE_URL setzen. Explizit per
+    # EDU_REPO_API überschreibbar, falls die API woanders liegt.
+    edu_repo_api: str = ""
+
+    @model_validator(mode="after")
+    def _derive_repo_api(self) -> Settings:
+        if not (self.edu_repo_api or "").strip():
+            self.edu_repo_api = f"{self.edu_repo_base_url.rstrip('/')}/edu-sharing/rest"
+        return self
     # Gast-Account ohne Default — Pflicht über .env / ENV-Variable.
     # Lieber harter Fehler beim Start als unbeabsichtigt mit
     # hard-coded Test-Credentials gegen Prod laufen.
@@ -50,10 +60,10 @@ class Settings(BaseSettings):
     # Schwellwerte gelten je Einzel-Upload und gelten zusätzlich zu
     # ggf. davor geschalteten Reverse-Proxy-Limits (nginx
     # client_max_body_size).
-    upload_image_max_bytes: int = 10 * 1024 * 1024       # 10 MB Vorschaubilder
-    upload_content_max_bytes: int = 50 * 1024 * 1024     # 50 MB Idee-Hauptinhalte
+    upload_image_max_bytes: int = 10 * 1024 * 1024  # 10 MB Vorschaubilder
+    upload_content_max_bytes: int = 50 * 1024 * 1024  # 50 MB Idee-Hauptinhalte
     upload_attachment_max_bytes: int = 50 * 1024 * 1024  # 50 MB pro Anhang
-    upload_restore_max_bytes: int = 200 * 1024 * 1024    # 200 MB Backup-Restore
+    upload_restore_max_bytes: int = 200 * 1024 * 1024  # 200 MB Backup-Restore
 
     # KI (optional)
     b_api_key: str | None = Field(default=None, alias="B_API_KEY")

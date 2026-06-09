@@ -4,6 +4,7 @@ Read-only operations work unauthenticated against the guest account.
 Write operations accept an optional Authorization header (Basic-Auth from the
 browser session) for pass-through — the backend never stores user credentials.
 """
+
 from __future__ import annotations
 
 from base64 import b64encode
@@ -62,12 +63,17 @@ class EduSharingClient:
     # ---- Collections ----
     async def get_collection(self, node_id: str, *, auth_header: str | None = None) -> dict:
         return await self._req(
-            "GET", f"/collection/v1/collections/-home-/{node_id}",
+            "GET",
+            f"/collection/v1/collections/-home-/{node_id}",
             auth_header=auth_header,
         )
 
     async def collection_subcollections(
-        self, node_id: str, max_items: int = 100, *, auth_header: str | None = None,
+        self,
+        node_id: str,
+        max_items: int = 100,
+        *,
+        auth_header: str | None = None,
     ) -> dict:
         return await self._req(
             "GET",
@@ -77,7 +83,11 @@ class EduSharingClient:
         )
 
     async def collection_references(
-        self, node_id: str, max_items: int = 100, *, auth_header: str | None = None,
+        self,
+        node_id: str,
+        max_items: int = 100,
+        *,
+        auth_header: str | None = None,
     ) -> dict:
         return await self._req(
             "GET",
@@ -147,9 +157,7 @@ class EduSharingClient:
             auth_header=auth_header,
         )
 
-    async def get_group(
-        self, group: str, *, auth_header: str | None = None
-    ) -> dict:
+    async def get_group(self, group: str, *, auth_header: str | None = None) -> dict:
         return await self._req(
             "GET",
             f"/iam/v1/groups/-home-/{group}",
@@ -166,18 +174,14 @@ class EduSharingClient:
             auth_header=auth_header,
         )
 
-    async def add_group_member(
-        self, group: str, member: str, *, auth_header: str
-    ) -> Any:
+    async def add_group_member(self, group: str, member: str, *, auth_header: str) -> Any:
         return await self._req(
             "PUT",
             f"/iam/v1/groups/-home-/{group}/members/{member}",
             auth_header=auth_header,
         )
 
-    async def remove_group_member(
-        self, group: str, member: str, *, auth_header: str
-    ) -> Any:
+    async def remove_group_member(self, group: str, member: str, *, auth_header: str) -> Any:
         return await self._req(
             "DELETE",
             f"/iam/v1/groups/-home-/{group}/members/{member}",
@@ -192,16 +196,16 @@ class EduSharingClient:
         Heuristik: wenn Body in Quotes eingeschlossen ist und gültiges
         JSON ist, parsen wir's und nutzen den dekodierten String."""
         result = await self._req(
-            "GET", f"/comment/v1/comments/-home-/{node_id}",
+            "GET",
+            f"/comment/v1/comments/-home-/{node_id}",
             auth_header=auth_header,
         )
         for c in (result or {}).get("comments") or []:
             body = c.get("comment")
-            if (isinstance(body, str)
-                    and len(body) >= 2
-                    and body[0] == '"' and body[-1] == '"'):
+            if isinstance(body, str) and len(body) >= 2 and body[0] == '"' and body[-1] == '"':
                 try:
                     import json as _json
+
                     decoded = _json.loads(body)
                     if isinstance(decoded, str):
                         c["comment"] = decoded
@@ -343,7 +347,9 @@ class EduSharingClient:
         solche mit dem `ccm:io_childobject`-Aspekt. Andere Children
         (Versionen, etc.) werden ausgeklammert."""
         result = await self.node_children(
-            parent_id, max_items=200, auth_header=auth_header,
+            parent_id,
+            max_items=200,
+            auth_header=auth_header,
         )
         if not isinstance(result, dict):
             return []
@@ -351,6 +357,7 @@ class EduSharingClient:
         for n in result.get("nodes") or []:
             if "ccm:io_childobject" in (n.get("aspects") or []):
                 out.append(n)
+
         # Sortieren nach childobject_order, dann nach createdAt als Tie-Breaker
         def _sort_key(n: dict) -> tuple:
             props = n.get("properties") or {}
@@ -360,6 +367,7 @@ class EduSharingClient:
             except (ValueError, TypeError):
                 order = 999
             return (order, n.get("createdAt") or "")
+
         out.sort(key=_sort_key)
         return out
 
@@ -549,6 +557,16 @@ class EduSharingClient:
             params={"rating": rating_param},
             content=body,
             content_type="application/json",
+            auth_header=auth_header,
+        )
+
+    async def delete_rating(self, node_id: str, *, auth_header: str) -> Any:
+        """Eigene Bewertung zurücknehmen (für „Daumen weg"). Hinweis: Auf
+        redaktion.openeduhub.net liefert dieser Endpoint aktuell oft 500
+        (bekannter Server-Bug) — der Aufrufer sollte den Fehler tolerieren."""
+        return await self._req(
+            "DELETE",
+            f"/rating/v1/ratings/-home-/{node_id}",
             auth_header=auth_header,
         )
 

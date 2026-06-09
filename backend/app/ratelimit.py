@@ -15,6 +15,7 @@ kombinierten Key:
   - Anonym         → IP-Adresse (X-Forwarded-For respektieren)
 Hinter nginx muss `X-Forwarded-For` durchgereicht werden (s. README).
 """
+
 from __future__ import annotations
 
 import hashlib

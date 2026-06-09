@@ -11,7 +11,8 @@ import {
   signal,
 } from '@angular/core';
 import { ApiService } from '../api.service';
-import { Idea } from '../models';
+import { Idea, VotingMode } from '../models';
+import { VotingService } from '../voting.service';
 import { ShareDialogComponent } from './share-dialog.component';
 
 type SortKey = 'rating' | 'comments' | 'interest';
@@ -124,6 +125,16 @@ interface RankItem {
       .vote-stars:hover .star-btn { color: var(--wlo-accent, #f5b600); }
       .vote-stars .star-btn:hover ~ .star-btn { color: var(--wlo-border, #c8cfdb); }
       .vote-msg { font-size: .7rem; color: var(--wlo-primary, #1d3a6e); font-weight: 600; }
+      /* Daumen-Modus */
+      .thumb-btn {
+        background: var(--wlo-surface, #fff); cursor: pointer;
+        border: 1px solid var(--wlo-border, #c8cfdb); border-radius: 999px;
+        padding: 4px 12px; font-size: 1.05rem; line-height: 1;
+        transition: background .12s, border-color .12s, transform .1s;
+        &:hover:not(:disabled) { border-color: var(--wlo-primary); transform: scale(1.08); }
+        &:disabled { opacity: .7; cursor: default; }
+        &.on { background: var(--wlo-primary, #1d3a6e); border-color: var(--wlo-primary, #1d3a6e); }
+      }
     }
     .rank-num {
       font-size: 1.4rem; font-weight: 700; color: var(--wlo-primary);
@@ -371,15 +382,23 @@ interface RankItem {
 
             <!-- Inline-Schnellvoting direkt im Balken -->
             <div class="rank-vote" (click)="$event.stopPropagation()">
-              <div class="vote-stars" role="radiogroup" aria-label="Bewerten">
-                @for (s of [1,2,3,4,5]; track s) {
-                  <button type="button" class="star-btn"
-                          [class.filled]="(voteValue[item.idea!.id] || 0) >= s"
-                          [disabled]="voteBusy[item.idea!.id]"
-                          (click)="vote(item, s)"
-                          [attr.aria-label]="s + ' von 5 Sternen'">★</button>
-                }
-              </div>
+              @if (mode() === 'thumbs') {
+                <button type="button" class="thumb-btn"
+                        [class.on]="(voteValue[item.idea!.id] || 0) > 0"
+                        [disabled]="voteBusy[item.idea!.id]"
+                        (click)="toggleThumb(item)"
+                        aria-label="Daumen hoch">👍</button>
+              } @else {
+                <div class="vote-stars" role="radiogroup" aria-label="Bewerten">
+                  @for (s of [1,2,3,4,5]; track s) {
+                    <button type="button" class="star-btn"
+                            [class.filled]="(voteValue[item.idea!.id] || 0) >= s"
+                            [disabled]="voteBusy[item.idea!.id]"
+                            (click)="vote(item, s)"
+                            [attr.aria-label]="s + ' von 5 Sternen'">★</button>
+                  }
+                </div>
+              }
               @if (voteMsg[item.idea!.id]) {
                 <span class="vote-msg">{{ voteMsg[item.idea!.id] }}</span>
               }
@@ -415,6 +434,12 @@ interface RankItem {
 })
 export class RankingComponent implements OnChanges {
   api = inject(ApiService);
+  private voting = inject(VotingService);
+
+  /** Effektiver Modus für den aktuellen Filter-Kontext (Event oder global). */
+  mode(): VotingMode {
+    return this.voting.effective(this.eventFilter());
+  }
 
   @Input() apiBase = '';
   @Input() events: { value: string; count: number }[] | null = null;
@@ -484,11 +509,39 @@ export class RankingComponent implements OnChanges {
 
   ngOnChanges(ch: SimpleChanges) {
     if (ch['apiBase']) this.api.setBase(this.apiBase);
+    this.voting.load();  // Modus + Event-Overrides (idempotent)
     // Start-Event-Filter aus URL übernehmen (einmalig, wenn gesetzt).
     if (ch['initialEvent'] && this.initialEvent) {
       this.eventFilter.set(this.initialEvent);
     }
     this.load();
+  }
+
+  /** Daumen-Modus: Like setzen / zurücknehmen + Liste neu laden. */
+  toggleThumb(item: RankItem) {
+    const idea = item.idea;
+    if (!idea) return;
+    if (!this.api.hasCredentials()) { this.requireLogin.emit(); return; }
+    const liked = (this.voteValue[idea.id] || 0) > 0;
+    this.voteBusy[idea.id] = true;
+    this.voteMsg[idea.id] = '';
+    const done = () => { this.voteBusy[idea.id] = false; this.load(true); };
+    if (liked) {
+      this.voteValue[idea.id] = 0;
+      this.api.unrateIdea(idea.id).subscribe({ next: done, error: done });
+    } else {
+      this.voteValue[idea.id] = 5;
+      this.api.rateIdea(idea.id, 5).subscribe({
+        next: () => { this.voteMsg[idea.id] = '✓'; setTimeout(() => (this.voteMsg[idea.id] = ''), 2000); done(); },
+        error: (e) => { this.voteBusy[idea.id] = false; this.voteValue[idea.id] = 0; this.voteMsg[idea.id] = e?.error?.detail ? '✗' : '✗'; },
+      });
+    }
+  }
+
+  /** Backend-Sort-Key: im Daumen-Modus wird „Bewertung" zur Anzahl (likes). */
+  private backendSort(): 'rating' | 'comments' | 'interest' | 'likes' {
+    if (this.sortKey() === 'rating' && this.mode() === 'thumbs') return 'likes';
+    return this.sortKey();
   }
 
   setSort(s: SortKey) { this.sortKey.set(s); this.load(); }
@@ -514,8 +567,9 @@ export class RankingComponent implements OnChanges {
 
   load(silent = false) {
     if (!silent) this.loading.set(true);
+    const sort = this.backendSort();
     this.api.ranking({
-      sort: this.sortKey(),
+      sort,
       event: this.eventFilter(),
       limit: 50,
     }).subscribe({
@@ -524,7 +578,7 @@ export class RankingComponent implements OnChanges {
     });
     // Top-Steiger separat laden — passt zu Sort + Event-Filter.
     this.api.rankingRisers({
-      sort: this.sortKey(),
+      sort,
       event: this.eventFilter(),
       days: 7,
       limit: 5,
@@ -542,15 +596,18 @@ export class RankingComponent implements OnChanges {
   }
 
   scoreUnit(): string {
-    /* Einheit als Wort statt Emoji — passt mit dem flachen Icon-Stil
-       der übrigen Seite zusammen und bleibt sprachlich verständlich. */
-    return this.sortKey() === 'rating' ? ' ★'
-         : this.sortKey() === 'comments' ? ''
-         : '';
+    if (this.sortKey() === 'rating') {
+      return this.mode() === 'thumbs' ? ' 👍' : ' ★';
+    }
+    return '';
   }
 
   formatScore(n: number): string {
-    if (this.sortKey() === 'rating') return n.toFixed(2);
+    // Sterne-Durchschnitt mit Nachkommastelle, alles andere (Anzahl/Likes/
+    // Kommentare/Mitmachen) als ganze Zahl.
+    if (this.sortKey() === 'rating' && this.mode() !== 'thumbs') {
+      return n.toFixed(2);
+    }
     return Math.round(n).toString();
   }
 

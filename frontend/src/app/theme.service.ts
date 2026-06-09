@@ -13,18 +13,16 @@ const STORAGE_KEY = 'ideendb-theme';
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
   /** Aktuelle Theme-Auswahl (signal-basiert für Component-Reaktivität). */
-  readonly current = signal<ThemeKey>('default');
+  readonly current = signal<ThemeKey>('hackathoern');
   readonly options = THEMES;
 
   constructor() {
-    // Boot: gespeichertes Theme oder System-Preference (prefers-color-scheme: dark)
-    let initial: ThemeKey = 'default';
+    // Boot: gespeichertes Theme, sonst Standard = HackathOERn (hell, Logo-Farben).
+    let initial: ThemeKey = 'hackathoern';
     try {
       const saved = localStorage.getItem(STORAGE_KEY) as ThemeKey | null;
       if (saved && THEMES.find((t) => t.key === saved)) {
         initial = saved;
-      } else if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
-        initial = 'dark';
       }
     } catch { /* SSR / privacy mode */ }
     this.set(initial);

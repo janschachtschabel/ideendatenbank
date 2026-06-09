@@ -115,6 +115,15 @@ export interface TaxonomyEntry {
   // Nur bei Events befüllt — Lifecycle-Status + Featured-Slot-Endzeit.
   status?: 'draft' | 'live' | 'archived';
   featured_until?: string | null;
+  // Pro-Event-Override des Bewertungssystems. null/'' = globalen Modus erben.
+  voting_mode?: VotingMode | '' | null;
+}
+
+export type VotingMode = 'stars' | 'thumbs';
+
+export interface AppSettings {
+  voting_mode_global: VotingMode;
+  edu_repo_base_url?: string;
 }
 
 export interface FeaturedEvent extends TaxonomyEntry {

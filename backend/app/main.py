@@ -49,7 +49,8 @@ async def lifespan(app: FastAPI):
         if restored:
             log.info(
                 "auto-restore: aktiv — DB aus %s wiederhergestellt (%d Bytes)",
-                restored["from"], restored.get("size") or 0,
+                restored["from"],
+                restored.get("size") or 0,
             )
     except Exception:
         log.exception("auto-restore: unerwarteter Fehler — starte mit leerer DB")

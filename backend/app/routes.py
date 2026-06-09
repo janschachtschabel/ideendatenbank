@@ -78,8 +78,7 @@ def _validate_external_url(value: str | None, *, field: str = "URL") -> str | No
     if not low.startswith(_SAFE_URL_SCHEMES):
         raise HTTPException(
             400,
-            f"Ungültige {field}: nur http(s)-Adressen erlaubt "
-            f"(z.B. https://example.org).",
+            f"Ungültige {field}: nur http(s)-Adressen erlaubt (z.B. https://example.org).",
         )
     if len(v) > 2000:
         raise HTTPException(400, f"{field} zu lang (max 2000 Zeichen)")
@@ -154,8 +153,8 @@ def _captcha_make_question() -> tuple[str, int]:
     """Erzeugt eine einfache Plus/Minus-Aufgabe mit zweistelligen Werten.
     Ergebnis ist immer ≥ 0 (keine negativen Antworten, damit ein
     nummerisches Eingabefeld ohne Vorzeichen reicht)."""
-    a = _secrets.randbelow(13) + 2    # 2..14
-    b = _secrets.randbelow(10) + 1    # 1..10
+    a = _secrets.randbelow(13) + 2  # 2..14
+    b = _secrets.randbelow(10) + 1  # 1..10
     if a >= b and _secrets.randbelow(2):
         return f"Was ist {a} − {b}?", a - b
     return f"Was ist {a} + {b}?", a + b
@@ -222,6 +221,60 @@ def captcha_new():
     return _captcha_issue()
 
 
+# ---- App-Settings (Voting-Modus) ----------------------------------------
+
+_VALID_VOTING_MODES = ("stars", "thumbs")
+
+
+def _get_setting(key: str, default: str | None = None) -> str | None:
+    with connect() as con:
+        row = con.execute(
+            "SELECT value FROM app_setting WHERE key=?", (key,)
+        ).fetchone()
+    return row["value"] if row else default
+
+
+def _set_setting(key: str, value: str) -> None:
+    with connect() as con:
+        con.execute(
+            "INSERT INTO app_setting (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+
+@router.get("/settings", tags=["public"])
+def get_settings():
+    """Öffentliche Lauf-Einstellungen, die das Frontend zum Rendern braucht.
+    - voting_mode_global: 'stars' | 'thumbs' (Pro-Event-Overrides in der Event-Liste)
+    - edu_repo_base_url: für „im Repo öffnen"-Links + Registrierungs-Link,
+      deployment-spezifisch aus der Backend-Config."""
+    return {
+        "voting_mode_global": _get_setting("voting_mode_global", "stars"),
+        "edu_repo_base_url": settings.edu_repo_base_url.rstrip("/"),
+    }
+
+
+class SettingsPatch(BaseModel):
+    voting_mode_global: Literal["stars", "thumbs"] | None = None
+
+
+@router.put("/admin/settings", tags=["admin"])
+async def update_settings(
+    body: SettingsPatch, authorization: str | None = Header(None),
+):
+    """Mod-only: globale Einstellungen ändern (sofort wirksam)."""
+    await _require_moderator(authorization)
+    if body.voting_mode_global is not None:
+        _set_setting("voting_mode_global", body.voting_mode_global)
+        _log_activity(
+            action="setting_changed", authorization=authorization, is_mod=True,
+            target_type="setting", target_id="voting_mode_global",
+            detail={"value": body.voting_mode_global},
+        )
+    return {"ok": True, "voting_mode_global": _get_setting("voting_mode_global", "stars")}
+
+
 def _attachment_from_node(n: dict) -> dict:
     """Normalise an edu-sharing ccm:io node into our attachment payload."""
     props = n.get("properties") or {}
@@ -259,12 +312,14 @@ def get_topic(topic_id: str):
     cols = "id,parent_id,title,description,preview_url,color,created_at,modified_at"
     with connect() as con:
         row = con.execute(
-            f"SELECT {cols} FROM topic WHERE id=?", (topic_id,),
+            f"SELECT {cols} FROM topic WHERE id=?",
+            (topic_id,),
         ).fetchone()
         if not row:
             raise HTTPException(404, "Topic not found")
         children = con.execute(
-            f"SELECT {cols} FROM topic WHERE parent_id=? ORDER BY title", (topic_id,),
+            f"SELECT {cols} FROM topic WHERE parent_id=? ORDER BY title",
+            (topic_id,),
         ).fetchall()
         parent = None
         if row["parent_id"]:
@@ -279,6 +334,7 @@ def get_topic(topic_id: str):
 
 
 # ===== Topic-CRUD (Mod-only) ============================================
+
 
 class TopicCreate(BaseModel):
     parent_id: str | None = None  # None = neue Top-Level-Themen-Sammlung
@@ -318,12 +374,8 @@ async def create_topic(
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, hier eine Sammlung anzulegen.")
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
-    new_id = (
-        ((result or {}).get("collection") or result or {}).get("ref") or {}
-    ).get("id")
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
+    new_id = (((result or {}).get("collection") or result or {}).get("ref") or {}).get("id")
     if not new_id:
         raise HTTPException(502, "edu-sharing lieferte keine ID")
     # Sofort in den Cache schreiben (Voll-Sync zieht später nach)
@@ -332,12 +384,24 @@ async def create_topic(
             "INSERT OR REPLACE INTO topic "
             "(id,parent_id,title,description,color,sort_order,created_at,modified_at) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            (new_id, body.parent_id, body.title, body.description, body.color,
-             100, sync_mod._iso_now(), sync_mod._iso_now()),
+            (
+                new_id,
+                body.parent_id,
+                body.title,
+                body.description,
+                body.color,
+                100,
+                sync_mod._iso_now(),
+                sync_mod._iso_now(),
+            ),
         )
     _log_activity(
-        action="topic_created", authorization=authorization, is_mod=True,
-        target_type="topic", target_id=new_id, target_label=body.title,
+        action="topic_created",
+        authorization=authorization,
+        is_mod=True,
+        target_type="topic",
+        target_id=new_id,
+        target_label=body.title,
         detail={"parent_id": body.parent_id},
     )
     return {"ok": True, "id": new_id}
@@ -363,14 +427,14 @@ async def edit_topic(
     if props:
         try:
             await edu_sharing.client.update_metadata(
-                topic_id, props, auth_header=authorization,
+                topic_id,
+                props,
+                auth_header=authorization,
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):
                 raise HTTPException(403, "Keine Berechtigung, diese Herausforderung zu ändern.")
-            raise HTTPException(
-                e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-            )
+            raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
 
     # SET-Klausel über Whitelist-Helper bauen — Spaltennamen werden gegen
     # eine harte Liste geprüft, Werte gehen parametrisiert rein. So bleibt
@@ -390,11 +454,16 @@ async def edit_topic(
         params.append(topic_id)
         with connect() as con:
             con.execute(
-                f"UPDATE topic SET {set_sql} WHERE id=?", params,
+                f"UPDATE topic SET {set_sql} WHERE id=?",
+                params,
             )
     _log_activity(
-        action="topic_edited", authorization=authorization, is_mod=True,
-        target_type="topic", target_id=topic_id, target_label=body.title,
+        action="topic_edited",
+        authorization=authorization,
+        is_mod=True,
+        target_type="topic",
+        target_id=topic_id,
+        target_label=body.title,
         detail=body.model_dump(exclude_none=True),
     )
     return {"ok": True}
@@ -412,13 +481,16 @@ async def delete_topic(
     # Vor-Check: hat Cache noch Kinder/Ideen?
     with connect() as con:
         kids = con.execute(
-            "SELECT COUNT(*) FROM topic WHERE parent_id=?", (topic_id,),
+            "SELECT COUNT(*) FROM topic WHERE parent_id=?",
+            (topic_id,),
         ).fetchone()[0]
         ideas = con.execute(
-            "SELECT COUNT(*) FROM idea WHERE topic_id=?", (topic_id,),
+            "SELECT COUNT(*) FROM idea WHERE topic_id=?",
+            (topic_id,),
         ).fetchone()[0]
         title_row = con.execute(
-            "SELECT title FROM topic WHERE id=?", (topic_id,),
+            "SELECT title FROM topic WHERE id=?",
+            (topic_id,),
         ).fetchone()
     if kids or ideas:
         raise HTTPException(
@@ -432,14 +504,15 @@ async def delete_topic(
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, diese Herausforderung zu löschen.")
         if e.response.status_code != 404:
-            raise HTTPException(
-                e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-            )
+            raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     with connect() as con:
         con.execute("DELETE FROM topic WHERE id=?", (topic_id,))
     _log_activity(
-        action="topic_deleted", authorization=authorization, is_mod=True,
-        target_type="topic", target_id=topic_id,
+        action="topic_deleted",
+        authorization=authorization,
+        is_mod=True,
+        target_type="topic",
+        target_id=topic_id,
         target_label=(title_row["title"] if title_row else None),
     )
     return {"ok": True}
@@ -469,14 +542,13 @@ async def upload_topic_preview(
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, hier ein Vorschaubild zu setzen.")
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     # Topic-Cache refreshen, damit die neue preview.url-URL (mit neuem
     # `?modified=`-Token) ins Cache wandert und Browser-Caches umgeht.
     try:
         meta = await edu_sharing.client.node_metadata(
-            topic_id, auth_header=authorization,
+            topic_id,
+            auth_header=authorization,
         )
         node = (meta or {}).get("node") or {}
         new_preview = (node.get("preview") or {}).get("url")
@@ -490,8 +562,11 @@ async def upload_topic_preview(
     except Exception as e:
         log.debug("upload_topic_preview: Cache-Refresh fehlgeschlagen: %s", e)
     _log_activity(
-        action="topic_preview_set", authorization=authorization, is_mod=True,
-        target_type="topic", target_id=topic_id,
+        action="topic_preview_set",
+        authorization=authorization,
+        is_mod=True,
+        target_type="topic",
+        target_id=topic_id,
         detail={"size": len(data), "mimetype": file.content_type},
     )
     return {"ok": True}
@@ -513,7 +588,9 @@ async def sort_topics(
                 (it.sort_order, it.id),
             )
     _log_activity(
-        action="topics_sorted", authorization=authorization, is_mod=True,
+        action="topics_sorted",
+        authorization=authorization,
+        is_mod=True,
         target_type="topic",
         detail={"count": len(items)},
     )
@@ -544,7 +621,8 @@ def meta_facets(topic_id: str | None = Query(None)):
         )
         phases = con.execute(phase_sql, params).fetchall()
         rows = con.execute(
-            f"SELECT events, categories FROM idea {where_sql}", params,
+            f"SELECT events, categories FROM idea {where_sql}",
+            params,
         ).fetchall()
 
     events: dict[str, int] = {}
@@ -556,8 +634,12 @@ def meta_facets(topic_id: str | None = Query(None)):
             categories[c] = categories.get(c, 0) + 1
     return {
         "phases": [dict(p) for p in phases],
-        "events": [{"value": k, "count": v} for k, v in sorted(events.items(), key=lambda x: -x[1])],
-        "categories": [{"value": k, "count": v} for k, v in sorted(categories.items(), key=lambda x: -x[1])],
+        "events": [
+            {"value": k, "count": v} for k, v in sorted(events.items(), key=lambda x: -x[1])
+        ],
+        "categories": [
+            {"value": k, "count": v} for k, v in sorted(categories.items(), key=lambda x: -x[1])
+        ],
     }
 
 
@@ -663,7 +745,9 @@ def list_ideas(
             ", highlight(idea_fts, 1, '<mark>', '</mark>') AS highlight_title"
         )
 
-    list_sql = f"SELECT {select_cols} {base_sql} ORDER BY {sort_col} {order.upper()} LIMIT ? OFFSET ?"
+    list_sql = (
+        f"SELECT {select_cols} {base_sql} ORDER BY {sort_col} {order.upper()} LIMIT ? OFFSET ?"
+    )
     count_sql = f"SELECT COUNT(*) {base_sql}"
 
     with connect() as con:
@@ -687,7 +771,10 @@ def list_ideas(
         items.append(d)
 
     response: dict = {
-        "total": total, "limit": limit, "offset": offset, "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": items,
     }
 
     # 0-Treffer-Suggestions: bei Volltext-Suche ohne Treffer schlagen wir
@@ -711,15 +798,12 @@ def _suggest_for_empty_query(q: str) -> dict:
     with connect() as con:
         for tok in tokens:
             row = con.execute(
-                "SELECT title FROM idea WHERE title LIKE ? "
-                "ORDER BY modified_at DESC LIMIT 1",
+                "SELECT title FROM idea WHERE title LIKE ? ORDER BY modified_at DESC LIMIT 1",
                 (f"%{tok}%",),
             ).fetchone()
             if row and row["title"] not in alt_terms:
                 alt_terms.append(row["title"])
-        recent_rows = con.execute(
-            "SELECT * FROM idea ORDER BY modified_at DESC LIMIT 5"
-        ).fetchall()
+        recent_rows = con.execute("SELECT * FROM idea ORDER BY modified_at DESC LIMIT 5").fetchall()
     return {
         "alt_terms": alt_terms,
         "recent": [_row_to_idea(r) for r in recent_rows],
@@ -728,7 +812,7 @@ def _suggest_for_empty_query(q: str) -> dict:
 
 # ===== Trend-Ranking =====================================================
 
-_RANKING_SORTS = {"rating", "comments", "interest"}
+_RANKING_SORTS = {"rating", "comments", "interest", "likes"}
 
 
 @router.get("/ranking", tags=["ranking"])
@@ -764,17 +848,18 @@ async def get_ranking(
             ).fetchall()
         }
 
-        all_ideas = con.execute(
-            f"SELECT * FROM idea{sql_where}", params
-        ).fetchall()
+        all_ideas = con.execute(f"SELECT * FROM idea{sql_where}", params).fetchall()
 
         def _score(r) -> tuple[float, float]:
             """(primär, sekundär) je nach Sort — höher = besser."""
             if sort == "comments":
                 return (float(r["comment_count"] or 0), float(r["rating_avg"] or 0))
             if sort == "interest":
-                return (float(interest_map.get(r["id"], 0)),
-                        float(r["comment_count"] or 0))
+                return (float(interest_map.get(r["id"], 0)), float(r["comment_count"] or 0))
+            if sort == "likes":
+                # Daumen-Modus: Score = Anzahl Bewertungen (= Likes),
+                # Tie-Break Kommentare.
+                return (float(r["rating_count"] or 0), float(r["comment_count"] or 0))
             # rating (default): Schnitt, Tie-Break Anzahl Bewertungen
             return (float(r["rating_avg"] or 0), float(r["rating_count"] or 0))
 
@@ -812,11 +897,13 @@ async def get_ranking(
                 "WHERE event=? AND sort=? AND score > 0 ORDER BY snapshot_at ASC",
                 (ev, sort),
             ).fetchall():
-                history_by_idea.setdefault(hr["idea_id"], []).append({
-                    "at": hr["snapshot_at"],
-                    "score": hr["score"],
-                    "rank": hr["rank"],
-                })
+                history_by_idea.setdefault(hr["idea_id"], []).append(
+                    {
+                        "at": hr["snapshot_at"],
+                        "score": hr["score"],
+                        "rank": hr["rank"],
+                    }
+                )
 
     # Synthetischer „Jetzt"-Punkt: Damit Verlaufs-Chart + Zeilen-Sparklines
     # zum LIVE-Rang der Tabelle passen, hängen wir den aktuellen Stand als
@@ -838,14 +925,16 @@ async def get_ranking(
         history = list(history_by_idea.get(iid, []))
         if has_snaps:
             history.append({"at": LIVE_MARKER, "score": live_score, "rank": rank})
-        items.append({
-            "rank": rank,
-            "prev_rank": prev_rank,
-            "delta": delta,
-            "score": live_score,
-            "idea": _row_to_idea(r),
-            "history": history,
-        })
+        items.append(
+            {
+                "rank": rank,
+                "prev_rank": prev_rank,
+                "delta": delta,
+                "score": live_score,
+                "idea": _row_to_idea(r),
+                "history": history,
+            }
+        )
 
     snapshots_out = list(reversed(snaps))  # alt → neu (für Chart-X-Achse)
     if has_snaps:
@@ -877,9 +966,7 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         ok = await sync_mod.refresh_idea(idea_id, auth_header=authorization)
         if ok:
             with connect() as con:
-                row = con.execute(
-                    "SELECT * FROM idea WHERE id = ?", (idea_id,)
-                ).fetchone()
+                row = con.execute("SELECT * FROM idea WHERE id = ?", (idea_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Idea not found")
 
@@ -902,7 +989,8 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     live_meta_node: dict = {}
     try:
         meta = await edu_sharing.client.node_metadata(
-            target_id, auth_header=authorization,
+            target_id,
+            auth_header=authorization,
         )
         live_meta_node = (meta or {}).get("node") or {}
     except Exception as e:
@@ -962,9 +1050,12 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         order = _phase_order(con)
     base["allowed_next_phases"] = (
         _allowed_next_phases(
-            current=base.get("phase"), is_mod=is_mod_caller, order=order,
+            current=base.get("phase"),
+            is_mod=is_mod_caller,
+            order=order,
         )
-        if can_edit else []
+        if can_edit
+        else []
     )
 
     # Live comments — always against the ccm:io target (collection ideas
@@ -975,9 +1066,12 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     comment_target = row["main_content_id"] or row["id"]
     is_private = False  # markiert: Gast hat keinen Lesezugriff
     try:
-        base["comments"] = (await edu_sharing.client.comments(
-            comment_target, auth_header=authorization,
-        )).get("comments") or []
+        base["comments"] = (
+            await edu_sharing.client.comments(
+                comment_target,
+                auth_header=authorization,
+            )
+        ).get("comments") or []
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             is_private = True
@@ -993,8 +1087,10 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         echten Datei-Inhalt führen sonst zu einer leeren `Dokumente (1)`-
         Anzeige mit unbenutzbarem „Öffnen"-Button."""
         sz = att.get("size") or 0
-        try: sz = int(sz)
-        except (TypeError, ValueError): sz = 0
+        try:
+            sz = int(sz)
+        except (TypeError, ValueError):
+            sz = 0
         return bool(att.get("download_url")) or sz > 0
 
     attachments: list[dict] = []
@@ -1004,7 +1100,8 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         att: dict | None = None
         try:
             meta = await edu_sharing.client.node_metadata(
-                row["id"], auth_header=authorization,
+                row["id"],
+                auth_header=authorization,
             )
             att = _attachment_from_node(meta.get("node") or {})
         except httpx.HTTPStatusError as e:
@@ -1037,7 +1134,9 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         # Collection idea — list every referenced ccm:io as an attachment.
         try:
             refs = await edu_sharing.client.collection_references(
-                row["id"], max_items=50, auth_header=authorization,
+                row["id"],
+                max_items=50,
+                auth_header=authorization,
             )
             for n in refs.get("references") or []:
                 attachments.append(_attachment_from_node(n))
@@ -1054,7 +1153,8 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         # Bei kind="io" hängen Children am Knoten selbst; bei kind="collection"
         # hängen sie ebenfalls am Idee-Knoten (= ccm:map). Funktioniert für beide.
         children = await edu_sharing.client.list_child_objects(
-            row["id"], auth_header=authorization,
+            row["id"],
+            auth_header=authorization,
         )
         for n in children:
             a = _attachment_from_node(n)
@@ -1086,9 +1186,7 @@ async def rate_idea(
     if not authorization:
         raise HTTPException(401, "Authorization header required for rating")
     with connect() as con:
-        row = con.execute(
-            "SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)
-        ).fetchone()
+        row = con.execute("SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Idea not found")
     target = row["main_content_id"] or row["id"]
@@ -1122,7 +1220,8 @@ async def rate_idea(
     mine = 0.0
     try:
         meta = await edu_sharing.client.node_metadata(
-            target, auth_header=authorization,
+            target,
+            auth_header=authorization,
         )
         r = (meta.get("node") or {}).get("rating") or {}
         overall = r.get("overall") or {}
@@ -1142,7 +1241,8 @@ async def rate_idea(
         # Tool-Permission gesetzt ist.
         log.warning(
             "rate_idea: Rating nicht persistiert (HTTP %s): %s",
-            write_status, write_error_text,
+            write_status,
+            write_error_text,
         )
         if "DAOSecurityException" in (write_error_text or "") or write_status == 403:
             raise HTTPException(
@@ -1152,15 +1252,15 @@ async def rate_idea(
             )
         raise HTTPException(
             502,
-            "edu-sharing konnte das Rating nicht speichern. "
-            "Bitte später nochmal probieren.",
+            "edu-sharing konnte das Rating nicht speichern. Bitte später nochmal probieren.",
         )
 
     # Erfolg (entweder Write 200 oder Schein-500 mit persistiertem Rating)
     if write_status:
         log.info(
             "rate_idea: ES-Write %s ignoriert (Read-Back zeigt mine=%s)",
-            write_status, mine,
+            write_status,
+            mine,
         )
 
     # Cache update — best-effort
@@ -1179,6 +1279,46 @@ async def rate_idea(
     }
 
 
+@router.delete("/ideas/{idea_id}/rating")
+@limiter.limit("30/minute")
+async def unrate_idea(
+    request: Request,
+    idea_id: str,
+    authorization: str | None = Header(None),
+):
+    """Eigene Bewertung/Like zurücknehmen (Daumen-Modus „un-like").
+
+    Achtung: edu-sharing quittiert das Löschen aktuell oft mit 500
+    (Server-Bug). Wir unterdrücken den Fehler bewusst — der Endnutzer
+    sieht keinen Fehler, der Like kann aber serverseitig bestehen bleiben,
+    bis der Bug behoben ist. Frontend aktualisiert optimistisch."""
+    if not authorization:
+        raise HTTPException(401, "Anmeldung erforderlich")
+    with connect() as con:
+        row = con.execute(
+            "SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Idea not found")
+    target = row["main_content_id"] or row["id"]
+
+    ok = True
+    try:
+        await edu_sharing.client.delete_rating(target, auth_header=authorization)
+    except Exception as e:
+        # 500 vom bekannten edu-sharing-Bug o.ä. → still schlucken.
+        ok = False
+        log.info("unrate_idea: delete_rating fehlgeschlagen (toleriert): %s", e)
+
+    try:
+        await sync_mod.refresh_idea(idea_id, auth_header=authorization)
+    except Exception:
+        pass
+
+    # Immer 200 — der Endnutzer soll keinen Fehler sehen.
+    return {"ok": True, "persisted": ok}
+
+
 @router.post("/ideas/{idea_id}/comments")
 @limiter.limit("30/minute")
 async def comment_idea(
@@ -1191,9 +1331,7 @@ async def comment_idea(
     if not authorization:
         raise HTTPException(401, "Authorization header required for comments")
     with connect() as con:
-        row = con.execute(
-            "SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)
-        ).fetchone()
+        row = con.execute("SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Idea not found")
     target = row["main_content_id"] or row["id"]
@@ -1270,9 +1408,7 @@ async def submit_idea(
     # Submitter-Tracking: bei eingeloggter Einreichung den Caller-Username
     # als Keyword anhängen, damit "Meine Ideen" und Edit-Gating zuordnen können.
     submitter = _user_key_from_auth(authorization) if authorization else None
-    if submitter and not any(
-        k.lower().startswith("submitter:") for k in kws
-    ):
+    if submitter and not any(k.lower().startswith("submitter:") for k in kws):
         kws.append(f"submitter:{submitter}")
 
     props: dict[str, list[str]] = {
@@ -1329,8 +1465,7 @@ async def submit_idea(
             )
         raise HTTPException(
             502,
-            f"edu-sharing Fehler beim Anlegen: {e.response.status_code} "
-            f"{e.response.text[:180]}",
+            f"edu-sharing Fehler beim Anlegen: {e.response.status_code} {e.response.text[:180]}",
         )
 
     node = (result or {}).get("node") or {}
@@ -1347,11 +1482,15 @@ async def submit_idea(
     _log_activity(
         action="idea_submitted",
         authorization=authorization,
-        target_type="idea", target_id=new_id, target_label=body.title,
-        detail={"anonymous": authorization is None,
-                "topic_id": body.topic_id,
-                "phase": body.phase,
-                "events": list(body.events or []) + ([body.event] if body.event else [])},
+        target_type="idea",
+        target_id=new_id,
+        target_label=body.title,
+        detail={
+            "anonymous": authorization is None,
+            "topic_id": body.topic_id,
+            "phase": body.phase,
+            "events": list(body.events or []) + ([body.event] if body.event else []),
+        },
     )
 
     return {
@@ -1371,6 +1510,7 @@ def _user_key_from_auth(authorization: str | None) -> str | None:
     if not authorization or not authorization.lower().startswith("basic "):
         return None
     import base64 as _b
+
     try:
         raw = _b.b64decode(authorization.split(" ", 1)[1]).decode("utf-8", "replace")
         return raw.split(":", 1)[0] or None
@@ -1392,18 +1532,27 @@ def _phase_order(con) -> list[str]:
     """Liefert die aktiven Phase-Slugs in der vom Mod definierten Reihenfolge.
     Fallback auf den DEFAULT_PHASES-Stand, falls keine Taxonomie da ist."""
     rows = con.execute(
-        "SELECT slug FROM taxonomy_phase WHERE active = 1 "
-        "ORDER BY sort_order ASC, slug ASC"
+        "SELECT slug FROM taxonomy_phase WHERE active = 1 ORDER BY sort_order ASC, slug ASC"
     ).fetchall()
     if rows:
         return [r["slug"] for r in rows]
     # Fallback (sollte init_db immer schon gepflanzt haben)
-    return ["anregung", "ausarbeitung", "pitch-bereit",
-            "in-umsetzung", "abgeschlossen", PHASE_ARCHIVE_SLUG]
+    return [
+        "anregung",
+        "ausarbeitung",
+        "pitch-bereit",
+        "in-umsetzung",
+        "abgeschlossen",
+        PHASE_ARCHIVE_SLUG,
+    ]
 
 
 def _is_allowed_phase_transition(
-    *, current: str | None, target: str | None, is_mod: bool, order: list[str],
+    *,
+    current: str | None,
+    target: str | None,
+    is_mod: bool,
+    order: list[str],
 ) -> tuple[bool, str | None]:
     """Returns (ok, reason). Reason ist nur bei ok=False gesetzt."""
     if is_mod:
@@ -1421,8 +1570,7 @@ def _is_allowed_phase_transition(
         # Idee ohne Phase → darf auf erste oder zweite Stufe wechseln (Toleranz)
         if target_idx <= 1:
             return True, None
-        return False, ("Phase muss schrittweise hochgesetzt werden — "
-                       "Sprung zu weit. Mod fragen.")
+        return False, ("Phase muss schrittweise hochgesetzt werden — Sprung zu weit. Mod fragen.")
     current_idx = order.index(current)
     if target_idx == current_idx:
         return True, None  # No-Op
@@ -1430,12 +1578,17 @@ def _is_allowed_phase_transition(
         return True, None  # genau eine Stufe vorwärts
     if target_idx < current_idx:
         return False, "Nur Moderator:innen dürfen Phasen zurückschalten."
-    return False, ("Mehrere Stufen auf einmal sind nur für Moderator:innen — "
-                   "schrittweise weiter, oder Mod fragen.")
+    return False, (
+        "Mehrere Stufen auf einmal sind nur für Moderator:innen — "
+        "schrittweise weiter, oder Mod fragen."
+    )
 
 
 def _allowed_next_phases(
-    *, current: str | None, is_mod: bool, order: list[str],
+    *,
+    current: str | None,
+    is_mod: bool,
+    order: list[str],
 ) -> list[str]:
     """Welche Phasen darf der Caller jetzt setzen?"""
     if is_mod:
@@ -1581,9 +1734,9 @@ async def list_inbox(
     limit: int = Query(200, ge=1, le=500),
     filter: Literal[
         "uncategorized",  # noch nicht in einer Sammlung (Default — was zu tun ist)
-        "all",            # alle ccm:io der Inbox
-        "categorized",    # bereits irgendwo als Reference verlinkt
-        "app-submits",    # nur App-Einreichungen mit phase:/event:-Markern
+        "all",  # alle ccm:io der Inbox
+        "categorized",  # bereits irgendwo als Reference verlinkt
+        "app-submits",  # nur App-Einreichungen mit phase:/event:-Markern
     ] = Query("uncategorized", description="Sichtfilter über die Inbox"),
     authorization: str | None = Header(None),
 ):
@@ -1642,9 +1795,7 @@ async def list_inbox(
         if isinstance(kws, str):
             kws = [kws]
         has_marker = any(
-            str(k).lower().startswith(p)
-            for k in kws
-            for p in ("phase:", "event:", "target-topic:")
+            str(k).lower().startswith(p) for k in kws for p in ("phase:", "event:", "target-topic:")
         )
         # Sichtfilter anwenden
         if filter == "uncategorized" and is_cataloged:
@@ -1664,20 +1815,14 @@ async def list_inbox(
             None,
         )
         target_topic = next(
-            (
-                k[len("target-topic:") :]
-                for k in kws
-                if str(k).lower().startswith("target-topic:")
-            ),
+            (k[len("target-topic:") :] for k in kws if str(k).lower().startswith("target-topic:")),
             None,
         )
         items.append(
             {
                 "id": (n.get("ref") or {}).get("id"),
                 "name": n.get("name"),
-                "title": n.get("title")
-                or (props.get("cm:title") or [None])[0]
-                or n.get("name"),
+                "title": n.get("title") or (props.get("cm:title") or [None])[0] or n.get("name"),
                 "description": (props.get("cclom:general_description") or [None])[0]
                 or (props.get("cm:description") or [None])[0],
                 "author": (props.get("ccm:author_freetext") or [None])[0],
@@ -1712,17 +1857,15 @@ async def delete_inbox_item(
     """Delete a pending inbox submission. Caller muss Moderator sein."""
     await _require_moderator(authorization)
     try:
-        result = await edu_sharing.client.delete_node(
-            node_id, auth_header=authorization
-        )
+        result = await edu_sharing.client.delete_node(node_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:180]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:180]}")
     _log_activity(
         action="inbox_deleted",
-        authorization=authorization, is_mod=True,
-        target_type="idea", target_id=node_id,
+        authorization=authorization,
+        is_mod=True,
+        target_type="idea",
+        target_id=node_id,
     )
     return result
 
@@ -1751,9 +1894,7 @@ async def upload_idea_content(
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, hier Inhalte zu speichern.")
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     return {"ok": True, "size": len(data), "name": file.filename}
 
 
@@ -1782,9 +1923,7 @@ async def upload_idea_preview(
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, hier ein Vorschaubild zu setzen.")
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     # Cache aktualisieren: edu-sharing setzt einen neuen `?modified=`-Param
     # in preview.url. Ohne Refresh würde das Frontend weiter die alte URL
     # (alter Zeitstempel) anfragen und den Browser-Cache treffen.
@@ -1798,12 +1937,14 @@ async def upload_idea_preview(
     try:
         with connect() as con:
             row = con.execute(
-                "SELECT preview_url FROM idea WHERE id=?", (idea_id,),
+                "SELECT preview_url FROM idea WHERE id=?",
+                (idea_id,),
             ).fetchone()
             if row and row["preview_url"]:
                 from datetime import datetime
+
                 bust = int(datetime.now(UTC).timestamp())
-                sep = '&' if '?' in row["preview_url"] else '?'
+                sep = "&" if "?" in row["preview_url"] else "?"
                 new_url = f"{row['preview_url']}{sep}cb={bust}"
                 # Cache-Buster nur, wenn nicht bereits via Sync gesetzt
                 if "modified=" not in row["preview_url"]:
@@ -1827,7 +1968,10 @@ class BulkMoveRequest(BaseModel):
 
 
 async def _reference_into_collection(
-    source_id: str, target_topic_id: str, *, authorization: str,
+    source_id: str,
+    target_topic_id: str,
+    *,
+    authorization: str,
 ) -> str:
     """Hängt eine Inbox-Idee als Reference an eine Ziel-Sammlung
     (HackathOERn-Standardvorgehensweise — Original bleibt in der Inbox,
@@ -1852,13 +1996,12 @@ async def _reference_into_collection(
         # Reference auf diese Idee. Wir suchen sie nach und geben deren ID
         # zurück, damit der Caller einen no-op-Erfolg sieht.
         if e.response.status_code == 409:
-            existing = await _find_existing_reference(
-                source_id, target_topic_id, authorization
-            )
+            existing = await _find_existing_reference(source_id, target_topic_id, authorization)
             if existing:
                 log.info(
                     "addReference: %s war bereits in %s referenziert (no-op)",
-                    source_id, target_topic_id,
+                    source_id,
+                    target_topic_id,
                 )
                 return existing
         raise
@@ -1869,7 +2012,8 @@ async def _reference_into_collection(
         try:
             with connect() as con:
                 await sync_mod._upsert_idea(
-                    con, ref_node,
+                    con,
+                    ref_node,
                     kind="io",
                     topic_id=target_topic_id,
                     main_content_id=ref_id,
@@ -1880,28 +2024,34 @@ async def _reference_into_collection(
 
 
 async def _find_existing_reference(
-    source_id: str, target_topic_id: str, authorization: str | None,
+    source_id: str,
+    target_topic_id: str,
+    authorization: str | None,
 ) -> str | None:
     """Sucht eine bereits existierende Reference auf `source_id` in der
     Sammlung `target_topic_id`. Wird vom Idempotenz-Pfad von
     `_reference_into_collection` genutzt (siehe 409-Behandlung dort)."""
     try:
         refs = await edu_sharing.client.collection_references(
-            target_topic_id, max_items=500, auth_header=authorization,
+            target_topic_id,
+            max_items=500,
+            auth_header=authorization,
         )
     except Exception as e:
         log.warning("collection_references-Lookup fehlgeschlagen: %s", e)
         return None
-    for r in (refs.get("references") or []):
+    for r in refs.get("references") or []:
         props = r.get("properties") or {}
         orig_field = props.get("ccm:original") or props.get("sys:node-uuid")
         if isinstance(orig_field, list) and orig_field:
             orig_field = orig_field[0]
         # Fallback: in den Reference-Eigenschaften steht oft `ccm:original_id`
         if not orig_field:
-            orig_field = (props.get("ccm:original_id") or [None])[0] \
-                if isinstance(props.get("ccm:original_id"), list) \
+            orig_field = (
+                (props.get("ccm:original_id") or [None])[0]
+                if isinstance(props.get("ccm:original_id"), list)
                 else props.get("ccm:original_id")
+            )
         # Manche ES-Versionen liefern `originalId` direkt auf Top-Level
         if not orig_field:
             orig_field = r.get("originalId")
@@ -1934,7 +2084,8 @@ async def change_idea_topic(
             (idea_id,),
         ).fetchone()
         target = con.execute(
-            "SELECT id, title FROM topic WHERE id = ?", (body.new_topic_id,),
+            "SELECT id, title FROM topic WHERE id = ?",
+            (body.new_topic_id,),
         ).fetchone()
     if not row:
         raise HTTPException(404, "Idee nicht im Cache — unbekannte ID")
@@ -1943,8 +2094,12 @@ async def change_idea_topic(
 
     current_topic = row["topic_id"]
     if current_topic == body.new_topic_id:
-        return {"ok": True, "message": "Idee ist bereits in dieser Herausforderung",
-                "result_id": idea_id, "no_op": True}
+        return {
+            "ok": True,
+            "message": "Idee ist bereits in dieser Herausforderung",
+            "result_id": idea_id,
+            "no_op": True,
+        }
 
     # `original_id` zeigt auf den Inbox-Knoten. Falls die Row selbst das
     # Original ist (z.B. neu eingereicht, noch nirgends referenziert),
@@ -1954,7 +2109,9 @@ async def change_idea_topic(
     # 1. Neue Reference im Ziel-Topic
     try:
         new_ref_id = await _reference_into_collection(
-            source_id, body.new_topic_id, authorization=authorization,
+            source_id,
+            body.new_topic_id,
+            authorization=authorization,
         )
     except httpx.HTTPStatusError as e:
         raise HTTPException(
@@ -1969,22 +2126,28 @@ async def change_idea_topic(
     if row["original_id"] and row["id"] != new_ref_id:
         try:
             await edu_sharing.client.delete_collection_reference(
-                row["id"], auth_header=authorization,
+                row["id"],
+                auth_header=authorization,
             )
             with connect() as con:
                 con.execute("DELETE FROM idea WHERE id = ?", (row["id"],))
                 con.execute("DELETE FROM idea_fts WHERE id = ?", (row["id"],))
             deleted_old = True
         except Exception as e:
-            log.warning("change-topic: alte Reference %s nicht gelöscht: %s",
-                        row["id"], e)
+            log.warning("change-topic: alte Reference %s nicht gelöscht: %s", row["id"], e)
 
     _log_activity(
-        action="idea_topic_changed", authorization=authorization, is_mod=True,
-        target_type="idea", target_id=idea_id, target_label=row["title"],
+        action="idea_topic_changed",
+        authorization=authorization,
+        is_mod=True,
+        target_type="idea",
+        target_id=idea_id,
+        target_label=row["title"],
         detail={
-            "from_topic_id": current_topic, "to_topic_id": body.new_topic_id,
-            "to_topic_title": target["title"], "new_ref_id": new_ref_id,
+            "from_topic_id": current_topic,
+            "to_topic_id": body.new_topic_id,
+            "to_topic_title": target["title"],
+            "new_ref_id": new_ref_id,
             "old_ref_deleted": deleted_old,
         },
     )
@@ -2017,11 +2180,14 @@ async def bulk_move_to_topic(
     for nid in body.node_ids:
         try:
             new_id = await _reference_into_collection(
-                nid, body.target_topic_id, authorization=authorization,
+                nid,
+                body.target_topic_id,
+                authorization=authorization,
             )
         except httpx.HTTPStatusError as e:
-            failed.append({"id": nid, "status": e.response.status_code,
-                           "detail": e.response.text[:160]})
+            failed.append(
+                {"id": nid, "status": e.response.status_code, "detail": e.response.text[:160]}
+            )
             continue
         except Exception as e:
             failed.append({"id": nid, "status": 0, "detail": str(e)[:160]})
@@ -2034,12 +2200,18 @@ async def bulk_move_to_topic(
             ).fetchone()
             moved_title = r["title"] if r else None
         _log_activity(
-            action="idea_moved", authorization=authorization, is_mod=True,
-            target_type="idea", target_id=nid, target_label=moved_title,
-            detail={"to_topic_id": body.target_topic_id,
-                    "to_topic_title": t["title"],
-                    "result_id": new_id,
-                    "bulk": True},
+            action="idea_moved",
+            authorization=authorization,
+            is_mod=True,
+            target_type="idea",
+            target_id=nid,
+            target_label=moved_title,
+            detail={
+                "to_topic_id": body.target_topic_id,
+                "to_topic_title": t["title"],
+                "result_id": new_id,
+                "bulk": True,
+            },
         )
         succeeded.append(nid)
 
@@ -2072,7 +2244,9 @@ async def move_to_topic(
 
     try:
         new_id = await _reference_into_collection(
-            body.node_id, body.target_topic_id, authorization=authorization,
+            body.node_id,
+            body.target_topic_id,
+            authorization=authorization,
         )
     except httpx.HTTPStatusError as e:
         raise HTTPException(
@@ -2090,10 +2264,16 @@ async def move_to_topic(
         moved_title = r["title"] if r else None
     _log_activity(
         action="idea_moved",
-        authorization=authorization, is_mod=True,
-        target_type="idea", target_id=body.node_id, target_label=moved_title,
-        detail={"to_topic_id": body.target_topic_id, "to_topic_title": t["title"],
-                "result_id": new_id},
+        authorization=authorization,
+        is_mod=True,
+        target_type="idea",
+        target_id=body.node_id,
+        target_label=moved_title,
+        detail={
+            "to_topic_id": body.target_topic_id,
+            "to_topic_title": t["title"],
+            "result_id": new_id,
+        },
     )
 
     return {"ok": True, "moved_to": t["title"], "result_id": new_id}
@@ -2111,6 +2291,7 @@ async def move_to_topic(
 # Wird im Submit-Form als Dropdown angeboten und ans `cclom:general_keyword`
 # als `phase:<slug>` bzw. `event:<slug>` angehängt.
 
+
 class TaxonomyEntry(BaseModel):
     slug: str = Field(..., min_length=2, max_length=80, pattern=r"^[a-z0-9][a-z0-9\-]*$")
     label: str = Field(..., min_length=2, max_length=120)
@@ -2121,11 +2302,15 @@ class TaxonomyEntry(BaseModel):
 
 class EventEntry(TaxonomyEntry):
     """Erweitert TaxonomyEntry um Event-spezifische Lifecycle-Felder."""
+
     # Lifecycle: draft (Mod sichtbar, Submitter nicht), live (Default),
     # archived (abgelaufen — taucht im UI ausgegraut auf).
     status: Literal["draft", "live", "archived"] = "live"
     # ISO-Zeitstempel; bis dahin im Featured-Slot auf der Startseite.
     featured_until: str | None = None
+    # Pro-Event-Override des Bewertungssystems. None/"" = globalen Modus
+    # erben. Sonst 'stars' | 'thumbs'.
+    voting_mode: Literal["stars", "thumbs", ""] | None = None
 
 
 def _list_taxonomy(table: str) -> list[dict]:
@@ -2135,9 +2320,7 @@ def _list_taxonomy(table: str) -> list[dict]:
             f"SELECT slug,label,description,sort_order,active,created_at,created_by "
             f"FROM {table} ORDER BY sort_order, label"
         ).fetchall()
-    return [
-        {**dict(r), "active": bool(r["active"])} for r in rows
-    ]
+    return [{**dict(r), "active": bool(r["active"])} for r in rows]
 
 
 def _list_events(include_drafts: bool = False, include_archived: bool = False) -> list[dict]:
@@ -2146,7 +2329,7 @@ def _list_events(include_drafts: bool = False, include_archived: bool = False) -
     with connect() as con:
         rows = con.execute(
             "SELECT slug,label,description,sort_order,active,status,"
-            "featured_until,created_at,created_by "
+            "featured_until,voting_mode,created_at,created_by "
             "FROM taxonomy_event ORDER BY sort_order, label"
         ).fetchall()
     items: list[dict] = []
@@ -2178,7 +2361,8 @@ def list_events(
     Submit-Form filtert clientseitig auf nur live). Drafts nur, wenn der
     Aufrufer Mod ist und das Flag explizit setzt."""
     items = _list_events(
-        include_drafts=include_drafts, include_archived=include_archived,
+        include_drafts=include_drafts,
+        include_archived=include_archived,
     )
     if only_active:
         items = [i for i in items if i["active"]]
@@ -2215,8 +2399,7 @@ def featured_event():
             # und NICHT in der `keywords`-Spalte. Gleiches LIKE-Muster wie
             # der Listen-Filter (siehe list_ideas, i.events LIKE '%"slug"%').
             ev["idea_count"] = con.execute(
-                "SELECT COUNT(*) FROM idea "
-                "WHERE COALESCE(hidden,0)=0 AND events LIKE ?",
+                "SELECT COUNT(*) FROM idea WHERE COALESCE(hidden,0)=0 AND events LIKE ?",
                 (f'%"{row["slug"]}"%',),
             ).fetchone()[0]
             out.append(ev)
@@ -2225,30 +2408,35 @@ def featured_event():
 
 def _upsert_taxonomy(table: str, body: TaxonomyEntry, user: str | None) -> dict:
     with connect() as con:
-        existing = con.execute(
-            f"SELECT slug FROM {table} WHERE slug=?", (body.slug,)
-        ).fetchone()
+        existing = con.execute(f"SELECT slug FROM {table} WHERE slug=?", (body.slug,)).fetchone()
         if existing:
             con.execute(
-                f"UPDATE {table} SET label=?, description=?, sort_order=?, active=? "
-                f"WHERE slug=?",
-                (body.label, body.description, body.sort_order,
-                 1 if body.active else 0, body.slug),
+                f"UPDATE {table} SET label=?, description=?, sort_order=?, active=? WHERE slug=?",
+                (body.label, body.description, body.sort_order, 1 if body.active else 0, body.slug),
             )
         else:
             from datetime import datetime
+
             con.execute(
                 f"INSERT INTO {table} (slug,label,description,sort_order,active,"
                 f"created_at,created_by) VALUES (?,?,?,?,?,?,?)",
-                (body.slug, body.label, body.description, body.sort_order,
-                 1 if body.active else 0,
-                 datetime.now(UTC).isoformat(), user or "anonymous"),
+                (
+                    body.slug,
+                    body.label,
+                    body.description,
+                    body.sort_order,
+                    1 if body.active else 0,
+                    datetime.now(UTC).isoformat(),
+                    user or "anonymous",
+                ),
             )
     return {"ok": True, "slug": body.slug}
 
 
 def _upsert_event(body: EventEntry, user: str | None) -> dict:
-    """Upsert mit Event-spezifischen Feldern (Status + Featured)."""
+    """Upsert mit Event-spezifischen Feldern (Status + Featured + Voting-Modus)."""
+    # Leerstring → NULL (= globalen Modus erben).
+    vmode = body.voting_mode or None
     with connect() as con:
         existing = con.execute(
             "SELECT slug FROM taxonomy_event WHERE slug=?", (body.slug,)
@@ -2256,19 +2444,35 @@ def _upsert_event(body: EventEntry, user: str | None) -> dict:
         if existing:
             con.execute(
                 "UPDATE taxonomy_event SET label=?, description=?, sort_order=?, "
-                "active=?, status=?, featured_until=? WHERE slug=?",
-                (body.label, body.description, body.sort_order,
-                 1 if body.active else 0,
-                 body.status, body.featured_until, body.slug),
+                "active=?, status=?, featured_until=?, voting_mode=? WHERE slug=?",
+                (
+                    body.label,
+                    body.description,
+                    body.sort_order,
+                    1 if body.active else 0,
+                    body.status,
+                    body.featured_until,
+                    vmode,
+                    body.slug,
+                ),
             )
         else:
             con.execute(
                 "INSERT INTO taxonomy_event "
                 "(slug,label,description,sort_order,active,status,featured_until,"
-                "created_at,created_by) VALUES (?,?,?,?,?,?,?,?,?)",
-                (body.slug, body.label, body.description, body.sort_order,
-                 1 if body.active else 0, body.status, body.featured_until,
-                 datetime.now(UTC).isoformat(), user or "anonymous"),
+                "voting_mode,created_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    body.slug,
+                    body.label,
+                    body.description,
+                    body.sort_order,
+                    1 if body.active else 0,
+                    body.status,
+                    body.featured_until,
+                    vmode,
+                    datetime.now(UTC).isoformat(),
+                    user or "anonymous",
+                ),
             )
     return {"ok": True, "slug": body.slug}
 
@@ -2281,11 +2485,17 @@ async def upsert_event(slug: str, body: EventEntry, authorization: str | None = 
     res = _upsert_event(body, user)
     _log_activity(
         action="taxonomy_event_changed",
-        authorization=authorization, is_mod=True,
-        target_type="taxonomy", target_id=slug, target_label=body.label,
-        detail={"active": body.active, "sort_order": body.sort_order,
-                "status": body.status,
-                "featured_until": body.featured_until},
+        authorization=authorization,
+        is_mod=True,
+        target_type="taxonomy",
+        target_id=slug,
+        target_label=body.label,
+        detail={
+            "active": body.active,
+            "sort_order": body.sort_order,
+            "status": body.status,
+            "featured_until": body.featured_until,
+        },
     )
     return res
 
@@ -2297,8 +2507,10 @@ async def delete_event(slug: str, authorization: str | None = Header(None)):
         con.execute("DELETE FROM taxonomy_event WHERE slug=?", (slug,))
     _log_activity(
         action="taxonomy_event_deleted",
-        authorization=authorization, is_mod=True,
-        target_type="taxonomy", target_id=slug,
+        authorization=authorization,
+        is_mod=True,
+        target_type="taxonomy",
+        target_id=slug,
     )
     return {"ok": True}
 
@@ -2311,8 +2523,11 @@ async def upsert_phase(slug: str, body: TaxonomyEntry, authorization: str | None
     res = _upsert_taxonomy("taxonomy_phase", body, user)
     _log_activity(
         action="taxonomy_phase_changed",
-        authorization=authorization, is_mod=True,
-        target_type="taxonomy", target_id=slug, target_label=body.label,
+        authorization=authorization,
+        is_mod=True,
+        target_type="taxonomy",
+        target_id=slug,
+        target_label=body.label,
         detail={"active": body.active, "sort_order": body.sort_order},
     )
     return res
@@ -2325,8 +2540,10 @@ async def delete_phase(slug: str, authorization: str | None = Header(None)):
         con.execute("DELETE FROM taxonomy_phase WHERE slug=?", (slug,))
     _log_activity(
         action="taxonomy_phase_deleted",
-        authorization=authorization, is_mod=True,
-        target_type="taxonomy", target_id=slug,
+        authorization=authorization,
+        is_mod=True,
+        target_type="taxonomy",
+        target_id=slug,
     )
     return {"ok": True}
 
@@ -2375,7 +2592,8 @@ async def edit_idea(
         current_phase: str | None = None
     else:
         target_node = (
-            row["main_content_id"] if row["kind"] == "collection" and row["main_content_id"]
+            row["main_content_id"]
+            if row["kind"] == "collection" and row["main_content_id"]
             else idea_id
         )
         current_phase = row["phase"]
@@ -2387,7 +2605,10 @@ async def edit_idea(
         with connect() as con:
             order = _phase_order(con)
         ok, reason = _is_allowed_phase_transition(
-            current=current_phase, target=body.phase, is_mod=is_mod, order=order,
+            current=current_phase,
+            target=body.phase,
+            is_mod=is_mod,
+            order=order,
         )
         if not ok:
             raise HTTPException(403, reason or "Phase-Wechsel nicht erlaubt.")
@@ -2407,9 +2628,7 @@ async def edit_idea(
         if body.project_url.strip() == "":
             props["ccm:wwwurl"] = []
         else:
-            props["ccm:wwwurl"] = [
-                _validate_external_url(body.project_url, field="Projekt-URL")
-            ]
+            props["ccm:wwwurl"] = [_validate_external_url(body.project_url, field="Projekt-URL")]
     # Keywords-Merge: bestehende Keywords aus edu-sharing erhalten,
     # nur phase: und event: gezielt austauschen.
     #
@@ -2423,16 +2642,20 @@ async def edit_idea(
     #  - body.keywords NICHT mitgeschickt (Quick-Edit): wir holen die alten
     #    Keywords live aus edu-sharing, behalten alle Nicht-phase/event-Werte
     #    und überschreiben nur phase:/event:-Einträge.
-    if (body.keywords is not None or body.phase is not None
-            or body.event is not None or body.events is not None):
-
+    if (
+        body.keywords is not None
+        or body.phase is not None
+        or body.event is not None
+        or body.events is not None
+    ):
         if body.keywords is not None:
             base_kws = list(body.keywords)
         else:
             # Quick-Edit: alte Liste live holen, damit Bestand erhalten bleibt
             try:
                 cur_meta = await edu_sharing.client.node_metadata(
-                    target_node, auth_header=authorization,
+                    target_node,
+                    auth_header=authorization,
                 )
                 cur_props = (cur_meta.get("node") or {}).get("properties") or {}
                 base_kws = list(cur_props.get("cclom:general_keyword") or [])
@@ -2444,10 +2667,7 @@ async def edit_idea(
                 base_kws = []
 
         # phase:- und event:-Einträge entfernen, die wir gleich neu setzen
-        kws = [
-            k for k in base_kws
-            if not k.lower().startswith(("phase:", "event:"))
-        ]
+        kws = [k for k in base_kws if not k.lower().startswith(("phase:", "event:"))]
         if body.phase:
             kws.append(f"phase:{body.phase}")
         # Events: events[] hat Vorrang, sonst legacy event-Feld.
@@ -2455,9 +2675,7 @@ async def edit_idea(
         # alten Event-Keywords aus base_kws erhalten — wir müssen sie also
         # zurück-mergen, sonst gehen sie verloren beim Phase-Quick-Edit.
         if body.events is not None or body.event is not None:
-            evs = body.events if body.events is not None else (
-                [body.event] if body.event else []
-            )
+            evs = body.events if body.events is not None else ([body.event] if body.event else [])
             seen: set[str] = set()
             for ev in evs:
                 ev = (ev or "").strip()
@@ -2484,17 +2702,11 @@ async def edit_idea(
         raise HTTPException(400, "Keine Felder zum Aktualisieren angegeben")
 
     try:
-        await edu_sharing.client.update_metadata(
-            target_node, props, auth_header=authorization
-        )
+        await edu_sharing.client.update_metadata(target_node, props, auth_header=authorization)
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
-            raise HTTPException(
-                403, "Du hast keine Berechtigung, diese Idee zu bearbeiten."
-            )
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+            raise HTTPException(403, "Du hast keine Berechtigung, diese Idee zu bearbeiten.")
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
 
     # Read-Back: edu-sharing antwortet bei fehlenden Schreibrechten
     # gelegentlich mit 200 OK, persistiert die Änderungen aber stillschweigend
@@ -2503,7 +2715,8 @@ async def edit_idea(
     # klarer Meldung an den User.
     try:
         verify = await edu_sharing.client.node_metadata(
-            target_node, auth_header=authorization,
+            target_node,
+            auth_header=authorization,
         )
         live_props = (verify.get("node") or {}).get("properties") or {}
         # Wir prüfen exemplarisch das aussagekräftigste Feld, das die UI ändert:
@@ -2514,7 +2727,9 @@ async def edit_idea(
                 log.warning(
                     "edit_idea: Properties nicht persistiert für %s "
                     "(Permission?): expected %s, got %s",
-                    idea_id, expected, actual,
+                    idea_id,
+                    expected,
+                    actual,
                 )
                 raise HTTPException(
                     403,
@@ -2546,16 +2761,23 @@ async def edit_idea(
     _log_activity(
         action="idea_edited",
         authorization=authorization,
-        target_type="idea", target_id=idea_id, target_label=body.title,
-        detail={k: v for k, v in body.model_dump(exclude_none=True).items()
-                if k in {"title", "phase", "event", "events"}},
+        target_type="idea",
+        target_id=idea_id,
+        target_label=body.title,
+        detail={
+            k: v
+            for k, v in body.model_dump(exclude_none=True).items()
+            if k in {"title", "phase", "event", "events"}
+        },
     )
     # Separater Phase-Wechsel-Eintrag mit Old/New, falls Phase wirklich gewechselt
     if body.phase is not None and body.phase != current_phase:
         _log_activity(
             action="phase_changed",
             authorization=authorization,
-            target_type="idea", target_id=idea_id, target_label=body.title,
+            target_type="idea",
+            target_id=idea_id,
+            target_label=body.title,
             detail={"from": current_phase, "to": body.phase},
         )
     return {"ok": True, "node_id": target_node}
@@ -2576,24 +2798,19 @@ async def delete_idea(
     if not allowed:
         raise HTTPException(
             403,
-            "Diese Idee gehört nicht dir. Nur der Einreicher oder die "
-            "Moderation kann sie löschen.",
+            "Diese Idee gehört nicht dir. Nur der Einreicher oder die Moderation kann sie löschen.",
         )
 
     try:
         await edu_sharing.client.delete_node(idea_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
-            raise HTTPException(
-                403, "Keine Berechtigung, diese Idee zu löschen."
-            )
+            raise HTTPException(403, "Keine Berechtigung, diese Idee zu löschen.")
         if e.response.status_code == 404:
             # Schon weg — Cache nachziehen, dem Caller OK zurückgeben.
             pass
         else:
-            raise HTTPException(
-                e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-            )
+            raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
 
     # Cache aufräumen + Titel für Log retten BEVOR wir löschen
     deleted_title: str | None = None
@@ -2606,7 +2823,9 @@ async def delete_idea(
     _log_activity(
         action="idea_deleted",
         authorization=authorization,
-        target_type="idea", target_id=idea_id, target_label=deleted_title,
+        target_type="idea",
+        target_id=idea_id,
+        target_label=deleted_title,
     )
     return {"ok": True}
 
@@ -2625,9 +2844,7 @@ async def duplicate_idea(
     try:
         meta = await edu_sharing.client.node_metadata(idea_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     node = (meta or {}).get("node") or {}
     props = node.get("properties") or {}
     parent = node.get("parent") or {}
@@ -2637,7 +2854,8 @@ async def duplicate_idea(
 
     title = (
         (props.get("cclom:title") or props.get("cm:title") or [None])[0]
-        or node.get("title") or "Idee"
+        or node.get("title")
+        or "Idee"
     )
     new_title = f"{title} (Kopie)"
     new_props: dict[str, list[str]] = {
@@ -2666,9 +2884,7 @@ async def duplicate_idea(
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, hier eine Kopie anzulegen.")
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     new_id = ((result or {}).get("node") or {}).get("ref", {}).get("id")
     if not new_id:
         raise HTTPException(502, "edu-sharing lieferte keine ID für die Kopie")
@@ -2681,7 +2897,9 @@ async def duplicate_idea(
     _log_activity(
         action="idea_duplicated",
         authorization=authorization,
-        target_type="idea", target_id=new_id, target_label=new_title,
+        target_type="idea",
+        target_id=new_id,
+        target_label=new_title,
         detail={"source_id": idea_id},
     )
     return {"ok": True, "node_id": new_id}
@@ -2705,26 +2923,27 @@ class AttachmentRename(BaseModel):
 
 
 async def _verify_child_of(
-    *, child_id: str, parent_id: str, authorization: str,
+    *,
+    child_id: str,
+    parent_id: str,
+    authorization: str,
 ) -> dict:
     """Sicherheits-Check: das Child muss tatsächlich unter dem angegebenen
     Eltern-IO hängen. Verhindert versehentliche Operationen auf fremden
     Knoten. Gibt die Node-Metadaten zurück (für nachfolgenden Code reusable)."""
     try:
         meta = await edu_sharing.client.node_metadata(
-            child_id, auth_header=authorization,
+            child_id,
+            auth_header=authorization,
         )
     except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     parent = (meta.get("node") or {}).get("parent") or {}
     actual_parent = parent.get("id") or (parent.get("ref") or {}).get("id")
     if actual_parent != parent_id:
         raise HTTPException(
             409,
-            "Dieser Anhang gehört nicht zu dieser Idee. "
-            "Aus Sicherheitsgründen abgelehnt.",
+            "Dieser Anhang gehört nicht zu dieser Idee. Aus Sicherheitsgründen abgelehnt.",
         )
     return meta
 
@@ -2741,7 +2960,9 @@ async def rename_attachment(
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
     await _verify_child_of(
-        child_id=attachment_id, parent_id=idea_id, authorization=authorization,
+        child_id=attachment_id,
+        parent_id=idea_id,
+        authorization=authorization,
     )
     new_name = body.name.strip()
     try:
@@ -2753,12 +2974,13 @@ async def rename_attachment(
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, diesen Anhang umzubenennen.")
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     _log_activity(
-        action="attachment_renamed", authorization=authorization,
-        target_type="attachment", target_id=attachment_id, target_label=new_name,
+        action="attachment_renamed",
+        authorization=authorization,
+        target_type="attachment",
+        target_id=attachment_id,
+        target_label=new_name,
         detail={"idea_id": idea_id},
     )
     return {"ok": True, "name": new_name}
@@ -2775,26 +2997,25 @@ async def delete_attachment(
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
     meta = await _verify_child_of(
-        child_id=attachment_id, parent_id=idea_id, authorization=authorization,
+        child_id=attachment_id,
+        parent_id=idea_id,
+        authorization=authorization,
     )
     att_props = (meta.get("node") or {}).get("properties") or {}
-    att_name = (
-        (att_props.get("cm:name") or att_props.get("cclom:title") or [None])[0]
-        or "Datei"
-    )
+    att_name = (att_props.get("cm:name") or att_props.get("cclom:title") or [None])[0] or "Datei"
     try:
         await edu_sharing.client.delete_node(attachment_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, diesen Anhang zu löschen.")
         if e.response.status_code != 404:
-            raise HTTPException(
-                e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-            )
+            raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
     _log_activity(
         action="attachment_deleted",
         authorization=authorization,
-        target_type="attachment", target_id=attachment_id, target_label=att_name,
+        target_type="attachment",
+        target_id=attachment_id,
+        target_label=att_name,
         detail={"idea_id": idea_id},
     )
     return {"ok": True}
@@ -2820,25 +3041,21 @@ async def report_idea(
         reporter = None
         if authorization:
             try:
-                me = await edu_sharing.client.node_metadata(
-                    idea_id, auth_header=authorization
-                )
+                me = await edu_sharing.client.node_metadata(idea_id, auth_header=authorization)
                 reporter = ((me.get("node") or {}).get("createdBy") or {}).get("authorityName")
             except Exception:
                 pass
         con.execute(
-            "INSERT INTO idea_report (idea_id,reason,reporter,created_at) "
-            "VALUES (?,?,?,?)",
+            "INSERT INTO idea_report (idea_id,reason,reporter,created_at) VALUES (?,?,?,?)",
             (idea_id, body.reason.strip(), reporter, sync_mod._iso_now()),
         )
         # Idee-Titel für hübsches Log
-        title_row = con.execute(
-            "SELECT title FROM idea WHERE id=?", (idea_id,)
-        ).fetchone()
+        title_row = con.execute("SELECT title FROM idea WHERE id=?", (idea_id,)).fetchone()
     _log_activity(
         action="report_submitted",
         authorization=authorization,
-        target_type="idea", target_id=idea_id,
+        target_type="idea",
+        target_id=idea_id,
         target_label=(title_row["title"] if title_row else None),
         detail={"reason_excerpt": body.reason.strip()[:120]},
     )
@@ -2868,17 +3085,15 @@ async def admin_stats(authorization: str | None = Header(None)):
         # Totals
         ideas_total = con.execute("SELECT COUNT(*) FROM idea").fetchone()[0]
         topics_total = con.execute("SELECT COUNT(*) FROM topic").fetchone()[0]
-        themes_total = con.execute(
-            "SELECT COUNT(*) FROM topic WHERE parent_id IS NULL"
-        ).fetchone()[0]
+        themes_total = con.execute("SELECT COUNT(*) FROM topic WHERE parent_id IS NULL").fetchone()[
+            0
+        ]
         challenges_total = topics_total - themes_total
 
-        comments_total = con.execute(
-            "SELECT COALESCE(SUM(comment_count),0) FROM idea"
-        ).fetchone()[0]
-        ratings_total = con.execute(
-            "SELECT COALESCE(SUM(rating_count),0) FROM idea"
-        ).fetchone()[0]
+        comments_total = con.execute("SELECT COALESCE(SUM(comment_count),0) FROM idea").fetchone()[
+            0
+        ]
+        ratings_total = con.execute("SELECT COALESCE(SUM(rating_count),0) FROM idea").fetchone()[0]
         interest_total = con.execute(
             "SELECT COUNT(*) FROM idea_interaction WHERE kind='interest'"
         ).fetchone()[0]
@@ -2922,14 +3137,10 @@ async def admin_stats(authorization: str | None = Header(None)):
             "FROM idea WHERE created_at IS NOT NULL "
             "GROUP BY week ORDER BY week DESC LIMIT 12"
         ).fetchall()
-        weekly_list = list(reversed([
-            {"week": r["week"], "count": r["c"]} for r in weekly
-        ]))
+        weekly_list = list(reversed([{"week": r["week"], "count": r["c"]} for r in weekly]))
 
         # Top-Aktive User aus activity_log (letzte 30 Tage)
-        cutoff = (
-            datetime.now(UTC) - timedelta(days=30)
-        ).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
         top_actors = [
             {"actor": r["actor"], "count": r["c"]}
             for r in con.execute(
@@ -2941,16 +3152,22 @@ async def admin_stats(authorization: str | None = Header(None)):
         ]
 
         # Reports
-        rep_open = con.execute(
-            "SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NULL"
-        ).fetchone()[0] if con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
-        ).fetchone() else 0
-        rep_resolved = con.execute(
-            "SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NOT NULL"
-        ).fetchone()[0] if con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
-        ).fetchone() else 0
+        rep_open = (
+            con.execute("SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NULL").fetchone()[0]
+            if con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
+            ).fetchone()
+            else 0
+        )
+        rep_resolved = (
+            con.execute(
+                "SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NOT NULL"
+            ).fetchone()[0]
+            if con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
+            ).fetchone()
+            else 0
+        )
 
         # Aktivitäts-Volumen letzte 30 Tage pro Action
         action_dist = [
@@ -2964,7 +3181,8 @@ async def admin_stats(authorization: str | None = Header(None)):
 
         # Aktivste Ideen (Rating + Comments + Interest gewichtet)
         top_ideas = [
-            dict(r) for r in con.execute(
+            dict(r)
+            for r in con.execute(
                 "SELECT i.id, i.title, i.rating_avg, i.rating_count, "
                 "       i.comment_count, "
                 "       (SELECT COUNT(*) FROM idea_interaction "
@@ -3023,7 +3241,8 @@ async def list_activity(
     where: list[str] = []
     params: list = []
     if action:
-        where.append("action = ?"); params.append(action)
+        where.append("action = ?")
+        params.append(action)
     if actor:
         # SQL-LIKE-Wildcards (% / _) aus dem User-Input neutralisieren,
         # damit z.B. `actor=%` nicht zur Voll-Liste degeneriert und
@@ -3031,23 +3250,23 @@ async def list_activity(
         where.append("actor LIKE ? ESCAPE '\\'")
         params.append(f"%{_escape_like(actor)}%")
     if target_id:
-        where.append("target_id = ?"); params.append(target_id)
+        where.append("target_id = ?")
+        params.append(target_id)
     if since:
-        where.append("ts >= ?"); params.append(since)
+        where.append("ts >= ?")
+        params.append(since)
     sql_where = (" WHERE " + " AND ".join(where)) if where else ""
 
     with connect() as con:
-        total = con.execute(
-            f"SELECT COUNT(*) FROM activity_log{sql_where}", params
-        ).fetchone()[0]
+        total = con.execute(f"SELECT COUNT(*) FROM activity_log{sql_where}", params).fetchone()[0]
         rows = con.execute(
-            f"SELECT * FROM activity_log{sql_where} "
-            f"ORDER BY ts DESC LIMIT ? OFFSET ?",
+            f"SELECT * FROM activity_log{sql_where} ORDER BY ts DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
         ).fetchall()
         # Verfügbare Action-Typen für UI-Dropdown
         actions = [
-            r["action"] for r in con.execute(
+            r["action"]
+            for r in con.execute(
                 "SELECT DISTINCT action FROM activity_log ORDER BY action ASC"
             ).fetchall()
         ]
@@ -3056,13 +3275,18 @@ async def list_activity(
     for r in rows:
         d = dict(r)
         if d.get("detail"):
-            try: d["detail"] = json.loads(d["detail"])
-            except Exception: pass
+            try:
+                d["detail"] = json.loads(d["detail"])
+            except Exception:
+                pass
         items.append(d)
 
     return {
-        "total": total, "limit": limit, "offset": offset,
-        "actions": actions, "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "actions": actions,
+        "items": items,
     }
 
 
@@ -3076,13 +3300,16 @@ async def resolve_report(report_id: int, authorization: str | None = Header(None
         )
     _log_activity(
         action="report_resolved",
-        authorization=authorization, is_mod=True,
-        target_type="report", target_id=str(report_id),
+        authorization=authorization,
+        is_mod=True,
+        target_type="report",
+        target_id=str(report_id),
     )
     return {"ok": True}
 
 
 # ===== Moderation — Rolle ermitteln =============================
+
 
 async def _is_moderator(authorization: str | None) -> bool:
     """Bestätigt, ob der eingeloggte User Mod-Rechte hat.
@@ -3134,7 +3361,8 @@ async def _is_owner_or_mod(
     try:
         with connect() as con:
             row = con.execute(
-                "SELECT owner_username FROM idea WHERE id=?", (idea_id,),
+                "SELECT owner_username FROM idea WHERE id=?",
+                (idea_id,),
             ).fetchone()
         if row and row["owner_username"] and row["owner_username"] == user:
             return True, user, False
@@ -3144,19 +3372,24 @@ async def _is_owner_or_mod(
     # 2. Live-Fallback: ES-Metadaten lesen (cm:creator / submitter:-Keyword)
     try:
         meta = await edu_sharing.client.node_metadata(
-            idea_id, auth_header=authorization,
+            idea_id,
+            auth_header=authorization,
         )
         node = (meta or {}).get("node") or {}
         props = node.get("properties") or {}
         creator_field = props.get("cm:creator") or []
         creator = (
-            creator_field[0] if isinstance(creator_field, list) and creator_field
-            else creator_field if isinstance(creator_field, str) else None
+            creator_field[0]
+            if isinstance(creator_field, list) and creator_field
+            else creator_field
+            if isinstance(creator_field, str)
+            else None
         )
         if creator and creator == user:
             return True, user, False
         kws = props.get("cclom:general_keyword") or []
-        if isinstance(kws, str): kws = [kws]
+        if isinstance(kws, str):
+            kws = [kws]
         target = f"submitter:{user}".lower()
         if any(str(k).lower() == target for k in kws):
             return True, user, False
@@ -3172,13 +3405,15 @@ async def _require_moderator(authorization: str | None) -> str:
     Mod im Audit-Tab erkennen, ob jemand Mod-Endpoints zu raten versucht."""
     if not authorization:
         _log_activity(
-            action="auth_failed", target_type="admin",
+            action="auth_failed",
+            target_type="admin",
             detail={"reason": "no_credentials"},
         )
         raise HTTPException(401, "Anmeldung erforderlich")
     if not await _is_moderator(authorization):
         _log_activity(
-            action="auth_failed", authorization=authorization,
+            action="auth_failed",
+            authorization=authorization,
             target_type="admin",
             detail={"reason": "not_moderator"},
         )
@@ -3216,7 +3451,7 @@ async def my_memberships_debug(authorization: str | None = Header(None)):
         {
             "authorityName": g.get("authorityName"),
             "displayName": (g.get("profile") or {}).get("displayName"),
-            "groupType":   (g.get("profile") or {}).get("groupType"),
+            "groupType": (g.get("profile") or {}).get("groupType"),
         }
         for g in (m.get("groups") or [])
     ]
@@ -3237,6 +3472,7 @@ async def my_memberships_debug(authorization: str | None = Header(None)):
 
 
 # ===== "Mein Bereich" — User-spezifische Listen ==================
+
 
 @router.get("/me/ideas", tags=["me"])
 def my_ideas(authorization: str | None = Header(None)):
@@ -3303,14 +3539,16 @@ async def my_activity(
     with connect() as con:
         # Sammle relevante Idea-IDs: gefolgt + Mitmachen + eigene
         idea_ids = {
-            r["idea_id"] for r in con.execute(
+            r["idea_id"]
+            for r in con.execute(
                 "SELECT idea_id FROM idea_interaction "
                 "WHERE user_key = ? AND kind IN ('follow','interest')",
                 (me,),
             ).fetchall()
         }
         for r in con.execute(
-            "SELECT id FROM idea WHERE owner_username = ?", (me,),
+            "SELECT id FROM idea WHERE owner_username = ?",
+            (me,),
         ).fetchall():
             idea_ids.add(r["id"])
 
@@ -3330,8 +3568,10 @@ async def my_activity(
     for r in rows:
         d = dict(r)
         if d.get("detail"):
-            try: d["detail"] = json.loads(d["detail"])
-            except Exception: pass
+            try:
+                d["detail"] = json.loads(d["detail"])
+            except Exception:
+                pass
         items.append(d)
     return {"count": len(items), "items": items}
 
@@ -3339,6 +3579,7 @@ async def my_activity(
 # ===== Anhänge als Child-IO (Serienobjekt-Pattern) ==============
 # Frühere Lösung mit Geschwister-Sammlung + `attachment-of:<id>`-Keyword
 # wurde abgelöst — siehe ~/.claude/skills/wlo-childobjects/SKILL.md.
+
 
 @router.post("/ideas/{idea_id}/attachments/upload", tags=["ideas"])
 async def upload_attachment(
@@ -3362,7 +3603,8 @@ async def upload_attachment(
     # Order = aktuelle Anzahl bestehender Children, damit Reihenfolge stabil bleibt.
     try:
         existing = await edu_sharing.client.list_child_objects(
-            idea_id, auth_header=authorization,
+            idea_id,
+            auth_header=authorization,
         )
     except Exception:
         existing = []
@@ -3377,14 +3619,10 @@ async def upload_attachment(
         )
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
-            raise HTTPException(
-                403, "Keine Berechtigung, an diese Idee Anhänge zu hängen."
-            )
+            raise HTTPException(403, "Keine Berechtigung, an diese Idee Anhänge zu hängen.")
         if e.response.status_code == 404:
             raise HTTPException(404, "Idee nicht gefunden")
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
 
     new_id = ((result or {}).get("node") or {}).get("ref", {}).get("id")
     if not new_id:
@@ -3417,7 +3655,9 @@ async def upload_attachment(
     _log_activity(
         action="attachment_uploaded",
         authorization=authorization,
-        target_type="attachment", target_id=new_id, target_label=filename,
+        target_type="attachment",
+        target_id=new_id,
+        target_label=filename,
         detail={"idea_id": idea_id, "size": len(data), "mimetype": mimetype},
     )
     return {"ok": True, "node_id": new_id, "name": filename, "size": len(data)}
@@ -3432,32 +3672,32 @@ async def list_attachments(
     `ccm:childobject_order`."""
     try:
         children = await edu_sharing.client.list_child_objects(
-            idea_id, auth_header=authorization,
+            idea_id,
+            auth_header=authorization,
         )
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             raise HTTPException(404, "Idee nicht gefunden")
-        raise HTTPException(
-            e.response.status_code, f"edu-sharing: {e.response.text[:200]}"
-        )
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
 
     items = []
     for n in children:
         ref = n.get("ref") or {}
         props = n.get("properties") or {}
-        items.append({
-            "node_id": ref.get("id"),
-            "name": (props.get("cm:name") or [n.get("name")])[0],
-            "mimetype": (props.get("ccm:content-type") or [None])[0]
-                        or n.get("mimetype"),
-            "size": n.get("size"),
-            "created_at": n.get("createdAt"),
-            "order": (props.get("ccm:childobject_order") or [None])[0],
-            "preview_url": (n.get("preview") or {}).get("url"),
-            "render_url": f"{settings.es_render_base}/{ref.get('id')}"
-                          if ref.get("id") and getattr(settings, "es_render_base", None)
-                          else None,
-        })
+        items.append(
+            {
+                "node_id": ref.get("id"),
+                "name": (props.get("cm:name") or [n.get("name")])[0],
+                "mimetype": (props.get("ccm:content-type") or [None])[0] or n.get("mimetype"),
+                "size": n.get("size"),
+                "created_at": n.get("createdAt"),
+                "order": (props.get("ccm:childobject_order") or [None])[0],
+                "preview_url": (n.get("preview") or {}).get("url"),
+                "render_url": f"{settings.es_render_base}/{ref.get('id')}"
+                if ref.get("id") and getattr(settings, "es_render_base", None)
+                else None,
+            }
+        )
     return {"items": items, "count": len(items)}
 
 
@@ -3466,6 +3706,7 @@ async def list_attachments(
 # edu-sharing-Repository selbst verwaltet — diese App liest sie nur
 # zur Anzeige aus, um nicht versehentlich globale Admin-Rechte zu
 # erteilen oder zu entziehen.
+
 
 @router.get("/admin/moderators", tags=["moderation"])
 async def list_moderators(authorization: str | None = Header(None)):
@@ -3478,9 +3719,7 @@ async def list_moderators(authorization: str | None = Header(None)):
         ok = True
         error: str | None = None
         try:
-            m = await edu_sharing.client.group_members(
-                group_name, auth_header=authorization
-            )
+            m = await edu_sharing.client.group_members(group_name, auth_header=authorization)
         except httpx.HTTPStatusError as e:
             ok = False
             if e.response.status_code == 404:
@@ -3495,24 +3734,31 @@ async def list_moderators(authorization: str | None = Header(None)):
             m = {}
 
         added = 0
-        for p in (m.get("persons") or m.get("authorities") or m.get("members") or []):
+        for p in m.get("persons") or m.get("authorities") or m.get("members") or []:
             uname = p.get("authorityName") or p.get("userName")
             key = (uname or "").lower()
             if not uname or key in seen:
                 continue
             seen.add(key)
             profile = p.get("profile") or {}
-            members.append({
-                "username": uname,
-                "first_name": profile.get("firstName"),
-                "last_name": profile.get("lastName"),
-                "email": profile.get("email") or p.get("mailbox"),
-                "source": group_name,
-            })
+            members.append(
+                {
+                    "username": uname,
+                    "first_name": profile.get("firstName"),
+                    "last_name": profile.get("lastName"),
+                    "email": profile.get("email") or p.get("mailbox"),
+                    "source": group_name,
+                }
+            )
             added += 1
-        group_results.append({
-            "group": group_name, "ok": ok, "error": error, "count": added,
-        })
+        group_results.append(
+            {
+                "group": group_name,
+                "ok": ok,
+                "error": error,
+                "count": added,
+            }
+        )
 
     # Bootstrap-User aus ENV anhängen (sofern nicht bereits in einer Gruppe)
     for u in settings.bootstrap_mod_users:
@@ -3536,6 +3782,7 @@ async def trigger_sync(authorization: str | None = Header(None)):
 
 # ===== Backup / Restore (Mod-only) =======================================
 
+
 @router.post("/admin/backup", tags=["admin"])
 async def admin_backup_create(authorization: str | None = Header(None)):
     """Erstellt jetzt ein neues Backup. Behält die letzten N (laut
@@ -3544,13 +3791,17 @@ async def admin_backup_create(authorization: str | None = Header(None)):
     try:
         # Im Executor laufen lassen — VACUUM INTO + ZIP-Pack ist I/O-lastig
         import asyncio as _aio
+
         path = await _aio.to_thread(backup_mod.create_backup)
     except Exception as e:
         log.exception("backup failed")
         raise HTTPException(500, f"Backup fehlgeschlagen: {e}")
     _log_activity(
-        action="backup_created", authorization=authorization, is_mod=True,
-        target_type="backup", target_label=path.name,
+        action="backup_created",
+        authorization=authorization,
+        is_mod=True,
+        target_type="backup",
+        target_label=path.name,
         detail={"size": path.stat().st_size},
     )
     return {
@@ -3564,15 +3815,18 @@ async def admin_backup_create(authorization: str | None = Header(None)):
 async def admin_backup_list(authorization: str | None = Header(None)):
     """Liste vorhandener Backups, neueste zuerst."""
     await _require_moderator(authorization)
-    return {"backups": backup_mod.list_backups(),
-            "keep": settings.backup_keep,
-            "interval_hours": settings.backup_interval_hours,
-            "enabled": settings.backup_enabled}
+    return {
+        "backups": backup_mod.list_backups(),
+        "keep": settings.backup_keep,
+        "interval_hours": settings.backup_interval_hours,
+        "enabled": settings.backup_enabled,
+    }
 
 
 @router.get("/admin/backups/{filename}", tags=["admin"])
 async def admin_backup_download(
-    filename: str, authorization: str | None = Header(None),
+    filename: str,
+    authorization: str | None = Header(None),
 ):
     """Stream-Download einer Backup-ZIP."""
     await _require_moderator(authorization)
@@ -3581,6 +3835,7 @@ async def admin_backup_download(
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(404, str(e))
     from fastapi.responses import FileResponse
+
     return FileResponse(
         path,
         media_type="application/zip",
@@ -3590,7 +3845,8 @@ async def admin_backup_download(
 
 @router.delete("/admin/backups/{filename}", tags=["admin"])
 async def admin_backup_delete(
-    filename: str, authorization: str | None = Header(None),
+    filename: str,
+    authorization: str | None = Header(None),
 ):
     """Löscht ein Backup manuell. Pre-Restore-Backups bleiben dadurch nicht
     automatisch erhalten — wer eines aufheben will, muss es vorher
@@ -3601,8 +3857,11 @@ async def admin_backup_delete(
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(404, str(e))
     _log_activity(
-        action="backup_deleted", authorization=authorization, is_mod=True,
-        target_type="backup", target_label=filename,
+        action="backup_deleted",
+        authorization=authorization,
+        is_mod=True,
+        target_type="backup",
+        target_label=filename,
     )
     return {"ok": True}
 
@@ -3632,15 +3891,18 @@ async def admin_backup_restore(
         log.exception("restore failed")
         raise HTTPException(500, f"Restore fehlgeschlagen: {e}")
     _log_activity(
-        action="backup_restored", authorization=authorization, is_mod=True,
-        target_type="backup", target_label=file.filename,
-        detail={"size": len(data),
-                "restored_metadata": result.get("restored_metadata")},
+        action="backup_restored",
+        authorization=authorization,
+        is_mod=True,
+        target_type="backup",
+        target_label=file.filename,
+        detail={"size": len(data), "restored_metadata": result.get("restored_metadata")},
     )
     return result
 
 
 # ===== Kommentar löschen (Owner + Mod) ============================
+
 
 @router.delete("/comments/{comment_id}", tags=["ideas"])
 async def delete_comment(
@@ -3664,13 +3926,14 @@ async def delete_comment(
         try:
             with connect() as con:
                 row = con.execute(
-                    "SELECT main_content_id,id FROM idea WHERE id=?", (idea_id,),
+                    "SELECT main_content_id,id FROM idea WHERE id=?",
+                    (idea_id,),
                 ).fetchone()
             if row:
                 target = row["main_content_id"] or row["id"]
                 cm = await edu_sharing.client.comments(target, auth_header=authorization)
                 for c in (cm or {}).get("comments") or []:
-                    ref_id = ((c.get("ref") or {}).get("id"))
+                    ref_id = (c.get("ref") or {}).get("id")
                     if ref_id == comment_id:
                         creator = ((c.get("creator") or {}).get("authorityName") or "").lower()
                         if creator and me and creator == me.lower():
@@ -3695,14 +3958,17 @@ async def delete_comment(
             pass
     _log_activity(
         action="comment_deleted",
-        authorization=authorization, is_mod=is_mod,
-        target_type="idea", target_id=idea_id or "",
+        authorization=authorization,
+        is_mod=is_mod,
+        target_type="idea",
+        target_id=idea_id or "",
         detail={"comment_id": comment_id},
     )
     return {"ok": True}
 
 
 # ===== Phasen-Historie einer Idee =================================
+
 
 @router.get("/ideas/{idea_id}/phase-history", tags=["ideas"])
 async def idea_phase_history(
@@ -3714,7 +3980,8 @@ async def idea_phase_history(
     damit die Phase-Wechsel nicht über die Hintertür sichtbar werden."""
     with connect() as con:
         idea_row = con.execute(
-            "SELECT hidden FROM idea WHERE id=?", (idea_id,),
+            "SELECT hidden FROM idea WHERE id=?",
+            (idea_id,),
         ).fetchone()
     if idea_row and idea_row["hidden"] and not await _is_moderator(authorization):
         raise HTTPException(404, "Idea not found")
@@ -3740,6 +4007,7 @@ async def idea_phase_history(
 
 
 # ===== Reports — Status für den Reporter ==========================
+
 
 @router.get("/me/reports", tags=["me"])
 def my_reports(authorization: str | None = Header(None)):
@@ -3806,9 +4074,7 @@ async def bulk_resolve_reports(
     # einen großen IN-Cluster zu vermeiden.
     BULK_MAX = 500
     if len(raw) > BULK_MAX:
-        raise HTTPException(
-            413, f"Zu viele IDs in 'ids' (max {BULK_MAX} pro Aufruf)"
-        )
+        raise HTTPException(413, f"Zu viele IDs in 'ids' (max {BULK_MAX} pro Aufruf)")
     # Strikte Validierung: nur Integers ≥1. Schützt gegen Strings,
     # Floats, gemischte Arrays oder Manipulationsversuche.
     safe_ids: list[int] = []
@@ -3831,7 +4097,8 @@ async def bulk_resolve_reports(
         )
     _log_activity(
         action="reports_bulk_resolved",
-        authorization=authorization, is_mod=True,
+        authorization=authorization,
+        is_mod=True,
         target_type="report",
         detail={"count": len(safe_ids), "ids": safe_ids[:50]},
     )
@@ -3839,6 +4106,7 @@ async def bulk_resolve_reports(
 
 
 # ===== Ranking-Trend: Top-Steiger der letzten 7 Tage ==============
+
 
 @router.get("/ranking/risers", tags=["ranking"])
 def ranking_risers(
@@ -3861,7 +4129,8 @@ def ranking_risers(
             return {"count": 0, "items": []}
         # Snapshot N Tage zuvor (oder den ältesten verfügbaren)
         cutoff_target = con.execute(
-            "SELECT datetime(?, ?)", (latest, f"-{days} days"),
+            "SELECT datetime(?, ?)",
+            (latest, f"-{days} days"),
         ).fetchone()[0]
         prev = con.execute(
             """SELECT snapshot_at FROM ranking_snapshot
@@ -3907,19 +4176,21 @@ def ranking_risers(
     for r in rows:
         if (r["delta"] or 0) <= 0:
             continue
-        items.append({
-            "idea_id": r["idea_id"],
-            "title": r["title"],
-            "description": r["description"],
-            "preview_url": r["preview_url"],
-            "author": r["author"],
-            "phase": r["phase"],
-            "events": json.loads(r["events"] or "[]"),
-            "rank": r["rank"],
-            "prev_rank": r["prev_rank"],
-            "delta": r["delta"],
-            "score": r["score"],
-        })
+        items.append(
+            {
+                "idea_id": r["idea_id"],
+                "title": r["title"],
+                "description": r["description"],
+                "preview_url": r["preview_url"],
+                "author": r["author"],
+                "phase": r["phase"],
+                "events": json.loads(r["events"] or "[]"),
+                "rank": r["rank"],
+                "prev_rank": r["prev_rank"],
+                "delta": r["delta"],
+                "score": r["score"],
+            }
+        )
     return {
         "count": len(items),
         "items": items,
@@ -3931,6 +4202,7 @@ def ranking_risers(
 
 
 # ===== Öffentliches User-Profil ====================================
+
 
 @router.get("/users/{username}", tags=["users"])
 def public_user_profile(username: str):
@@ -3964,15 +4236,21 @@ def public_user_profile(username: str):
             (uname,),
         ).fetchone()[0]
         meta_row = con.execute(
-            "SELECT display_name, bio, website, role "
-            "FROM user_profile_meta WHERE username=?",
+            "SELECT display_name, bio, website, role FROM user_profile_meta WHERE username=?",
             (uname,),
         ).fetchone()
     if not rows and not last_act and not meta_row:
         raise HTTPException(404, "Kein öffentliches Profil vorhanden")
-    meta = dict(meta_row) if meta_row else {
-        "display_name": None, "bio": None, "website": None, "role": None,
-    }
+    meta = (
+        dict(meta_row)
+        if meta_row
+        else {
+            "display_name": None,
+            "bio": None,
+            "website": None,
+            "role": None,
+        }
+    )
     return {
         "username": uname,
         "stats": {
@@ -3989,16 +4267,20 @@ def public_user_profile(username: str):
 
 # ===== Eigene Profil-Felder pflegen (App-seitig) ===================
 
+
 class ProfileMetaPatch(BaseModel):
     """Optional editable Profil-Felder (alle nullable / leer = entfernen)."""
+
     display_name: str | None = Field(default=None, max_length=80)
     bio: str | None = Field(default=None, max_length=280)
     website: str | None = Field(default=None, max_length=2000)
     # Vordefinierte Rollen-Whitelist; Frontend rendert das als Dropdown.
-    role: Literal[
-        "schule", "hochschule", "bibliothek", "ngo", "verlag",
-        "freie-bildung", "sonstiges", ""
-    ] | None = None
+    role: (
+        Literal[
+            "schule", "hochschule", "bibliothek", "ngo", "verlag", "freie-bildung", "sonstiges", ""
+        ]
+        | None
+    ) = None
 
 
 @router.get("/me/profile-meta", tags=["me"])
@@ -4016,8 +4298,13 @@ def get_my_profile_meta(authorization: str | None = Header(None)):
             (me,),
         ).fetchone()
     if not row:
-        return {"display_name": None, "bio": None, "website": None,
-                "role": None, "updated_at": None}
+        return {
+            "display_name": None,
+            "bio": None,
+            "website": None,
+            "role": None,
+            "updated_at": None,
+        }
     return dict(row)
 
 
@@ -4063,17 +4350,28 @@ def update_my_profile_meta(
         )
     _log_activity(
         action="profile_meta_updated",
-        authorization=authorization, is_mod=False,
-        target_type="user", target_id=me,
-        detail={"fields": [k for k, v in {
-            "display_name": display, "bio": bio,
-            "website": safe_url, "role": role,
-        }.items() if v is not None]},
+        authorization=authorization,
+        is_mod=False,
+        target_type="user",
+        target_id=me,
+        detail={
+            "fields": [
+                k
+                for k, v in {
+                    "display_name": display,
+                    "bio": bio,
+                    "website": safe_url,
+                    "role": role,
+                }.items()
+                if v is not None
+            ]
+        },
     )
     return {"ok": True, "username": me, "updated_at": now}
 
 
 # ===== Hidden-Verwaltung (Mod-only) ===============================
+
 
 @router.get("/admin/hidden-ideas", tags=["moderation"])
 async def list_hidden_ideas(authorization: str | None = Header(None)):
@@ -4100,7 +4398,8 @@ async def hide_idea(
     reason = (body or {}).get("reason") if isinstance(body, dict) else None
     with connect() as con:
         row = con.execute(
-            "SELECT title FROM idea WHERE id=?", (idea_id,),
+            "SELECT title FROM idea WHERE id=?",
+            (idea_id,),
         ).fetchone()
         if not row:
             raise HTTPException(404, "Idee nicht gefunden")
@@ -4110,8 +4409,11 @@ async def hide_idea(
         )
     _log_activity(
         action="idea_hidden",
-        authorization=authorization, is_mod=True,
-        target_type="idea", target_id=idea_id, target_label=row["title"],
+        authorization=authorization,
+        is_mod=True,
+        target_type="idea",
+        target_id=idea_id,
+        target_label=row["title"],
         detail={"reason": reason} if reason else None,
     )
     return {"ok": True}
@@ -4126,7 +4428,8 @@ async def unhide_idea(
     await _require_moderator(authorization)
     with connect() as con:
         row = con.execute(
-            "SELECT title FROM idea WHERE id=?", (idea_id,),
+            "SELECT title FROM idea WHERE id=?",
+            (idea_id,),
         ).fetchone()
         if not row:
             raise HTTPException(404, "Idee nicht gefunden")
@@ -4136,13 +4439,17 @@ async def unhide_idea(
         )
     _log_activity(
         action="idea_unhidden",
-        authorization=authorization, is_mod=True,
-        target_type="idea", target_id=idea_id, target_label=row["title"],
+        authorization=authorization,
+        is_mod=True,
+        target_type="idea",
+        target_id=idea_id,
+        target_label=row["title"],
     )
     return {"ok": True}
 
 
 # ===== Notification-Cursor — "neu seit letztem Besuch" =============
+
 
 @router.get("/me/notifications/unseen", tags=["me"])
 def my_notifications_unseen(authorization: str | None = Header(None)):
@@ -4155,19 +4462,23 @@ def my_notifications_unseen(authorization: str | None = Header(None)):
         return {"count": 0}
     with connect() as con:
         seen_row = con.execute(
-            "SELECT last_seen FROM user_feed_seen WHERE user_key=?", (me,),
+            "SELECT last_seen FROM user_feed_seen WHERE user_key=?",
+            (me,),
         ).fetchone()
         last_seen = seen_row["last_seen"] if seen_row else "1970-01-01T00:00:00Z"
 
         # Relevante Idea-IDs (gefolgt + mitmachen + eigene)
         idea_ids = {
-            r["idea_id"] for r in con.execute(
+            r["idea_id"]
+            for r in con.execute(
                 "SELECT idea_id FROM idea_interaction "
-                "WHERE user_key=? AND kind IN ('follow','interest')", (me,),
+                "WHERE user_key=? AND kind IN ('follow','interest')",
+                (me,),
             ).fetchall()
         }
         for r in con.execute(
-            "SELECT id FROM idea WHERE owner_username=?", (me,),
+            "SELECT id FROM idea WHERE owner_username=?",
+            (me,),
         ).fetchall():
             idea_ids.add(r["id"])
         if not idea_ids:
@@ -4203,13 +4514,14 @@ def mark_notifications_seen(authorization: str | None = Header(None)):
     now = sync_mod._iso_now()
     with connect() as con:
         con.execute(
-            "INSERT OR REPLACE INTO user_feed_seen (user_key, last_seen) "
-            "VALUES (?, ?)", (me, now),
+            "INSERT OR REPLACE INTO user_feed_seen (user_key, last_seen) VALUES (?, ?)",
+            (me, now),
         )
     return {"ok": True, "last_seen": now}
 
 
 # ===== Idee aus edu-sharing nachladen ============================
+
 
 @router.post("/ideas/{idea_id}/refresh", tags=["ideas"])
 async def manual_refresh_idea(
@@ -4228,11 +4540,14 @@ async def manual_refresh_idea(
         raise HTTPException(403, "Nur Eigentümer oder Mod dürfen refreshen.")
     ok = await sync_mod.refresh_idea(idea_id, auth_header=authorization)
     if not ok:
-        raise HTTPException(502, "Refresh fehlgeschlagen — Knoten unbekannt oder edu-sharing nicht erreichbar.")
+        raise HTTPException(
+            502, "Refresh fehlgeschlagen — Knoten unbekannt oder edu-sharing nicht erreichbar."
+        )
     return {"ok": True}
 
 
 # ===== Bestehende Ideen nachpflegen: Pflicht-Metadaten für Freischaltung ====
+
 
 def _missing_publication_fields(cur_props: dict) -> dict[str, list[str]]:
     """Welche der WLO-Freischaltungs-Pflichtfelder fehlen am Knoten?
@@ -4260,7 +4575,8 @@ async def backfill_publication_meta(
     await _require_moderator(authorization)
     with connect() as con:
         row = con.execute(
-            "SELECT main_content_id, id, title FROM idea WHERE id=?", (idea_id,),
+            "SELECT main_content_id, id, title FROM idea WHERE id=?",
+            (idea_id,),
         ).fetchone()
     if not row:
         raise HTTPException(404, "Idee nicht gefunden")
@@ -4277,15 +4593,20 @@ async def backfill_publication_meta(
 
     try:
         await edu_sharing.client.update_metadata(
-            target, add, auth_header=authorization,
+            target,
+            add,
+            auth_header=authorization,
         )
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
 
     _log_activity(
         action="publication_meta_backfilled",
-        authorization=authorization, is_mod=True,
-        target_type="idea", target_id=idea_id, target_label=row["title"],
+        authorization=authorization,
+        is_mod=True,
+        target_type="idea",
+        target_id=idea_id,
+        target_label=row["title"],
         detail={"fields": list(add.keys())},
     )
     return {"ok": True, "changed": True, "fields": list(add.keys())}
@@ -4313,13 +4634,16 @@ async def backfill_publication_meta_all(
         target = r["main_content_id"] or r["id"]
         try:
             meta = await edu_sharing.client.node_metadata(
-                target, auth_header=authorization,
+                target,
+                auth_header=authorization,
             )
             cur = (meta.get("node") or {}).get("properties") or {}
             add = _missing_publication_fields(cur)
             if add:
                 await edu_sharing.client.update_metadata(
-                    target, add, auth_header=authorization,
+                    target,
+                    add,
+                    auth_header=authorization,
                 )
                 updated += 1
                 try:
@@ -4331,13 +4655,12 @@ async def backfill_publication_meta_all(
             errors.append({"id": r["id"], "title": r["title"], "error": str(e)[:200]})
     _log_activity(
         action="publication_meta_bulk_backfilled",
-        authorization=authorization, is_mod=True,
+        authorization=authorization,
+        is_mod=True,
         target_type="idea",
-        detail={"processed": processed, "updated": updated,
-                "error_count": len(errors)},
+        detail={"processed": processed, "updated": updated, "error_count": len(errors)},
     )
-    return {"ok": True, "processed": processed, "updated": updated,
-            "errors": errors[:20]}
+    return {"ok": True, "processed": processed, "updated": updated, "errors": errors[:20]}
 
 
 @router.get("/health")
@@ -4346,9 +4669,7 @@ def health():
         counts = con.execute(
             "SELECT (SELECT COUNT(*) FROM topic) topics, (SELECT COUNT(*) FROM idea) ideas"
         ).fetchone()
-        last = con.execute(
-            "SELECT * FROM sync_log ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+        last = con.execute("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     return {
         "ok": True,
         "topics": counts["topics"],

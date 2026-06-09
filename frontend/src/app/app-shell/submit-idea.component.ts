@@ -10,7 +10,7 @@ import { TaxonomyEntry, Topic } from '../models';
   imports: [CommonModule, FormsModule],
   styles: [`
     :host { display: block; }
-    .wrap { max-width: 780px; margin: 0 auto; padding: 24px; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 24px 48px; }
     .card { background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 12px; padding: 28px; }
     h1 { margin: 0 0 8px; color: var(--wlo-primary); }
     p.intro { color: var(--wlo-muted); margin: 0 0 24px; }
@@ -169,37 +169,35 @@ import { TaxonomyEntry, Topic } from '../models';
           </div>
           <div>
             <label>Veranstaltung <span class="req">*</span></label>
-            @if (isPreset()) {
-              <div class="preset-event">
-                📅 <strong>{{ presetLabel() }}</strong>
-                <small>fest gewählt über Share-Link/QR — Idee wird automatisch dieser Veranstaltung zugeordnet</small>
-              </div>
-            } @else {
-              <div class="event-chips">
-                <label class="event-chip none" [class.on]="noEvent">
-                  <input type="radio" name="event-none"
-                         [checked]="noEvent"
-                         (change)="setNoEvent()" />
-                  Keine Veranstaltungs­zugehörigkeit
+            <div class="event-chips">
+              <label class="event-chip none" [class.on]="noEvent">
+                <input type="radio" name="event-choice"
+                       [checked]="noEvent"
+                       (change)="setNoEvent()" />
+                Keine Veranstaltungs­zugehörigkeit
+              </label>
+              @for (e of liveEvents(); track e.slug) {
+                <label class="event-chip" [class.on]="selectedEvents.has(e.slug)">
+                  <input type="radio" name="event-choice"
+                         [checked]="selectedEvents.has(e.slug)"
+                         (change)="selectEventSingle(e.slug)" />
+                  {{ e.label }}
                 </label>
-                @for (e of liveEvents(); track e.slug) {
-                  <label class="event-chip" [class.on]="selectedEvents.has(e.slug)">
-                    <input type="checkbox"
-                           [checked]="selectedEvents.has(e.slug)"
-                           (change)="toggleEvent(e.slug)" />
-                    {{ e.label }}
-                  </label>
-                }
-              </div>
-              @if (!liveEvents().length) {
-                <small style="display:block; color: var(--wlo-muted); font-size:.78rem; margin-top:6px">
-                  Noch keine laufenden Veranstaltungen. Wähle „Keine Veranstaltungs­zugehörigkeit".
-                </small>
-              } @else {
-                <small style="display:block; color: var(--wlo-muted); font-size:.78rem; margin-top:6px">
-                  Bitte mindestens eine Auswahl. Mehrfachauswahl möglich — Idee taucht in jeder gewählten Veranstaltung auf.
-                </small>
               }
+            </div>
+            @if (isPreset()) {
+              <small style="display:block; color: var(--wlo-muted); font-size:.78rem; margin-top:6px">
+                „{{ presetLabel() }}" ist über den Veranstaltungs-Link vorausgewählt —
+                du kannst die Auswahl ändern.
+              </small>
+            } @else if (!liveEvents().length) {
+              <small style="display:block; color: var(--wlo-muted); font-size:.78rem; margin-top:6px">
+                Noch keine laufenden Veranstaltungen. Wähle „Keine Veranstaltungs­zugehörigkeit".
+              </small>
+            } @else {
+              <small style="display:block; color: var(--wlo-muted); font-size:.78rem; margin-top:6px">
+                Genau eine Veranstaltung wählen — oder „Keine Veranstaltungs­zugehörigkeit".
+              </small>
             }
           </div>
         </div>
@@ -311,13 +309,13 @@ export class SubmitIdeaComponent implements OnInit {
   noEvent = false;
   busy = false;
 
-  toggleEvent(slug: string) {
-    if (this.selectedEvents.has(slug)) this.selectedEvents.delete(slug);
-    else this.selectedEvents.add(slug);
-    // Wenn der User irgendein Event wählt, ist „keine Veranstaltung" aus
-    if (this.selectedEvents.size > 0) this.noEvent = false;
-    // legacy event-Feld auf erste Auswahl setzen für Backward-Compat
-    this.event = this.selectedEvents.values().next().value || '';
+  /** Einfachauswahl: genau eine Veranstaltung. Setzt die Auswahl exklusiv
+   * (ersetzt eine ggf. zuvor gewählte) und hebt „keine Veranstaltung" auf. */
+  selectEventSingle(slug: string) {
+    this.selectedEvents.clear();
+    this.selectedEvents.add(slug);
+    this.noEvent = false;
+    this.event = slug;  // legacy single-event Feld
   }
 
   setNoEvent() {
@@ -392,7 +390,8 @@ export class SubmitIdeaComponent implements OnInit {
   }
 
   isPreset(): boolean {
-    return !!this.presetEvent && this.event === this.presetEvent;
+    // True, solange das vorausgewählte Event noch gewählt ist (für den Hinweis).
+    return !!this.presetEvent && this.selectedEvents.has(this.presetEvent);
   }
   presetLabel(): string {
     return this.events.find((e) => e.slug === this.presetEvent)?.label || this.presetEvent || '';
@@ -435,8 +434,8 @@ export class SubmitIdeaComponent implements OnInit {
       }
     }
     // Event-Pflichtfeld: entweder explizit "keine" oder mindestens eine
-    // Auswahl. Bei Preset (Submit via Share-Link) ist event schon gesetzt.
-    if (!this.isPreset() && !this.noEvent && this.selectedEvents.size === 0) {
+    // Auswahl (ein Preset ist bereits als Auswahl vorgewählt).
+    if (!this.noEvent && this.selectedEvents.size === 0) {
       this.error = 'Bitte eine Veranstaltung wählen — oder „Keine Veranstaltungs­zugehörigkeit".';
       return;
     }

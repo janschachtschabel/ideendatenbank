@@ -16,6 +16,7 @@ Restore ersetzt die SQLite-Datei zur Laufzeit. Damit das sicher ist:
 3. Index-/Schema-Migration läuft beim nächsten Connect implizit über die
    `init_db()`-Idempotenz.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,9 +36,7 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 BACKUP_NAME_PREFIX = "ideendb-backup-"
-BACKUP_NAME_RE = re.compile(
-    r"^ideendb-backup-(\d{8})-(\d{4})\.zip$"
-)
+BACKUP_NAME_RE = re.compile(r"^ideendb-backup-(\d{8})-(\d{4})\.zip$")
 
 
 def _backup_dir() -> Path:
@@ -62,8 +61,15 @@ def _gather_metadata() -> dict:
         with sqlite3.connect(settings.sqlite_path) as con:
             con.row_factory = sqlite3.Row
             cur = con.cursor()
-            for tbl in ("idea", "topic", "activity_log", "ranking_snapshot",
-                        "idea_interaction", "taxonomy_phase", "taxonomy_event"):
+            for tbl in (
+                "idea",
+                "topic",
+                "activity_log",
+                "ranking_snapshot",
+                "idea_interaction",
+                "taxonomy_phase",
+                "taxonomy_event",
+            ):
                 try:
                     n = cur.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
                     stats[f"{tbl}_count"] = n
@@ -106,7 +112,8 @@ def create_backup() -> Path:
         # 2. Metadata
         meta = _gather_metadata()
         (tmp / "metadata.json").write_text(
-            json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8",
+            json.dumps(meta, indent=2, ensure_ascii=False),
+            encoding="utf-8",
         )
 
         # 3. KEIN .env-Snapshot — Secrets gehören in System-Env, nicht in
@@ -148,14 +155,14 @@ def list_backups() -> list[dict]:
         except Exception as e:
             meta = {"error": str(e)}
         stat = p.stat()
-        out.append({
-            "filename": p.name,
-            "size": stat.st_size,
-            "created_at": datetime.fromtimestamp(
-                stat.st_mtime, tz=UTC
-            ).isoformat(),
-            "metadata": meta,
-        })
+        out.append(
+            {
+                "filename": p.name,
+                "size": stat.st_size,
+                "created_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
+                "metadata": meta,
+            }
+        )
     return out
 
 
@@ -173,8 +180,11 @@ def prune_old_backups() -> int:
         except Exception as e:
             log.warning("prune (tmp) failed for %s: %s", stale.name, e)
     files = sorted(
-        [p for p in _backup_dir().iterdir() if p.is_file()
-         and p.name.startswith(BACKUP_NAME_PREFIX) and p.name.endswith(".zip")],
+        [
+            p
+            for p in _backup_dir().iterdir()
+            if p.is_file() and p.name.startswith(BACKUP_NAME_PREFIX) and p.name.endswith(".zip")
+        ],
         reverse=True,
     )
     for old in files[keep:]:
@@ -228,15 +238,11 @@ async def restore_backup(zip_bytes: bytes) -> dict:
             with zipfile.ZipFile(zip_path) as zf:
                 names = zf.namelist()
                 if "database.sqlite" not in names:
-                    raise ValueError(
-                        "ZIP enthält keine database.sqlite — falsches Backup-Format"
-                    )
+                    raise ValueError("ZIP enthält keine database.sqlite — falsches Backup-Format")
                 zf.extract("database.sqlite", tmp)
                 if "metadata.json" in names:
                     try:
-                        meta = json.loads(
-                            zf.read("metadata.json").decode("utf-8")
-                        )
+                        meta = json.loads(zf.read("metadata.json").decode("utf-8"))
                     except Exception:
                         meta = {}
                 else:
@@ -251,9 +257,7 @@ async def restore_backup(zip_bytes: bytes) -> dict:
         with open(new_db, "rb") as f:
             magic = f.read(16)
         if not magic.startswith(b"SQLite format 3"):
-            raise ValueError(
-                "database.sqlite ist keine SQLite-Datei (Magic-Bytes fehlen)"
-            )
+            raise ValueError("database.sqlite ist keine SQLite-Datei (Magic-Bytes fehlen)")
 
         # 2. Pre-Restore-Backup
         try:
@@ -278,6 +282,7 @@ async def restore_backup(zip_bytes: bytes) -> dict:
 
         # 4. Schema-Migration via init_db (idempotent — fügt fehlende Spalten ein)
         from .db import init_db
+
         try:
             init_db()
         except Exception as e:
@@ -307,6 +312,7 @@ async def restore_backup(zip_bytes: bytes) -> dict:
 # zusätzlich den Sync-Lock; beim Erststart ist der Sync noch nicht
 # gestartet, also überflüssig.
 
+
 def auto_restore_if_fresh() -> dict | None:
     """Stellt das jüngste Backup wieder her, wenn keine DB vorhanden ist.
     Gibt das Restore-Manifest zurück oder None, wenn kein Restore lief.
@@ -324,9 +330,7 @@ def auto_restore_if_fresh() -> dict | None:
 
     marker_name = (settings.backup_auto_restore_marker or "").strip()
     if not marker_name:
-        log.info(
-            "auto-restore: deaktiviert (kein Marker-Name konfiguriert)"
-        )
+        log.info("auto-restore: deaktiviert (kein Marker-Name konfiguriert)")
         return None
     marker = _backup_dir() / marker_name
     if not marker.exists():
@@ -349,13 +353,11 @@ def auto_restore_if_fresh() -> dict | None:
         log.warning("auto-restore: Backup-Datei nicht gefunden: %s", zip_path)
         return None
 
-    log.info("auto-restore: stelle %s wieder her (DB war leer/fehlend)",
-             newest["filename"])
+    log.info("auto-restore: stelle %s wieder her (DB war leer/fehlend)", newest["filename"])
     try:
         with zipfile.ZipFile(zip_path) as zf:
             if "database.sqlite" not in zf.namelist():
-                log.error("auto-restore: %s enthält keine database.sqlite",
-                          newest["filename"])
+                log.error("auto-restore: %s enthält keine database.sqlite", newest["filename"])
                 return None
             with tempfile.TemporaryDirectory() as tmp_dir:
                 tmp = Path(tmp_dir)
@@ -366,8 +368,7 @@ def auto_restore_if_fresh() -> dict | None:
                     return None
                 with open(src, "rb") as f:
                     if not f.read(16).startswith(b"SQLite format 3"):
-                        log.error("auto-restore: database.sqlite hat falschen "
-                                  "Magic-Header")
+                        log.error("auto-restore: database.sqlite hat falschen Magic-Header")
                         return None
                 # Begleitdateien wegräumen (sollten bei fresh install nicht
                 # existieren, aber sicher ist sicher)
@@ -377,8 +378,7 @@ def auto_restore_if_fresh() -> dict | None:
                         try:
                             aux.unlink()
                         except Exception as e:
-                            log.warning("auto-restore: konnte %s nicht entfernen: %s",
-                                        aux, e)
+                            log.warning("auto-restore: konnte %s nicht entfernen: %s", aux, e)
                 db_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(src, db_path)
     except Exception as e:
@@ -396,8 +396,7 @@ def auto_restore_if_fresh() -> dict | None:
     except Exception as e:
         log.warning("auto-restore: Marker konnte nicht entfernt werden: %s", e)
 
-    log.info("auto-restore: erfolgreich aus %s — Schema-Migration via init_db",
-             newest["filename"])
+    log.info("auto-restore: erfolgreich aus %s — Schema-Migration via init_db", newest["filename"])
     return {
         "ok": True,
         "from": newest["filename"],

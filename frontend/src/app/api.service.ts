@@ -520,7 +520,7 @@ export class ApiService {
     });
   }
 
-  ranking(opts: { sort?: 'rating' | 'comments' | 'interest';
+  ranking(opts: { sort?: 'rating' | 'comments' | 'interest' | 'likes';
                   event?: string | null; limit?: number } = {}):
       Observable<{
         sort: string;
@@ -548,6 +548,24 @@ export class ApiService {
     const params = new HttpParams().set('rating', rating).set('text', text);
     return this.http.post(`${this.base}/ideas/${id}/rating`, null, {
       params,
+      headers: this.authHeaders(),
+    });
+  }
+
+  /** Eigene Bewertung/Like zurücknehmen (Daumen-Modus). Backend toleriert
+   * den edu-sharing-500-Bug und liefert trotzdem 200. */
+  unrateIdea(id: string): Observable<unknown> {
+    return this.http.delete(`${this.base}/ideas/${id}/rating`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  // ---- App-Settings (Voting-Modus) ----
+  getSettings(): Observable<import('./models').AppSettings> {
+    return this.http.get<import('./models').AppSettings>(`${this.base}/settings`);
+  }
+  updateSettings(body: Partial<import('./models').AppSettings>): Observable<unknown> {
+    return this.http.put(`${this.base}/admin/settings`, body, {
       headers: this.authHeaders(),
     });
   }
@@ -631,7 +649,7 @@ export class ApiService {
     });
   }
 
-  rankingRisers(opts: { sort?: 'rating' | 'comments' | 'interest';
+  rankingRisers(opts: { sort?: 'rating' | 'comments' | 'interest' | 'likes';
                          event?: string | null; days?: number; limit?: number; }): Observable<{
     count: number; items: any[]; latest?: string; previous?: string | null;
   }> {

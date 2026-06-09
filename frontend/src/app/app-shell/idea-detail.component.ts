@@ -2,7 +2,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
-import { Attachment, Idea, TaxonomyEntry, Topic } from '../models';
+import { Attachment, Idea, TaxonomyEntry, Topic, VotingMode } from '../models';
+import { VotingService } from '../voting.service';
 import { ShareDialogComponent } from './share-dialog.component';
 import { ShareMenuComponent } from './share-menu.component';
 
@@ -325,6 +326,21 @@ import { ShareMenuComponent } from './share-menu.component';
     .stars-input:hover .star:hover ~ .star { color: transparent; }
     /* simpler: only highlight the selected count */
     .stars-input .star.on { color: var(--wlo-accent); }
+    /* Daumen-Modus */
+    .thumb-summary { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+    .thumb-count-big { font-size: 1.6rem; font-weight: 700; color: var(--wlo-text); }
+    .thumb-sub { font-size: .85rem; color: var(--wlo-muted); }
+    .thumb-vote-btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 18px; border-radius: 999px; cursor: pointer;
+      border: 1px solid var(--wlo-primary, #1d3a6e);
+      background: transparent; color: var(--wlo-primary, #1d3a6e);
+      font: inherit; font-weight: 600; font-size: 1rem;
+      transition: background .12s, transform .1s;
+      &:hover:not(:disabled) { transform: translateY(-1px); }
+      &:disabled { opacity: .7; cursor: default; }
+      &.on { background: var(--wlo-primary, #1d3a6e); color: #fff; }
+    }
     .rate-status { margin-top: 6px; font-size: .85rem; font-weight: 600; }
     .rate-status.ok { color: #137333; }
     .rate-status.err { color: #c5221f; }
@@ -885,7 +901,29 @@ import { ShareMenuComponent } from './share-menu.component';
         <!-- Sidebar -->
         <aside class="sidebar">
           <div class="side-card">
-            <h3>Bewertung</h3>
+            <h3>{{ mode() === 'thumbs' ? 'Zustimmung' : 'Bewertung' }}</h3>
+
+          @if (mode() === 'thumbs') {
+            <!-- Daumen-Modus -->
+            <div class="thumb-summary">
+              <span class="thumb-count-big">👍 {{ i.rating_count }}</span>
+              <span class="thumb-sub">{{ i.rating_count === 1 ? 'Stimme' : 'Stimmen' }}</span>
+            </div>
+            @if (!api.hasCredentials()) {
+              <div class="notice">Zum Abstimmen anmelden.</div>
+            } @else {
+              <button type="button" class="thumb-vote-btn"
+                      [class.on]="userRating > 0"
+                      [disabled]="thumbBusy"
+                      (click)="toggleThumb(i.id)">
+                👍 {{ userRating > 0 ? 'Zugestimmt' : 'Daumen hoch' }}
+              </button>
+              @if (rateStatus) {
+                <div class="rate-status" [class.ok]="rateStatusOk"
+                     [class.err]="!rateStatusOk">{{ rateStatus }}</div>
+              }
+            }
+          } @else {
 
             <!-- Durchschnitt der Community: nur lesen, mit Sternen visualisiert -->
             @if (i.rating_count > 0) {
@@ -943,6 +981,7 @@ import { ShareMenuComponent } from './share-menu.component';
               }
               @if (rateError) { <div class="error">{{ rateError }}</div> }
             }
+          }
           </div>
 
           <div class="side-card">
@@ -1175,6 +1214,37 @@ import { ShareMenuComponent } from './share-menu.component';
 })
 export class IdeaDetailComponent implements OnChanges {
   api = inject(ApiService);
+  private voting = inject(VotingService);
+
+  /** Detailseite ist nicht event-gescoped → globaler Bewertungs-Modus. */
+  mode(): VotingMode {
+    return this.voting.effective(null);
+  }
+  thumbBusy = false;
+
+  /** Daumen-Modus: Zustimmung setzen/zurücknehmen. */
+  toggleThumb(id: string) {
+    if (!this.api.hasCredentials()) { this.requestLogin.emit(); return; }
+    this.thumbBusy = true;
+    this.rateStatus = '';
+    if (this.userRating > 0) {
+      this.userRating = 0;
+      this.api.unrateIdea(id).subscribe({
+        next: () => { this.thumbBusy = false; this.refreshAfterVote(id); },
+        error: () => { this.thumbBusy = false; this.refreshAfterVote(id); },
+      });
+    } else {
+      this.userRating = 5;
+      this.api.rateIdea(id, 5).subscribe({
+        next: () => { this.thumbBusy = false; this.rateStatus = '✓ Danke!'; this.rateStatusOk = true; this.refreshAfterVote(id); },
+        error: (e) => { this.thumbBusy = false; this.userRating = 0; this.rateStatus = e?.error?.detail || 'Fehler'; this.rateStatusOk = false; },
+      });
+    }
+  }
+
+  private refreshAfterVote(id: string) {
+    this.api.getIdea(id).subscribe({ next: (i) => this.idea.set(i as any), error: () => {} });
+  }
 
   @Input() ideaId!: string;
   @Input() apiBase = API_BASE_DEFAULT;
@@ -1314,6 +1384,7 @@ export class IdeaDetailComponent implements OnChanges {
   }
 
   load(opts: { keepCurrent?: boolean } = {}) {
+    this.voting.load();  // Bewertungs-Modus (idempotent)
     if (!opts.keepCurrent) {
       this.idea.set(null);
       this.interactions.set(null);

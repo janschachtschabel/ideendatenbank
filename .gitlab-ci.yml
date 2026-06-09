@@ -1,0 +1,147 @@
+# =============================================================================
+# GitLab CI/CD — HackathOERn Ideendatenbank (produktives Deployment)
+# =============================================================================
+# Aktive Pipeline-Konfiguration für das firmeninterne GitLab-Repo (Standard-
+# Pfad im Repo-Root). Berührt die GitHub-Workflows (.github/workflows/) nicht
+# — beide Plattformen laufen parallel (GitHub → ghcr.io, GitLab → self-hosted).
+#
+# CREDENTIALS / FIRMEN-SPEZIFISCHES — NICHT hier eintragen, sondern in GitLab
+# unter  Settings → CI/CD → Variables  als (masked + protected) Variablen
+# anlegen:
+#   DOCKER_REGISTRY   z.B. docker.edu-sharing.com   (Registry-Host)
+#   DOCKER_USERNAME   CI-Benutzer / Deploy-Token-User
+#   DOCKER_PASSWORD   CI-Token / Passwort           (masked + protected)
+#   DIND_IMAGE        z.B. docker:27-dind
+#   DIND_HOST         z.B. tcp://docker:2376
+#   DIND_DRIVER       z.B. overlay2
+#   DIND_TLS_CERTDIR  z.B. /certs
+#
+# Image-Pfad: DOCKER_IMAGE_PATH unten — Default leitet sich automatisch aus
+# dem Projektpfad ab. Bei Bedarf als CI/CD-Variable überschreiben.
+#
+# Der Docker-Build (Stage „build") läuft nur, wenn DOCKER_REGISTRY gesetzt ist
+# — solange die Variablen fehlen, bleibt die Pipeline grün (nur Lint läuft).
+# =============================================================================
+
+stages:
+  - lint
+  - build
+
+variables:
+  # Image-Pfad in der Registry — löst automatisch zum vollen Gruppen-/
+  # Projektpfad auf (z.B. "projects/wlo/ideendatenbank"). $CI_PROJECT_PATH
+  # ist eine GitLab-Standardvariable; kein Platzhalter nötig. Bei Bedarf
+  # überschreiben (z.B. fester Pfad oder als CI/CD-Variable im Projekt).
+  DOCKER_IMAGE_PATH: "projects/$CI_PROJECT_PATH"
+
+  # --- Folgende Variablen NICHT hier setzen, sondern als CI/CD-Variablen ---
+  # DOCKER_REGISTRY   z.B. registry.example.com         (Registry-Host)
+  # DOCKER_USERNAME   CI-Benutzer / Deploy-Token-User
+  # DOCKER_PASSWORD   CI-Token / Passwort  (masked + protected)
+  # DIND_IMAGE        z.B. docker:27-dind
+  # DIND_HOST         z.B. tcp://docker:2376
+  # DIND_DRIVER       z.B. overlay2
+  # DIND_TLS_CERTDIR  z.B. /certs
+
+# -----------------------------------------------------------------------------
+# Backend-Lint (ruff) — Konfiguration liegt in backend/pyproject.toml
+# -----------------------------------------------------------------------------
+ruff check:
+  stage: lint
+  interruptible: true
+  image:
+    name: ghcr.io/astral-sh/ruff:0.9.5-alpine
+  before_script:
+    - cd "$CI_PROJECT_DIR/backend"
+    - ruff --version
+  script:
+    - ruff check --output-format=gitlab app/ > "$CI_PROJECT_DIR/code-quality-report.json"
+  artifacts:
+    reports:
+      codequality: code-quality-report.json
+
+ruff format:
+  stage: lint
+  interruptible: true
+  image:
+    name: ghcr.io/astral-sh/ruff:0.9.5-alpine
+  before_script:
+    - cd "$CI_PROJECT_DIR/backend"
+    - ruff --version
+  script:
+    # Prüft, ob der Code ruff-format-konform ist (Diff = Exit-Code ≠0).
+    # Der Code wurde einmalig mit `ruff format` durchformatiert; neue
+    # Beiträge müssen das ebenfalls sein. Lokal vor dem Commit:
+    #   cd backend && ruff format app/
+    - ruff format --diff app/
+
+# -----------------------------------------------------------------------------
+# Frontend-Lint (Angular ESLint) — optional, aber empfohlen.
+# Hinweis: Das Frontend wird ohnehin im Docker-Build (Stage 1) gebaut; dieser
+# Job prüft nur die Lint-Regeln separat. Bei Bedarf entfernen.
+# -----------------------------------------------------------------------------
+frontend lint:
+  stage: lint
+  interruptible: true
+  image: node:22-bookworm-slim
+  before_script:
+    - cd "$CI_PROJECT_DIR/frontend"
+    - npm install --no-save --no-audit --no-fund
+  script:
+    - npx ng lint
+  allow_failure: true  # Lint-Warnungen sollen den Pipeline-Lauf nicht blocken
+
+# -----------------------------------------------------------------------------
+# Docker-Image bauen + in (self-hosted) Registry pushen — main + develop
+# Tag = Branch-Slug (z.B. "main", "develop")
+# -----------------------------------------------------------------------------
+build and push (branches):
+  stage: build
+  image: $DIND_IMAGE
+  variables:
+    DOCKER_HOST: "$DIND_HOST"
+    DOCKER_DRIVER: "$DIND_DRIVER"
+    DOCKER_TLS_CERTDIR: "$DIND_TLS_CERTDIR"
+  services:
+    - name: "$DIND_IMAGE"
+      alias: docker
+      entrypoint: [ "env", "-u", "DOCKER_HOST" ]
+      command: [ "dockerd-entrypoint.sh" ]
+  before_script:
+    - docker --version
+  script:
+    - docker login "$DOCKER_REGISTRY" -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD"
+    - docker buildx build --tag "$DOCKER_REGISTRY/$DOCKER_IMAGE_PATH:$CI_COMMIT_REF_SLUG" .
+    - docker image push "$DOCKER_REGISTRY/$DOCKER_IMAGE_PATH:$CI_COMMIT_REF_SLUG"
+  rules:
+    # Läuft nur, wenn die Registry-Variable gesetzt ist. Solange die
+    # CI/CD-Variablen (DOCKER_REGISTRY etc.) fehlen, wird der Job
+    # übersprungen — die Pipeline bleibt grün (statt am Login zu scheitern).
+    - if: "$CI_COMMIT_BRANCH == 'main' && $DOCKER_REGISTRY"
+    - if: "$CI_COMMIT_BRANCH == 'develop' && $DOCKER_REGISTRY"
+
+# -----------------------------------------------------------------------------
+# Docker-Image bauen + pushen bei Tag-Erstellung (z.B. v1.2.0)
+# Tag = exakter Git-Tag-Name
+# -----------------------------------------------------------------------------
+build and push (tags):
+  stage: build
+  image: $DIND_IMAGE
+  variables:
+    DOCKER_HOST: "$DIND_HOST"
+    DOCKER_DRIVER: "$DIND_DRIVER"
+    DOCKER_TLS_CERTDIR: "$DIND_TLS_CERTDIR"
+  services:
+    - name: "$DIND_IMAGE"
+      alias: docker
+      entrypoint: [ "env", "-u", "DOCKER_HOST" ]
+      command: [ "dockerd-entrypoint.sh" ]
+  before_script:
+    - docker --version
+  script:
+    - docker login "$DOCKER_REGISTRY" -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD"
+    - docker buildx build --tag "$DOCKER_REGISTRY/$DOCKER_IMAGE_PATH:$CI_COMMIT_REF_NAME" .
+    - docker image push "$DOCKER_REGISTRY/$DOCKER_IMAGE_PATH:$CI_COMMIT_REF_NAME"
+  rules:
+    # Nur bei Tag UND konfigurierter Registry (siehe oben).
+    - if: "$CI_COMMIT_TAG && $DOCKER_REGISTRY"

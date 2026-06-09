@@ -11,7 +11,8 @@ import {
 } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { ThemeService } from '../theme.service';
-import { Idea, SortBy } from '../models';
+import { VotingService } from '../voting.service';
+import { Idea, SortBy, VotingMode } from '../models';
 
 @Component({
   selector: 'ideendb-tile-grid-inner',
@@ -50,10 +51,14 @@ import { Idea, SortBy } from '../models';
               <p class="desc">{{ clip(i.description, 140) }}</p>
             }
             <div class="meta">
-              <span class="kpi" title="Bewertung">
-                ★ {{ i.rating_avg | number: '1.1-1' }}
-                <small>({{ i.rating_count }})</small>
-              </span>
+              @if (mode() === 'thumbs') {
+                <span class="kpi" title="Daumen hoch">👍 {{ i.rating_count }}</span>
+              } @else {
+                <span class="kpi" title="Bewertung">
+                  ★ {{ i.rating_avg | number: '1.1-1' }}
+                  <small>({{ i.rating_count }})</small>
+                </span>
+              }
               <span class="kpi" title="Kommentare">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                      stroke="currentColor" stroke-width="2"
@@ -71,16 +76,26 @@ import { Idea, SortBy } from '../models';
               <!-- Inline-Voting: stoppt die Klick-Weiterleitung zur Detailseite,
                    damit man direkt an der Kachel bewerten kann. -->
               <div class="vote-row" (click)="$event.stopPropagation()">
-                <span class="vote-label">Deine Stimme:</span>
-                <div class="vote-stars" role="radiogroup" aria-label="Bewerten">
-                  @for (s of [1,2,3,4,5]; track s) {
-                    <button type="button" class="star-btn"
-                            [class.filled]="(voteValue[i.id] || 0) >= s"
-                            [disabled]="voteBusy[i.id]"
-                            (click)="vote(i, s)"
-                            [attr.aria-label]="s + ' von 5 Sternen'">★</button>
-                  }
-                </div>
+                @if (mode() === 'thumbs') {
+                  <button type="button" class="thumb-btn"
+                          [class.on]="(voteValue[i.id] || 0) > 0"
+                          [disabled]="voteBusy[i.id]"
+                          (click)="toggleThumb(i)"
+                          aria-label="Daumen hoch">
+                    👍 <span class="thumb-count">{{ i.rating_count }}</span>
+                  </button>
+                } @else {
+                  <span class="vote-label">Deine Stimme:</span>
+                  <div class="vote-stars" role="radiogroup" aria-label="Bewerten">
+                    @for (s of [1,2,3,4,5]; track s) {
+                      <button type="button" class="star-btn"
+                              [class.filled]="(voteValue[i.id] || 0) >= s"
+                              [disabled]="voteBusy[i.id]"
+                              (click)="vote(i, s)"
+                              [attr.aria-label]="s + ' von 5 Sternen'">★</button>
+                    }
+                  </div>
+                }
                 @if (voteMsg[i.id]) {
                   <span class="vote-msg">{{ voteMsg[i.id] }}</span>
                 }
@@ -136,6 +151,12 @@ import { Idea, SortBy } from '../models';
 export class TileGridComponent implements OnInit, OnChanges {
   private api = inject(ApiService);
   private themeSvc = inject(ThemeService);
+  private voting = inject(VotingService);
+
+  /** Effektiver Bewertungs-Modus für den Kontext dieser Liste (Event-Slug). */
+  mode(): VotingMode {
+    return this.voting.effective(this.event);
+  }
 
   /** Initiales Theme als Web-Component-Attribut, identisch zum AppShell. */
   @Input() set theme(value: string) {
@@ -209,6 +230,50 @@ export class TileGridComponent implements OnInit, OnChanges {
     });
   }
 
+  /** Daumen-Modus: Like setzen / zurücknehmen (Toggle). */
+  toggleThumb(idea: Idea) {
+    if (!this.api.hasCredentials()) {
+      this.requireLogin.emit();
+      return;
+    }
+    const alreadyLiked = (this.voteValue[idea.id] || 0) > 0;
+    this.voteBusy[idea.id] = true;
+    this.voteMsg[idea.id] = '';
+    const n = idea.rating_count || 0;
+    if (alreadyLiked) {
+      // Un-Like (optimistisch). Backend toleriert den edu-sharing-500-Bug.
+      this.voteValue[idea.id] = 0;
+      idea.rating_count = Math.max(0, n - 1);
+      this.api.unrateIdea(idea.id).subscribe({
+        next: () => { this.voteBusy[idea.id] = false; this.afterThumb(); },
+        error: () => { this.voteBusy[idea.id] = false; this.afterThumb(); },
+      });
+    } else {
+      // Like = festes Rating 5; Kennzahl im Daumen-Modus ist die Anzahl.
+      this.voteValue[idea.id] = 5;
+      idea.rating_count = n + 1;
+      this.api.rateIdea(idea.id, 5).subscribe({
+        next: () => {
+          this.voteBusy[idea.id] = false;
+          this.voteMsg[idea.id] = '✓';
+          setTimeout(() => (this.voteMsg[idea.id] = ''), 2000);
+          this.afterThumb();
+        },
+        error: (e) => {
+          this.voteBusy[idea.id] = false;
+          this.voteValue[idea.id] = 0;
+          idea.rating_count = n;  // Rollback
+          this.voteMsg[idea.id] = e?.error?.detail || 'Fehler';
+        },
+      });
+    }
+  }
+
+  /** Nach Daumen-Aktion ggf. neu sortieren (Anzahl = Likes). */
+  private afterThumb() {
+    if (this.sort === 'rating') this.resortByCount();
+  }
+
   /** Sortiert das aktuell geladene Array clientseitig nach Bewertung,
    * passend zur aktiven order-Richtung. Hält die Anzeige nach einem
    * Vote konsistent, ohne einen vollen Reload auszulösen. */
@@ -222,8 +287,17 @@ export class TileGridComponent implements OnInit, OnChanges {
     });
   }
 
+  /** Wie resortByRating, aber nach Anzahl (Daumen-Modus). */
+  private resortByCount() {
+    const dir = this.order === 'asc' ? 1 : -1;
+    this.ideas = [...this.ideas].sort(
+      (a, b) => ((a.rating_count || 0) - (b.rating_count || 0)) * dir,
+    );
+  }
+
   ngOnInit() {
     this.api.setBase(this.apiBase);
+    this.voting.load();  // globaler Modus + Event-Overrides (idempotent)
     this.reload();
   }
 

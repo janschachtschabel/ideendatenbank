@@ -3,6 +3,7 @@
 edu-sharing stays source-of-truth; we mirror a subset of fields periodically.
 Uses FTS5 for full-text search across title + description + keywords.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -186,6 +187,14 @@ CREATE TABLE IF NOT EXISTS captcha_challenge (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_captcha_expires ON captcha_challenge(expires_at);
+
+-- Globale App-Einstellungen als simple Key-Value-Ablage. Aktuell genutzt
+-- für `voting_mode_global` ('stars' | 'thumbs'). Mod-umschaltbar zur
+-- Laufzeit, ohne Neustart.
+CREATE TABLE IF NOT EXISTS app_setting (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -194,12 +203,12 @@ def _ensure_dir() -> None:
 
 
 DEFAULT_PHASES = [
-    ("anregung",    "Anregung",      10),
+    ("anregung", "Anregung", 10),
     ("ausarbeitung", "Ausarbeitung", 20),
     ("pitch-bereit", "Pitch-bereit", 30),
     ("in-umsetzung", "In Umsetzung", 40),
     ("abgeschlossen", "Abgeschlossen", 50),
-    ("archiviert",   "Archiviert",   60),
+    ("archiviert", "Archiviert", 60),
 ]
 
 
@@ -237,15 +246,17 @@ def init_db() -> None:
         # Bestehende Events bekommen status='live' (Default) — keine
         # User-sichtbare Änderung.
         try:
-            con.execute(
-                "ALTER TABLE taxonomy_event ADD COLUMN status TEXT NOT NULL DEFAULT 'live'"
-            )
+            con.execute("ALTER TABLE taxonomy_event ADD COLUMN status TEXT NOT NULL DEFAULT 'live'")
         except sqlite3.OperationalError:
             pass
         try:
-            con.execute(
-                "ALTER TABLE taxonomy_event ADD COLUMN featured_until TEXT"
-            )
+            con.execute("ALTER TABLE taxonomy_event ADD COLUMN featured_until TEXT")
+        except sqlite3.OperationalError:
+            pass
+        # Pro-Event-Override des Bewertungssystems: NULL = globalen Modus
+        # erben, sonst 'stars' | 'thumbs'.
+        try:
+            con.execute("ALTER TABLE taxonomy_event ADD COLUMN voting_mode TEXT")
         except sqlite3.OperationalError:
             pass
         # User-Notification-Cursor: wann hat der User seinen Feed zuletzt
@@ -271,13 +282,13 @@ def init_db() -> None:
                )"""
         )
         con.execute(
-            "CREATE INDEX IF NOT EXISTS topic_sort_idx "
-            "ON topic(parent_id, sort_order, title)"
+            "CREATE INDEX IF NOT EXISTS topic_sort_idx ON topic(parent_id, sort_order, title)"
         )
         # seed phases on first start (idempotent)
         existing = con.execute("SELECT COUNT(*) FROM taxonomy_phase").fetchone()[0]
         if existing == 0:
             from datetime import datetime
+
             now = datetime.now(UTC).isoformat()
             con.executemany(
                 "INSERT INTO taxonomy_phase (slug,label,sort_order,active,created_at,created_by) "
@@ -289,9 +300,7 @@ def init_db() -> None:
         # vorliegen, einmalig entfernen. edu-sharing-Daten werden NICHT
         # angefasst — der Cache rebuilt sich beim nächsten Sync.
         con.execute("DELETE FROM idea WHERE kind = 'collection'")
-        con.execute(
-            "DELETE FROM idea_fts WHERE id NOT IN (SELECT id FROM idea)"
-        )
+        con.execute("DELETE FROM idea_fts WHERE id NOT IN (SELECT id FROM idea)")
 
 
 @contextmanager

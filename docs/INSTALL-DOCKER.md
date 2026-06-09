@@ -92,10 +92,12 @@ Inhalt — Platzhalter durch deine Werte aus Schritt 1 ersetzen:
 
 ```ini
 # === edu-sharing — Repository-Anbindung ===
-# Default-Repo ist die WLO-Produktion. Nur ändern, wenn ein eigener
-# Repo-Host gemeint ist.
+# Default-Repo ist die WLO-Produktion. Für ein anderes Repo NUR diese
+# Zeile ändern — sie steuert API + „im Repo öffnen"-/Registrierungs-Links.
 EDU_REPO_BASE_URL=https://redaktion.openeduhub.net
-EDU_REPO_API=https://redaktion.openeduhub.net/edu-sharing/rest
+# API-Basis: leer lassen → automatisch aus EDU_REPO_BASE_URL abgeleitet
+# (<base>/edu-sharing/rest). Nur setzen, wenn die API woanders liegt.
+# EDU_REPO_API=
 
 # Service-Account für anonyme Einreichungen (Werte vom WLO-Team).
 # Wird ausschließlich genutzt, um nicht-angemeldete Submits in die

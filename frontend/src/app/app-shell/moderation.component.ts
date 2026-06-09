@@ -519,11 +519,19 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         text-decoration: line-through;
       }
       &.featured {
-        background: var(--wlo-accent, #f5b600); color: #1a2235;
+        background: var(--wlo-cta-bg, #27ABE2); color: var(--wlo-cta-text, #fff);
       }
     }
     .event-edit-stack {
       display: flex; flex-direction: column; gap: 6px;
+    }
+    .voting-global {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+      background: var(--wlo-bg); border: 1px solid var(--wlo-border);
+      border-radius: 8px; padding: 10px 14px; margin-bottom: 14px;
+      font-size: .9rem;
+      .vm-opt { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+      .vm-hint { color: var(--wlo-muted); font-size: .8rem; flex-basis: 100%; }
     }
     .event-edit-meta {
       display: flex; gap: 10px; align-items: end; flex-wrap: wrap;
@@ -1625,6 +1633,27 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
           die Sichtbarkeit (Entwurf = nur Mod, Live = wählbar, Archiv = abgeschlossen).
           Wenn „Featured bis" gesetzt ist, erscheint das Event prominent auf der Startseite.
         </div>
+
+        <!-- Globales Bewertungssystem -->
+        <div class="voting-global">
+          <strong>Bewertungssystem (global):</strong>
+          <label class="vm-opt">
+            <input type="radio" name="vmglobal" value="stars"
+                   [checked]="votingGlobal() === 'stars'"
+                   (change)="setVotingGlobal('stars')" />
+            ★ Sterne (1–5)
+          </label>
+          <label class="vm-opt">
+            <input type="radio" name="vmglobal" value="thumbs"
+                   [checked]="votingGlobal() === 'thumbs'"
+                   (change)="setVotingGlobal('thumbs')" />
+            👍 Daumen hoch
+          </label>
+          <span class="vm-hint">
+            Gilt überall, wo keine veranstaltungs-spezifische Einstellung gesetzt ist.
+          </span>
+        </div>
+
         <div class="tax-toolbar">
           <strong>{{ events().length }} Veranstaltungen</strong>
         </div>
@@ -1659,6 +1688,14 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                       <button type="button" class="link-btn"
                               (click)="editingEvent!.featured_until = null">×</button>
                     }
+                    <label class="micro">Bewertung
+                      <select [ngModel]="editingEvent!.voting_mode || ''"
+                              (ngModelChange)="editingEvent!.voting_mode = $any($event)">
+                        <option value="">— global —</option>
+                        <option value="stars">★ Sterne</option>
+                        <option value="thumbs">👍 Daumen</option>
+                      </select>
+                    </label>
                   </div>
                 </div>
                 <input type="text" [(ngModel)]="editingEvent!.description" placeholder="Aufruftext (für Startseite)" />
@@ -2609,13 +2646,29 @@ export class ModerationComponent implements OnInit {
   }
 
   blankEventEntry(): TaxonomyEntry {
-    return { ...this.blankEntry(), status: 'live', featured_until: null };
+    return { ...this.blankEntry(), status: 'live', featured_until: null, voting_mode: '' };
+  }
+
+  // --- Globales Bewertungssystem (Sterne vs. Daumen) ---
+  votingGlobal = signal<'stars' | 'thumbs'>('stars');
+  loadVotingGlobal() {
+    this.api.getSettings().subscribe({
+      next: (s) => this.votingGlobal.set(s.voting_mode_global || 'stars'),
+      error: () => {},
+    });
+  }
+  setVotingGlobal(m: 'stars' | 'thumbs') {
+    this.votingGlobal.set(m);  // optimistisch
+    this.api.updateSettings({ voting_mode_global: m }).subscribe({
+      error: () => this.loadVotingGlobal(),  // Rollback durch Neuladen
+    });
   }
 
   loadEvents() {
     // Mod sieht ALLES — drafts + archived inkl. inaktiv
     this.api.listEvents({ includeInactive: true, includeDrafts: true, includeArchived: true })
       .subscribe((es) => this.events.set(es));
+    this.loadVotingGlobal();
   }
   loadPhases() {
     this.api.listPhases(true).subscribe((ps) => this.phases.set(ps));
@@ -2670,6 +2723,7 @@ export class ModerationComponent implements OnInit {
       description: this.editingEvent.description?.trim() || null,
       status: this.editingEvent.status ?? 'live',
       featured_until: this.editingEvent.featured_until || null,
+      voting_mode: this.editingEvent.voting_mode || '',  // '' = global erben
     };
     this.api.upsertEvent(payload).subscribe({
       next: () => {

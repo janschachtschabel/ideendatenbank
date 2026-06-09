@@ -15,8 +15,8 @@ html {
   --wlo-primary: #002855;
   --wlo-primary-600: #003c7e;
   --wlo-primary-soft: #e6edf7;   /* heller Tint von Primary für Hover/Pill-Bg */
-  --wlo-accent: #f5b600;
-  --wlo-accent-soft: #fff8db;    /* heller Tint von Accent */
+  --wlo-accent: #27ABE2;         /* Logo-Hellblau (ersetzt früheres Gelb) */
+  --wlo-accent-soft: #e0f3fb;    /* heller Tint von Accent */
   --wlo-bg: #f4f6f9;
   --wlo-surface: #ffffff;
   --wlo-surface-2: #f8f9fc;
@@ -25,15 +25,18 @@ html {
   --wlo-border: #e2e7ef;
   --wlo-success: #137333;
   --wlo-danger:  #c5221f;
-  /* CTA-Button-Tokens — gleiche Farbe in Topbar UND Hero, pro Theme. */
-  --wlo-cta-bg:        #f5b600;        /* Default: Gelb */
-  --wlo-cta-bg-hover:  #ffc727;
-  --wlo-cta-text:      #1a2235;
+  /* CTA-Button-Tokens — gleiche Farbe in Topbar UND Hero, pro Theme.
+     Logo-Hellblau statt Gelb, damit sich die Markenfarbe wiederholt. */
+  --wlo-cta-bg:        #27ABE2;
+  --wlo-cta-bg-hover:  #1e8ec0;
+  --wlo-cta-text:      #ffffff;
   /* Hero-Sektion (Startseite, Topic-Hero etc.) — eigene Token, nicht Primary */
   --wlo-hero-bg-from: #002855;
   --wlo-hero-bg-to:   #003c7e;
   --wlo-hero-text:    #ffffff;
   --wlo-hero-text-muted: rgba(255,255,255,.92);
+  /* Punktfarbe fürs Hero-Raster (CSS-radial-gradient, sauber kachelnd). */
+  --wlo-hero-dot: rgba(255,255,255,.13);
   /* Topbar-Tokens */
   --wlo-topbar-bg:        #002855;
   --wlo-topbar-text:      #ffffff;
@@ -77,6 +80,8 @@ html[data-theme="hackathoern"] {
   --wlo-hero-bg-to:   #e1edf3;
   --wlo-hero-text:    #383838;
   --wlo-hero-text-muted: #5a5a5a;
+  /* Dezente graue Punkte auf hellem Hero. */
+  --wlo-hero-dot: rgba(90,110,130,.16);
   /* Heller Header */
   --wlo-topbar-bg:        #ffffff;
   --wlo-topbar-text:      #383838;
@@ -92,8 +97,8 @@ html[data-theme="dark"] {
   --wlo-primary:     #d6d6d6;       /* helles Grau für Text/Borders/Active-Akzente */
   --wlo-primary-600: #f0f0f0;
   --wlo-primary-soft: #2a2a2a;      /* dunkler Tint für Pill/Hover-Bg */
-  --wlo-accent:      #d4a73a;       /* desaturierter Gold-Akzent */
-  --wlo-accent-soft: #3a311a;
+  --wlo-accent:      #27ABE2;       /* Logo-Hellblau (ersetzt früheres Gold) */
+  --wlo-accent-soft: #14323f;       /* dunkler Blau-Tint für Pill/Soft-Bg */
   --wlo-bg:          #161616;
   --wlo-surface:     #1f1f1f;
   --wlo-surface-2:   #262626;
@@ -102,15 +107,17 @@ html[data-theme="dark"] {
   --wlo-border:      #333333;
   --wlo-success:     #6da16d;
   --wlo-danger:      #c97070;
-  /* CTA: Gold-Akzent — wie im Hero, deutlich sichtbar auf dunkler Topbar */
-  --wlo-cta-bg:        #d4a73a;
-  --wlo-cta-bg-hover:  #e6b945;
-  --wlo-cta-text:      #1a1a1a;
+  /* CTA: Logo-Hellblau — deutlich sichtbar auf dunkler Topbar */
+  --wlo-cta-bg:        #27ABE2;
+  --wlo-cta-bg-hover:  #1e8ec0;
+  --wlo-cta-text:      #ffffff;
   /* Hero im Dark-Mode: dezent dunkler Verlauf, kein Blau */
   --wlo-hero-bg-from: #1c1c1c;
   --wlo-hero-bg-to:   #242424;
   --wlo-hero-text:    #e6e6e6;
   --wlo-hero-text-muted: rgba(230,230,230,.85);
+  /* Sehr dezente helle Punkte auf dunklem Hero. */
+  --wlo-hero-dot: rgba(255,255,255,.07);
   /* Topbar: tiefer als bg, kein Blau */
   --wlo-topbar-bg:        #0d0d0d;
   --wlo-topbar-text:      #e6e6e6;

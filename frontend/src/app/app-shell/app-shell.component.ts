@@ -71,7 +71,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
             </svg>
             Rangliste
           </button>
-          <button class="cta" (click)="go('submit'); mobileNavOpen=false">Idee einreichen</button>
+          <button class="cta" (click)="goSubmit(); mobileNavOpen=false">Idee einreichen</button>
 
           @if (api.hasCredentials()) {
             <div class="user-menu" (click)="$event.stopPropagation()">
@@ -155,13 +155,20 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
       @switch (view()) {
         @case ('home') {
           <section class="hero">
-            <div class="container">
-              <h1>Ideen für bessere OER-Infrastrukturen</h1>
-              <p>Sammle, diskutiere und bewerte Ideen für den nächsten HackathOERn.
-                 Ohne Hürde mitmachen — Einreichen geht auch ohne Login.</p>
-              <div class="hero-cta">
-                <button class="btn primary" (click)="go('submit')">Idee einreichen</button>
-                <button class="btn ghost" (click)="go('browser')">Ideen stöbern</button>
+            <div class="container hero-inner">
+              <div class="hero-text">
+                <h1>Ideen für bessere OER-Infrastrukturen</h1>
+                <p>Sammle, diskutiere und bewerte Ideen für den nächsten HackathOERn.
+                   Ohne Hürde mitmachen — Einreichen geht auch ohne Login.</p>
+                <div class="hero-cta">
+                  <button class="btn ghost" (click)="go('browser')">Ideen stöbern</button>
+                </div>
+              </div>
+              <div class="hero-art">
+                <img [src]="themeSvc.current() === 'dark'
+                              ? 'Ideesndatenbank_Heroimage_Darkmode.png'
+                              : 'Ideesndatenbank_Heroimage.png'"
+                     alt="" aria-hidden="true" loading="eager" />
               </div>
             </div>
           </section>
@@ -188,7 +195,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                   </div>
                   <div class="fe-actions">
                     <button class="btn primary" (click)="goSubmitForEvent(fe.slug)">
-                      + Idee einreichen
+                      Idee einreichen
                     </button>
                     <button class="btn fe-vote" (click)="goVoteForEvent(fe.slug)">
                       Jetzt voten
@@ -638,6 +645,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
           <ideendb-idea-detail
             [ideaId]="currentIdeaId()!"
             [apiBase]="apiBase"
+            [repoBaseUrl]="repoBaseUrl()"
             (back)="go('browser')"
             (openTopic)="openTopicById($event)"
             (requestLogin)="showLogin = true">
@@ -656,6 +664,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
           <ideendb-moderation
             [apiBase]="apiBase"
             [currentUser]="api.currentUser() || ''"
+            [repoBaseUrl]="repoBaseUrl()"
             (ideaSelected)="openIdea($any($event))">
           </ideendb-moderation>
         }
@@ -697,7 +706,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
     </footer>
 
     @if (showLogin) {
-      <ideendb-login-dialog (closed)="showLogin=false"></ideendb-login-dialog>
+      <ideendb-login-dialog [repoBaseUrl]="repoBaseUrl()" (closed)="showLogin=false"></ideendb-login-dialog>
     }
   `,
 })
@@ -779,6 +788,9 @@ export class AppShellComponent implements OnInit {
   /** Alle aktuell auf der Startseite hervorgehobenen Events (Liste).
    * Wird im ngOnInit einmalig geladen. */
   featuredEvents = signal<FeaturedEvent[]>([]);
+  /** edu-sharing-Repo-Basis-URL aus der Backend-Config (für „im Repo
+   * öffnen"-Links + Registrierung). Deployment-spezifisch. */
+  repoBaseUrl = signal<string>('https://redaktion.openeduhub.net');
   phaseLabels = new Map<string, string>();
   currentTopic = signal<Topic | null>(null);
   topicParent = signal<Topic | null>(null);
@@ -854,6 +866,11 @@ export class AppShellComponent implements OnInit {
     this.api.featuredEvents().subscribe({
       next: (fe) => this.featuredEvents.set(fe || []),
       error: () => this.featuredEvents.set([]),
+    });
+    // Repo-Basis-URL aus den Backend-Settings (deployment-spezifisch).
+    this.api.getSettings().subscribe({
+      next: (s) => { if (s.edu_repo_base_url) this.repoBaseUrl.set(s.edu_repo_base_url); },
+      error: () => { /* Default bleibt */ },
     });
     // Analog Phasen
     this.api.listPhases().subscribe((phases) => {
@@ -1089,7 +1106,24 @@ export class AppShellComponent implements OnInit {
   }
 
 
-  /** Featured-Slot: Klick auf „+ Idee einreichen" — landet im Submit
+  /** Allgemeiner „Idee einreichen"-Button (Header/Topbar). Belegt das
+   * Event automatisch mit der aktuell laufenden Promotion vor, falls es
+   * eine gibt — sonst ohne Vorauswahl. In beiden Fällen bleibt die
+   * Auswahl im Formular änderbar. */
+  goSubmit() {
+    this.presetEventForSubmit = this.defaultSubmitEvent();
+    this.go('submit');
+  }
+
+  /** Slug des aktuell promoteten „nächsten" Events (höchste sort_order
+   * unter den Featured-Events) oder null, wenn nichts promotet wird. */
+  private defaultSubmitEvent(): string | null {
+    const fe = this.featuredEvents();
+    if (!fe.length) return null;
+    return [...fe].sort((a, b) => (b.sort_order || 0) - (a.sort_order || 0))[0].slug;
+  }
+
+  /** Featured-Slot: Klick auf „Idee einreichen" — landet im Submit
    * mit vorgewähltem Event-Slug (via URL-Parameter). */
   goSubmitForEvent(slug: string) {
     this.presetEventForSubmit = slug;

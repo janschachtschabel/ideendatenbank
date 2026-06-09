@@ -153,6 +153,24 @@
     color: var(--wlo-primary, #1d3a6e);
     font-weight: 600;
   }
+
+  /* Daumen-hoch-Button (Daumen-Modus) */
+  .thumb-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 14px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--wlo-border, #c8cfdb);
+    background: var(--wlo-surface, #fff); color: var(--wlo-text, #1a2334);
+    font: inherit; font-size: .9rem; line-height: 1;
+    transition: background .12s, border-color .12s, transform .1s;
+    &:hover:not(:disabled) { border-color: var(--wlo-primary); transform: translateY(-1px); }
+    &:disabled { opacity: .7; cursor: default; }
+    &.on {
+      background: var(--wlo-primary, #1d3a6e);
+      border-color: var(--wlo-primary, #1d3a6e);
+      color: #fff;
+    }
+    .thumb-count { font-weight: 700; font-variant-numeric: tabular-nums; }
+  }
 }
 
 .empty {

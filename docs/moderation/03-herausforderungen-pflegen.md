@@ -1,13 +1,13 @@
 # 3. Herausforderungen pflegen
 
-Der **Herausforderungen**-Tab im Mod-Bereich verwaltet die Sammlungs-Hierarchie:
-Top-Themen (Ebene 1) und ihre Unter-Bereiche (Ebene 2 — die eigentlichen
-„Challenges").
+Unter **Inhalte ▾ → Themenbereiche** verwaltest du die Sammlungs-Hierarchie:
+Themenbereiche (Ebene 1) und ihre Unter-Bereiche (Ebene 2 — die eigentlichen
+Herausforderungen / „Challenges").
 
 ## Struktur
 
 ```
-Themengebiet (Top-Level)
+Themenbereich (oberste Ebene)
 ├── Herausforderung 1 (mit n Ideen drin)
 ├── Herausforderung 2
 └── Herausforderung 3
@@ -23,8 +23,8 @@ Oben rechts im Tab:
 
 | Feld | Beispiel |
 |---|---|
-| Eltern-Sammlung | „Top-Level (neue Herausforderung)" → erzeugt ein neues Themengebiet |
-| | ODER ein bestehendes Themengebiet wählen → erzeugt eine Sub-Challenge |
+| Eltern-Sammlung | „— Oberste Ebene (neuer Themenbereich) —" → erzeugt einen neuen **Themenbereich** |
+| | ODER „↳ unter „…" (Herausforderung)" — einen bestehenden Themenbereich wählen → erzeugt eine **Herausforderung** darunter |
 | Titel | „Mangelnde Metadatenstandards" |
 
 Klick **„+ Anlegen"** legt im edu-sharing-Repo ein neues `ccm:map` an. Erscheint
@@ -108,12 +108,12 @@ Sync.
 
 ### Eine neue HackathOERn-Edition vorbereiten
 
-1. **Veranstaltung anlegen** im Veranstaltungen-Tab (z.B. `hackathoern-4` /
+1. **Veranstaltung anlegen** unter Inhalte → Veranstaltungen (z.B. `hackathoern-4` /
    „HackathOERn 4")
-2. **Optional: neues Themengebiet** oder neue Sub-Challenges anlegen, falls
+2. **Optional: neuen Themenbereich** oder neue Herausforderungen anlegen, falls
    die Edition thematische Schwerpunkte hat
 3. **Sortierung anpassen** — relevante Challenges nach oben
-4. **QR-Code teilen** (im Events-Tab) für Plakate
+4. **QR-Code teilen** (unter Inhalte → Veranstaltungen) für Plakate
 
 ### Nach einem Event: Aufräumen
 

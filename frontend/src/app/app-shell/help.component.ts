@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
 
 /**
  * Endnutzer-Hilfeseite. Erklärt die wichtigsten Workflows der Ideendatenbank
- * in einfacher Sprache: Idee einreichen, Mitmachen/Folgen, Kommentieren,
+ * in einfacher Sprache: Idee einreichen, Mithacken/Folgen, Kommentieren,
  * Bewerten, Suche, Filter, Profil, Melden, Anmeldung.
  */
 @Component({
@@ -60,7 +60,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
     <p class="intro">
       Diese Seite erklärt die wichtigsten Funktionen der HackathOERn-
       Ideendatenbank — was du als Besucher:in, Idee-Einreicher:in
-      oder Mitmachende:r tun kannst.
+      oder Mithackende:r tun kannst.
     </p>
 
     <div class="toc">
@@ -68,7 +68,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
       <a href="#was">Was ist das?</a>
       <a href="#stoebern">Stöbern &amp; Suchen</a>
       <a href="#einreichen">Idee einreichen</a>
-      <a href="#mitmachen">Mitmachen &amp; Folgen</a>
+      <a href="#mithacken">Mithacken &amp; Folgen</a>
       <a href="#kommentieren">Kommentieren &amp; Bewerten</a>
       <a href="#profil">Konto &amp; Profil</a>
       <a href="#melden">Probleme melden</a>
@@ -85,7 +85,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
       </p>
       <ul>
         <li>einen <strong>Titel</strong> und eine <strong>Beschreibung</strong>,</li>
-        <li>einen <strong>Bereich</strong> (Herausforderung, in die sie thematisch passt),</li>
+        <li>eine <strong>Herausforderung</strong> (im passenden Themenbereich, zu der sie thematisch passt),</li>
         <li>eine <strong>Phase</strong> (Anregung → Pitch-bereit → In Umsetzung → Abgeschlossen),</li>
         <li>optional eine zugeordnete <strong>Veranstaltung</strong> (z.B. HackathOERn 3).</li>
       </ul>
@@ -104,7 +104,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
 
       <h3>Startseite</h3>
       <p>
-        Zeigt die zuletzt geänderten Ideen, die aktuellen Herausforderungen
+        Zeigt die zuletzt geänderten Ideen, die aktuellen Themenbereiche
         und einen Schnelleinstieg zur Rangliste.
       </p>
       <p>
@@ -123,25 +123,26 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
           Treffer werden im Tile-Grid hervorgehoben.
         </li>
         <li>
-          <strong>Filter</strong> für Phase, Veranstaltung und Bereich —
-          oben rechts mit Zähler hinter jedem Filter-Chip (z.B.
-          „Anregung 12" zeigt 12 Ideen in dieser Phase).
+          <strong>Filter</strong> für Phase, Veranstaltung, Themenbereich und
+          Herausforderung — als Pillen mit Zähler in Klammern hinter jeder
+          Option (z.B. „Anregung (12)" zeigt 12 Ideen in dieser Phase). Ein
+          „Filter zurücksetzen" leert alle Filter auf einmal.
         </li>
         <li>
           <strong>Sortierung</strong>: Datum, Bewertung, Kommentare, Titel.
         </li>
       </ul>
 
-      <h3>Herausforderungen</h3>
+      <h3>Themenbereiche</h3>
       <p>
-        Übergeordnete Themengebiete (z.B. „Lernortübergreifende Bildung").
-        Klick öffnet die Liste aller Ideen in diesem Bereich, mit
-        Drilldown auf einzelne Unter-Herausforderungen.
+        Übergeordnete Sammlungen (z.B. „Lernortübergreifende Bildung").
+        Klick öffnet die Liste aller Ideen in diesem Themenbereich, mit
+        Drilldown auf einzelne Herausforderungen.
       </p>
 
       <h3>Rangliste</h3>
       <p>
-        Sortierbar nach Bewertung, Kommentaren oder „Mitmachen". Die Liste
+        Sortierbar nach Bewertung, Kommentaren oder „Mithacken". Die Liste
         zeigt <strong>alle Ideen</strong> — auch noch unbewertete, damit auch
         Bewegungen in unteren Rängen sichtbar bleiben. Oben ein
         Verlaufs-Chart der Top-3 plus eine „Top-Steiger der letzten 7 Tage"-
@@ -174,7 +175,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
       <h2>Idee einreichen</h2>
       <ol>
         <li><span class="step">Schritt 1</span> — Auf den gelben „+ Idee einreichen"-Button klicken (Topbar oder Startseite-Hero).</li>
-        <li><span class="step">Schritt 2</span> — <strong>Titel</strong> eingeben (mindestens 3 Zeichen). Optional Beschreibung, Bereich/Herausforderung, Phase. <strong>Veranstaltung ist Pflicht</strong> — wähle eine laufende Veranstaltung oder „Keine Veranstaltungszugehörigkeit".</li>
+        <li><span class="step">Schritt 2</span> — <strong>Titel</strong> eingeben (mindestens 3 Zeichen). Optional Beschreibung, Themenbereich/Herausforderung, Phase. <strong>Veranstaltung ist Pflicht</strong> — wähle eine laufende Veranstaltung oder „Keine Veranstaltungszugehörigkeit".</li>
         <li><span class="step">Schritt 3</span> — Bei anonymer Einreichung kurz die <strong>Rechenaufgabe (Spam-Schutz)</strong> lösen. Angemeldete überspringen das.</li>
         <li><span class="step">Schritt 4</span> — Abschicken. Deine Idee landet in der <strong>Moderations-Inbox</strong>.</li>
         <li><span class="step">Schritt 5</span> — Das Mod-Team prüft und ordnet sie der passenden Herausforderung zu. Danach erscheint sie öffentlich.</li>
@@ -199,16 +200,16 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
       </p>
     </section>
 
-    <!-- ===== Mitmachen ===== -->
-    <section id="mitmachen">
-      <h2>Mitmachen &amp; Folgen</h2>
+    <!-- ===== Mithacken ===== -->
+    <section id="mithacken">
+      <h2>Mithacken &amp; Folgen</h2>
       <p>
         Auf jeder Idee-Detailseite gibt's zwei Buttons:
       </p>
       <ul>
         <li>
-          <strong>Ich will mitmachen</strong>: Signalisiert öffentlich Interesse,
-          aktiv an der Umsetzung mitzuwirken. Andere Mitmachende sehen dich
+          <strong>Ich will mithacken</strong>: Signalisiert öffentlich Interesse,
+          aktiv an der Umsetzung mitzuwirken. Andere Mithackende sehen dich
           in der Avatar-Reihe.
         </li>
         <li>
@@ -220,16 +221,17 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
       <div class="tip">
         Beide Aktionen erfordern eine Anmeldung. Wer angemeldet ist, kann
         beliebige Ideen mit einem Klick markieren — Stand wird in deinem
-        Profil unter „Mitmachen" und „Gefolgt" aufgelistet.
+        Profil unter „Mithacken" und „Gefolgt" aufgelistet.
       </div>
     </section>
 
     <!-- ===== Kommentieren ===== -->
     <section id="kommentieren">
       <h2>Kommentieren &amp; Bewerten</h2>
-      <h3>Bewertung (Sterne)</h3>
+      <h3>Bewertung</h3>
       <p>
-        Du kannst eine Idee zwischen 1★ und 5★ bewerten — an mehreren Stellen:
+        Du kannst jede Idee bewerten — je nach Einstellung mit Sternen (1–5)
+        oder mit Daumen hoch. An mehreren Stellen:
       </p>
       <ul>
         <li>auf der <strong>Idee-Detailseite</strong> unter „Bewertung",</li>
@@ -268,7 +270,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
         </li>
         <li><strong>Meine Ideen</strong>: alle von dir eingereichten Ideen.</li>
         <li><strong>Gefolgt</strong>: alle Ideen, denen du folgst.</li>
-        <li><strong>Mitmachen</strong>: Ideen, bei denen du mitmachst.</li>
+        <li><strong>Mithacken</strong>: Ideen, bei denen du mithackst.</li>
         <li>
           <strong>Profil &amp; Teilen</strong>: pflege optionale Profil-Felder
           (Anzeigename, Kurzbeschreibung, Website, Rolle) und teile dein

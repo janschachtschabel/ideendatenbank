@@ -5,16 +5,16 @@ welcher Herausforderung, sind sie spam oder schon mal eingereicht?
 
 ## Die vier Anzeigen-Filter
 
-Oben im Postfach-Tab vier Textlinks:
+Oben im Postfach vier Textlinks (Label „Anzeigen:"):
 
 | Filter | Was wird gezeigt | Typischer Use-Case |
 |---|---|---|
-| **Ohne Sammlung** (Default) | ccm:io-Items in der Inbox, die **noch nirgends referenziert** sind | tägliche Arbeitsliste |
+| **Inbox** (Default) | ccm:io-Items in der Inbox, die **noch nirgends referenziert** sind | tägliche Arbeitsliste |
 | **Alle** | Alle ccm:io-Items in der Inbox, egal ob schon irgendwo zugeordnet | Gesamt-Übersicht zur Reproduzierbarkeit |
-| **In Sammlung** | Items, die bereits als Reference irgendwo zugeordnet sind | um nachzuvollziehen, was schon eingepflegt wurde |
-| **App-Einreichungen** | Items, die App-Konvention-Marker tragen (`phase:`, `event:`, `target-topic:`) | nur die durchs eigene Submit-Formular gelaufenen |
+| **In Herausforderung** | Items, die bereits als Reference irgendwo zugeordnet sind | um nachzuvollziehen, was schon eingepflegt wurde |
+| **Sync-Differenz** | Dry-Run-Abgleich App-Cache ↔ edu-sharing: was fehlt im Cache, was ist verwaist | Sync-Probleme aufspüren |
 
-Hinter jedem Link steht in Klammern die aktuelle Anzahl, z.B. `Ohne Sammlung (13)`.
+Hinter jedem Link steht in Klammern die aktuelle Anzahl, z.B. `Inbox (13)`.
 Counter laden automatisch beim Tab-Öffnen.
 
 ## Eine Idee einsortieren (Reference setzen)
@@ -78,26 +78,26 @@ dem Knoten in der Detail-Ansicht. Praktisch für:
 Mögliche Ursachen:
 1. **Sie wurde direkt im Repo angelegt** → erscheint nur unter Filter „Alle"
 2. **Sync hat noch nicht gegriffen** → max. 5 Min. warten, oder Postfach-Tab schließen + öffnen
-3. **Sie wurde schon irgendwo referenziert** → erscheint unter „In Sammlung"
+3. **Sie wurde schon irgendwo referenziert** → erscheint unter „In Herausforderung"
 
-### „Die Idee ist in der falschen Sammlung gelandet"
+### „Die Idee ist in der falschen Herausforderung gelandet"
 
 Im **Detail-Bereich der Idee** (über Klick aus dem Postfach erreichbar) gibt's
 in der Sidebar einen „Herausforderung"-Dropdown (Mod-only). Auswahl ändern →
 sofort wird die Reference umgehängt: alte raus, neue rein. Original-Inhalt
 bleibt intakt.
 
-### „Die Idee soll in zwei Sammlungen erscheinen"
+### „Die Idee soll in zwei Herausforderungen erscheinen"
 
-Funktioniert nicht direkt im Postfach (Bulk-Move zielt auf eine Sammlung). Aber:
-1. Idee zur Sammlung A verschieben (im Postfach)
-2. Detail-Seite der referenzierten Idee öffnen
-3. (Wenn der Endpoint dafür eingerichtet ist:) Bulk-Reference auf Sammlung B —
-   sonst manuell im edu-sharing-Web-UI „Zu Sammlung hinzufügen"
+Das sieht die App **nicht** vor: Sie hält pro Idee genau **eine**
+Herausforderungs-Referenz. „Verschieben" bzw. ein Wechsel im Detail-Dropdown
+hängt die Idee jeweils um (alte Reference raus, neue rein) — es kommt keine
+zweite hinzu.
 
-Beachte: die App-DB-Cache zeigt die Idee unter **einer** Topic-ID (die zuletzt
-gesetzte Reference). Die zweite Reference ist im Repo da, aber die App-Listen-Sicht
-zeigt nur die erste.
+Wer eine Idee bewusst in mehreren Sammlungen führen will, legt die zweite
+Reference **manuell im edu-sharing-Web-UI** an („Zu Sammlung hinzufügen").
+Beachte aber: die App-Listen-Sicht zeigt die Idee weiterhin nur unter der einen
+Topic-ID aus dem Cache.
 
 ## Datenfluss-Übersicht
 
@@ -106,7 +106,7 @@ User submittet              edu-sharing-Inbox       App-Postfach
 ─────────────              ────────────────────     ────────────
                                                                     
   Submit-Form  ─────→  ccm:io ANLEGEN  ─────→  erscheint unter
-                       in 98fcbe56...           "Ohne Sammlung"
+                       in 98fcbe56...           Filter "Inbox"
                        als Child                                     
                                                                     
   Mod öffnet                                                         

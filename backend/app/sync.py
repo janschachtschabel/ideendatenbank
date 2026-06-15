@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
+import math
 from datetime import UTC, datetime, timedelta
 
 from . import edu_sharing
@@ -100,28 +100,18 @@ def _classify_keywords(kws: list[str]) -> tuple[str | None, list[str], list[str]
     return phase, events, categories, other
 
 
-_EVENT_TITLE_RE = re.compile(r"HackathOERn?\s*#?\s*(\d+)", re.IGNORECASE)
-
-
-def _infer_event_from_title(title: str) -> str | None:
-    """Heuristic: pick up "HackathOERn N" references in the title and emit a
-    SLUG that matches the curated taxonomy convention (e.g., `hackathoern-1`).
-
-    This is a transitional helper for Bestands-Daten ohne `event:`-Keyword.
-    Sobald Moderator:innen die Idee einmal über den Edit-Dialog speichern,
-    wird ein echter Slug ins `cclom:general_keyword` geschrieben — danach
-    greift dieser Fallback nicht mehr. Mittelfristig ganz entfernen.
-    """
-    if not title:
-        return None
-    m = _EVENT_TITLE_RE.search(title)
-    return f"hackathoern-{m.group(1)}" if m else None
-
-
-def _rating(node: dict) -> tuple[float, int]:
+def _rating(node: dict) -> tuple[float, int, float]:
+    """(Durchschnitt, Anzahl, Summe) der Sternwerte. edu-sharing liefert die
+    Summe direkt als `overall.sum` mit — exakter als Durchschnitt×Anzahl."""
     r = node.get("rating") or {}
     overall = r.get("overall") or {}
-    return float(overall.get("rating") or 0.0), int(overall.get("count") or 0)
+    avg = float(overall.get("rating") or 0.0)
+    count = int(overall.get("count") or 0)
+    # `sum` ist bei manchen Instanzen nicht gesetzt → exakt aus avg*count
+    # rekonstruieren (Sternwerte sind ganzzahlig, daher verlustfrei rundbar).
+    raw_sum = overall.get("sum")
+    total = float(raw_sum) if raw_sum is not None else float(round(avg * count))
+    return avg, count, total
 
 
 def _preview(node: dict) -> str | None:
@@ -166,6 +156,12 @@ async def _upsert_topic(con, node: dict, parent_id: str | None) -> None:
     # Skip the generic collection-icon so the UI falls back to our own visuals.
     preview = node.get("preview") or {}
     preview_url = preview.get("url") if not preview.get("isIcon") else None
+    # Farbe ist ein reines App-Konzept: gesetzt via PATCH /admin/topics, NICHT
+    # nach edu-sharing geschrieben. Beim ERSTEN INSERT seedet ES einen evtl.
+    # vorhandenen Wert; danach ist die im Cache gesetzte Farbe maßgeblich und
+    # wird beim Sync bewusst NICHT überschrieben (color fehlt im ON CONFLICT-SET
+    # unten — analog zu idea.hidden). Sonst würde der Sync sie alle 5 min auf
+    # NULL zurücksetzen.
     color = _first(props, "ccm:collection_color")
     con.execute(
         """INSERT INTO topic (id,parent_id,title,description,preview_url,color,created_at,modified_at)
@@ -175,7 +171,6 @@ async def _upsert_topic(con, node: dict, parent_id: str | None) -> None:
              title=excluded.title,
              description=excluded.description,
              preview_url=excluded.preview_url,
-             color=excluded.color,
              modified_at=excluded.modified_at""",
         (
             ref,
@@ -207,27 +202,21 @@ async def _upsert_idea(
     kws = _keywords(props)
     phase, events, categories, other = _classify_keywords(kws)
 
-    # Fallback: derive event from title when no explicit event keyword is set.
-    title_raw = node.get("title") or _first(props, "cm:name") or ""
-    if not events:
-        inferred = _infer_event_from_title(title_raw)
-        if inferred:
-            events.append(inferred)
-
     # Rating + commentCount live on the main ccm:io; fetch once and reuse.
     rating_avg = 0.0
     rating_count = 0
+    rating_sum = 0.0
     comment_count = 0
     if main_content_id and main_content_id != ref:
         try:
             io_meta = await edu_sharing.client.node_metadata(main_content_id)
             io_node = io_meta.get("node") or {}
-            rating_avg, rating_count = _rating(io_node)
+            rating_avg, rating_count, rating_sum = _rating(io_node)
             comment_count = _comment_count_from_node(io_node)
         except Exception as e:
             log.warning("metadata fetch failed for %s: %s", main_content_id, e)
     else:
-        rating_avg, rating_count = _rating(node)
+        rating_avg, rating_count, rating_sum = _rating(node)
         comment_count = _comment_count_from_node(node)
 
     title = node.get("title") or _first(props, "cm:name") or "(ohne Titel)"
@@ -282,9 +271,9 @@ async def _upsert_idea(
         """INSERT INTO idea
              (id,kind,topic_id,main_content_id,title,description,preview_url,author,
               project_url,phase,events,categories,keywords,rating_avg,rating_count,
-              comment_count,attachment_mimetype,attachment_size,attachment_name,
+              rating_sum,comment_count,attachment_mimetype,attachment_size,attachment_name,
               attachment_url,owner_username,original_id,created_at,modified_at,synced_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
              kind=excluded.kind,
              topic_id=excluded.topic_id,
@@ -300,6 +289,7 @@ async def _upsert_idea(
              keywords=excluded.keywords,
              rating_avg=excluded.rating_avg,
              rating_count=excluded.rating_count,
+             rating_sum=excluded.rating_sum,
              comment_count=excluded.comment_count,
              attachment_mimetype=excluded.attachment_mimetype,
              attachment_size=excluded.attachment_size,
@@ -325,6 +315,7 @@ async def _upsert_idea(
             json.dumps(other, ensure_ascii=False),
             rating_avg,
             rating_count,
+            rating_sum,
             comment_count,
             attach_mime,
             attach_size,
@@ -597,8 +588,106 @@ async def _run_sync_locked() -> dict:
     }
 
 
+# ===== Rating-Verfall (exponentiell mit Mindestgewicht) =================
+def _decay_weight(iso: str, lam: float, now: datetime, floor: float = 0.0) -> float:
+    """Gewicht einer Stimme nach Alter: w(t)=max(floor, e^(−λ·t)), t in Tagen.
+    `floor` = Verfallsstopp (Mindestgewicht), damit alte Stimmen nicht auf 0
+    fallen."""
+    if lam <= 0:
+        return 1.0
+    try:
+        d = datetime.fromisoformat(iso)
+    except Exception:
+        return 1.0
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=UTC)
+    age_days = max(0.0, (now - d).total_seconds() / 86400.0)
+    return max(floor, math.exp(-lam * age_days))
+
+
+def decay_scores(con, mode: str) -> dict[str, float]:
+    """Verfallsgewichteter Score je Idee.
+
+    mode 'stars'  → Σ Sternwert·w(t)  (+ Legacy-Seed seed_sum·w)
+    mode 'thumbs' → Σ 1·w(t)          (+ Legacy-Seed seed_count·w)
+
+    Quelle ist das `vote_event`-Ledger (echte Zeitstempel ab Einführung)
+    plus der einmalige `idea_score_seed` für Altbestand. λ + Mindestgewicht
+    (floor) kommen aus der Config. Bei deaktiviertem Verfall (λ=0) entspricht
+    das Ergebnis exakt der kumulativen Absolutsumme."""
+    from .config import settings
+
+    lam = settings.rating_decay_lambda
+    floor = settings.rating_decay_floor
+    now = datetime.now(UTC)
+    out: dict[str, float] = {}
+    for r in con.execute("SELECT idea_id, value, created_at FROM vote_event").fetchall():
+        unit = float(r["value"]) if mode == "stars" else 1.0
+        out[r["idea_id"]] = out.get(r["idea_id"], 0.0) + unit * _decay_weight(
+            r["created_at"], lam, now, floor
+        )
+    for r in con.execute(
+        "SELECT idea_id, seed_sum, seed_count, seeded_at FROM idea_score_seed"
+    ).fetchall():
+        base = float(r["seed_sum"]) if mode == "stars" else float(r["seed_count"])
+        if base:
+            out[r["idea_id"]] = out.get(r["idea_id"], 0.0) + base * _decay_weight(
+                r["seeded_at"], lam, now, floor
+            )
+    return out
+
+
+def ensure_vote_seed(con) -> None:
+    """Einmaliger Legacy-Seed: erfasst die zum Einführungszeitpunkt bereits in
+    edu-sharing vorhandenen Bewertungen als gebündelten, datierten Altbestand,
+    damit der Verfalls-Score nicht bei 0 startet. Idempotent über einen Marker
+    in app_setting."""
+    done = con.execute("SELECT value FROM app_setting WHERE key='vote_seed_done'").fetchone()
+    if done and done["value"] == "1":
+        return
+    now = _iso_now()
+    rows = con.execute(
+        "SELECT id, rating_avg, rating_count, rating_sum FROM idea "
+        "WHERE COALESCE(rating_count,0) > 0"
+    ).fetchall()
+    for r in rows:
+        cnt = int(r["rating_count"] or 0)
+        # Exakte Summe aus edu-sharing (overall.sum) bevorzugen, sonst aus
+        # Durchschnitt×Anzahl rekonstruieren.
+        seed_sum = round(float(r["rating_sum"] or 0.0)) or round(
+            float(r["rating_avg"] or 0.0) * cnt
+        )
+        con.execute(
+            "INSERT OR IGNORE INTO idea_score_seed "
+            "(idea_id,seed_sum,seed_count,seeded_at) VALUES (?,?,?,?)",
+            (r["id"], seed_sum, cnt, now),
+        )
+    # Marker NUR setzen, wenn es etwas zu seeden gab. Auf einer frisch
+    # deployten (leeren) DB läuft dieser Aufruf VOR dem ersten Sync — der
+    # idea-Cache ist dann noch leer. Würden wir den Marker hier brennen, gingen
+    # die in edu-sharing bereits vorhandenen Alt-Bewertungen nie in den
+    # Verfalls-Score ein. Ohne Marker greift der nächste Aufruf (beim ersten
+    # Snapshot nach dem Sync), sobald der Cache gefüllt ist.
+    if rows:
+        con.execute(
+            "INSERT INTO app_setting (key,value) VALUES ('vote_seed_done','1') "
+            "ON CONFLICT(key) DO UPDATE SET value='1'"
+        )
+    # Alte 'rating'-Snapshots haben die frühere Avg-Skala (~0..5); ab jetzt
+    # speichern wir den Verfalls-Score (deutlich größere Skala). Einmal leeren,
+    # damit der Verlaufs-Chart keine Maßstabs-Stufe zeigt.
+    con.execute("DELETE FROM ranking_snapshot WHERE sort IN ('rating','likes')")
+    log.info("ensure_vote_seed: %d Ideen als Legacy-Seed erfasst", len(rows))
+
+
 # ===== Ranking Snapshots =================================================
 SNAPSHOT_TOP_N = 50
+# Auch ohne Rang-Änderung mindestens 1× täglich ein Snapshot je Board, damit
+# der „Letzter Snapshot"-Zeitstempel aktuell bleibt (sonst steht da bei ruhigen
+# Phasen tagealtes Datum). Siehe _capture_ranking_snapshot.
+SNAPSHOT_MAX_AGE = timedelta(hours=24)
+# Sorts mit Verfall (Score = decay_scores) vs. einfache Zähl-Sorts.
+SNAPSHOT_DECAY_MODE = {"rating": "stars", "likes": "thumbs"}
 SNAPSHOT_SORTS = (
     ("rating", "rating_avg", "rating_count"),  # tie-breaker rating_count
     ("likes", "rating_count", "comment_count"),  # Daumen-Modus: Anzahl = Likes
@@ -628,6 +717,9 @@ def _capture_ranking_snapshot(con, ts: str) -> None:
     gerufen. Vor dem Insert werden ältere Snapshots ausgedünnt (siehe
     `_prune_snapshots`), damit die Tabelle nicht unbegrenzt wächst."""
 
+    # Legacy-Stimmen einmalig erfassen, damit der Verfalls-Score Bestand hat.
+    ensure_vote_seed(con)
+
     # Welche Events kommen in den Ideen vor? `events` ist JSON-Array.
     rows = con.execute(
         "SELECT DISTINCT events FROM idea WHERE events IS NOT NULL AND events != '[]'"
@@ -649,6 +741,8 @@ def _capture_ranking_snapshot(con, ts: str) -> None:
             "WHERE kind='interest' GROUP BY idea_id"
         ).fetchall()
     }
+    # Verfalls-Scores je Modus einmal vorberechnen (idee_id → Score).
+    decay_by_mode = {m: decay_scores(con, m) for m in set(SNAPSHOT_DECAY_MODE.values())}
 
     def _rank_for(event_filter: str | None, sort_key: str, primary: str, secondary: str):
         # Trend-Snapshots sollen nur Ideen enthalten, die im jeweiligen
@@ -658,8 +752,22 @@ def _capture_ranking_snapshot(con, ts: str) -> None:
         where = []
         params: list = []
         if event_filter:
-            where.append("events LIKE ?")
-            params.append(f'%"{event_filter}"%')
+            # Wildcards escapen (Konsistenz mit routes.py). event_filter ist ein
+            # DB-Slug, daher i.d.R. harmlos — aber sauber gehalten.
+            ef = event_filter.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            where.append("events LIKE ? ESCAPE '\\'")
+            params.append(f'%"{ef}"%')
+
+        # Rating/Likes: Score = verfallsgewichtet (decay_scores).
+        decay_mode = SNAPSHOT_DECAY_MODE.get(sort_key)
+        if decay_mode:
+            dmap = decay_by_mode[decay_mode]
+            sql_where = (" WHERE " + " AND ".join(where)) if where else ""
+            ideas = con.execute(f"SELECT id FROM idea{sql_where}", params).fetchall()
+            scored = [(r["id"], dmap.get(r["id"], 0.0)) for r in ideas]
+            scored = [t for t in scored if t[1] > 0]
+            scored.sort(key=lambda t: -t[1])
+            return [(iid, round(s, 3)) for iid, s in scored[:SNAPSHOT_TOP_N]]
 
         if sort_key == "interest":
             sql_where = (" WHERE " + " AND ".join(where)) if where else ""
@@ -675,7 +783,7 @@ def _capture_ranking_snapshot(con, ts: str) -> None:
             scored.sort(key=lambda t: (-t[1], -t[2]))
             return [(idea_id, score) for idea_id, score, _ in scored[:SNAPSHOT_TOP_N]]
 
-        # Rating + Comments: nur Ideen mit primary > 0
+        # Comments: nur Ideen mit primary > 0
         where.append(f"{primary} > 0")
         sql_where = " WHERE " + " AND ".join(where)
         ideas = con.execute(
@@ -704,18 +812,40 @@ def _capture_ranking_snapshot(con, ts: str) -> None:
             ).fetchall()
         ]
 
-    # Schreiben — overall + pro Event. Pro (event, sort) NUR wenn sich die
-    # Top-N-Reihenfolge gegenüber dem letzten Snapshot geändert hat (Option B:
-    # jeder gespeicherte Punkt = eine echte Rang-Änderung). Verhindert
-    # identische Wiederholungen, die den Verlauf-Chart zumüllen würden.
+    def _latest_at(ev: str, sort_key: str) -> str | None:
+        row = con.execute(
+            "SELECT MAX(snapshot_at) AS m FROM ranking_snapshot WHERE event=? AND sort=?",
+            (ev, sort_key),
+        ).fetchone()
+        return row["m"] if row else None
+
+    def _is_stale(last_at: str | None) -> bool:
+        """True wenn der letzte Board-Snapshot fehlt oder älter als
+        SNAPSHOT_MAX_AGE ist → täglicher Heartbeat, damit der „Letzter
+        Snapshot"-Zeitstempel auch in ruhigen Phasen aktuell bleibt."""
+        if not last_at:
+            return True
+        try:
+            d = datetime.fromisoformat(last_at)
+        except Exception:
+            return True
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=UTC)
+        return datetime.now(UTC) - d >= SNAPSHOT_MAX_AGE
+
+    # Schreiben — overall + pro Event. Pro (event, sort) wird geschrieben, wenn
+    # sich die Top-N-Reihenfolge geändert hat ODER der letzte Snapshot ≥24h alt
+    # ist (Heartbeat). So bleibt der Verlauf schlank, aber der Zeitstempel
+    # aktuell.
     targets = [""] + sorted(event_slugs)
     wrote_any = False
     for ev in targets:
         for sort_key, primary, secondary in SNAPSHOT_SORTS:
             ranking = _rank_for(ev or None, sort_key, primary, secondary)
             new_order = [idea_id for idea_id, _ in ranking]
-            if new_order and new_order == _latest_order(ev, sort_key):
-                continue  # unverändert → kein neuer Snapshot für dieses Board
+            unchanged = bool(new_order) and new_order == _latest_order(ev, sort_key)
+            if unchanged and not _is_stale(_latest_at(ev, sort_key)):
+                continue  # unverändert & frisch → kein neuer Snapshot
             for rank, (idea_id, score) in enumerate(ranking, start=1):
                 con.execute(
                     "INSERT OR REPLACE INTO ranking_snapshot "

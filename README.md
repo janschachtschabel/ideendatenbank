@@ -8,6 +8,8 @@ in **edu-sharing** (`redaktion.openeduhub.net`).
 > 🔄 **Docker-Update (Schnellreferenz)** → [`docs/DOCKER-UPDATE.md`](docs/DOCKER-UPDATE.md)
 > 📖 **Bedienung (Endnutzer)** → [`docs/benutzerhandbuch/`](docs/benutzerhandbuch/)
 > 🛠 **Bedienung (Moderation)** → [`docs/moderation/`](docs/moderation/)
+> 🏗 **Architektur & Technik** → [`docs/ARCHITEKTUR.md`](docs/ARCHITEKTUR.md)
+> 🔌 **Zusammenspiel mit edu-sharing** → [`docs/EDU-SHARING-ZUSAMMENSPIEL.md`](docs/EDU-SHARING-ZUSAMMENSPIEL.md)
 
 ---
 
@@ -27,12 +29,16 @@ in **edu-sharing** (`redaktion.openeduhub.net`).
 
 ## Architektur
 
+> Ausführlich: [`docs/ARCHITEKTUR.md`](docs/ARCHITEKTUR.md) (Techniken Backend/Frontend)
+> und [`docs/EDU-SHARING-ZUSAMMENSPIEL.md`](docs/EDU-SHARING-ZUSAMMENSPIEL.md)
+> (Cache ↔ edu-sharing). Kurzfassung:
+
 ```
 Browser (<ideendb-app> / <ideendb-tile-grid> Web Components)
         │
         ▼
 FastAPI Backend  ──► SQLite (FTS5, Activity-Log, Trend-Snapshots,
-        │                    Reports, Mitmachen/Folgen, Taxonomien,
+        │                    Reports, Mithacken/Folgen, Taxonomien,
         │                    Captcha-Tokens)
         ▼
 edu-sharing REST-API (Source of Truth: Ideen, Rating, Kommentare, User)
@@ -42,14 +48,14 @@ edu-sharing REST-API (Source of Truth: Ideen, Rating, Kommentare, User)
 - **edu-sharing** ist die einzig verbindliche Datenquelle für Ideen,
   Kommentare, Bewertungen, Anhänge, User und ACLs
 - **SQLite** ist nur ein Performance-Cache + Speicher für App-spezifische
-  Zusätze (Mitmachen, Folgen, Reports, Versteckt-Flag, Aktivitäts-Log,
+  Zusätze (Mithacken, Folgen, Reports, Versteckt-Flag, Aktivitäts-Log,
   Captcha-Challenges)
 - Sync alle 5 Min, plus Single-Node-Refresh bei jeder Schreib-Aktion
 
 ### Datenmodell
 
 ```
-Themengebiet (ccm:map)              ← Top-Level-Sammlungen
+Themenbereich (ccm:map)             ← Top-Level-Sammlungen
 └── Herausforderung (ccm:map)
     └── Idee (ccm:io)               ← Idee = ein ccm:io
         ├── anhang.pdf              ← optional 0..n Child-IOs
@@ -64,7 +70,7 @@ Themengebiet (ccm:map)              ← Top-Level-Sammlungen
 - **Mehrfach-Event** pro Idee unterstützt
 - **Anhänge** als Child-IOs direkt unter der Idee (Cascading-Delete mit
   der Idee). Migration April 2026 vom alten Sammlungs-Pattern.
-- **Mitmachen / Folgen** liegen in der App-SQLite (edu-sharing kennt sie nicht)
+- **Mithacken / Folgen** liegen in der App-SQLite (edu-sharing kennt sie nicht)
 - **Inbox-Pattern**: anonyme Submits landen in der Community-Inbox, von dort
   setzt die Moderation **Reference-Knoten** in die Herausforderungs-Sammlungen
   (kein `_move`)
@@ -75,9 +81,9 @@ Themengebiet (ccm:map)              ← Top-Level-Sammlungen
 
 ### Für alle Besucher:innen
 
-- Themen-Drilldown (Themen → Herausforderungen → Ideen)
+- Themen-Drilldown (Themenbereiche → Herausforderungen → Ideen)
 - Volltext-Suche, sortier-/filterbare Liste
-- Sterne-Bewertung, Kommentare, Markdown-Beschreibungen
+- Sterne- **oder** Daumen-Bewertung (im Mod-Bereich umschaltbar), Kommentare, Beschreibungen
 - Trend-Rangliste mit Top-Steigern
 - Themen- und Veranstaltungs-Übersicht mit aggregierten Counts
 - Direkt-Links auf Ideen, Themen, Veranstaltungen, User
@@ -85,20 +91,25 @@ Themengebiet (ccm:map)              ← Top-Level-Sammlungen
 
 ### Für eingeloggte User
 
-- Idee einreichen (Form mit Phase/Veranstaltung/Themen-Vorwahl,
-  Datei + Vorschaubild)
+- Idee einreichen (Veranstaltung ist Pflicht; Phase/Themen-Vorwahl;
+  bis zu 4 Anhänge + Vorschaubild direkt im Formular)
 - Eigene Ideen bearbeiten (Titel, Beschreibung, Phase, Anhänge ergänzen)
-- **Mitmachen** + **Folgen** mit Avatar-Reihe an der Idee
-- Profil „Mein Bereich": Eigene Ideen, Mitmachen, Folgen, Notifications
+- **Mithacken** (mit Freigabe-Workflow) + **Folgen** mit Avatar-Reihe an der Idee
+- Profil „Mein Bereich": eigene Ideen, Mithacken, Mithack-Anfragen freigeben,
+  Folgen, „Was ist neu"-Feed, Profil (Rollen + opt-in-Kontakt)
 - Öffentliches Profil pro User (auch ohne Login einsehbar)
 - Anonyme Submits werden durch eine **kleine Mathe-Captcha** vor
   Bot-Spam geschützt (kein Drittanbieter)
 
 ### Für Moderator:innen
 
-- 10-Tab-UI: Postfach, Herausforderungen, Versteckt, Meldungen,
-  Backup, Statistik, Aktivität, Veranstaltungen, Phasen, Moderatoren
-- Bulk-Aktionen (Move, Resolve, Hide)
+- Sticky Pill-/Dropdown-Navigation in fünf Gruppen: **Statistik**,
+  **Postfach**, **Inhalte** (Themenbereiche · Veranstaltungen · Phasen),
+  **Moderation** (Meldungen · Aktivität · Inhalte verwalten),
+  **System** (Moderatoren · Backup)
+- Postfach mit Bulk-Move + Sync-Differenz-Abgleich (Cache ↔ edu-sharing)
+- „Inhalte verwalten": alle Ideen durchsuchen, bearbeiten, verstecken/
+  einblenden und löschen an einer Stelle
 - Audit-Log aller Schreib-Aktionen, CSV-Export
 - Statistik-Dashboard mit Phasen-/Event-Verteilung, Top-Aktive User,
   Engagement-Ideen
@@ -245,8 +256,7 @@ Kürzeste Zusammenfassung:
 | `APP_CORS_ORIGINS` | ✅ | erlaubte Browser-Origins (kommagetrennt) |
 | `EDU_REPO_BASE_URL` | optional | Repo-Host; steuert API **und** „im Repo öffnen"-/Registrierungs-Links. Für ein anderes Repo **nur diese** Zeile ändern |
 | `EDU_REPO_API` | optional | API-Basis; leer = automatisch aus `EDU_REPO_BASE_URL` abgeleitet (`<base>/edu-sharing/rest`) |
-| `MODERATION_FALLBACK_GROUPS` | optional | edu-sharing-Gruppen mit Mod-Rechten |
-| `MODERATION_BOOTSTRAP_USERS` | optional | Notnagel-Mods per Username |
+| `MODERATION_FALLBACK_GROUPS` | optional | edu-sharing-Gruppen mit Mod-Rechten (einzige Mod-Quelle) |
 | `BACKUP_*` / `BACKUP_AUTO_RESTORE_MARKER` | optional | Auto-Backup-Intervall, Retention, Auto-Restore-Marker |
 | `SYNC_INTERVAL_SECONDS` / `UPLOAD_*_MAX_BYTES` | optional | sinnvolle Defaults vorhanden |
 | `B_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | optional | reserviert für künftige LLM-Funktionen |
@@ -327,8 +337,8 @@ Verfügbare Image-Tags:
 |---|---|
 | `app-shell/app-shell.component.ts` | Shell, Routing, Topbar, Theme-Switcher |
 | `app-shell/idea-detail.component.ts` | Detail mit Kommentaren, Rating, Anhängen, Sidebar |
-| `app-shell/moderation.component.ts` | Mod-UI mit 10 Tabs |
-| `app-shell/profile.component.ts` | „Mein Bereich" (eigener Feed/Ideen/Follows) |
+| `app-shell/moderation.component.ts` | Mod-UI (gruppierte Pill-/Dropdown-Navigation) |
+| `app-shell/profile.component.ts` | „Mein Bereich" (Feed, eigene Ideen, Mithacken, Folgen, Profil) |
 | `app-shell/public-profile.component.ts` | öffentliches Profil |
 | `app-shell/ranking.component.ts` | Trend-Rangliste + Top-Steiger |
 | `app-shell/submit-idea.component.ts` | Einreiche-Formular inkl. Mathe-Captcha |

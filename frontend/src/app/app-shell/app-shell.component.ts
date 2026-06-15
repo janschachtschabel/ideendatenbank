@@ -16,6 +16,7 @@ import { RankTrendComponent } from './rank-trend.component';
 import { LegalComponent } from './legal.component';
 import { EmbedComponent } from './embed.component';
 import { HelpComponent } from './help.component';
+import { ShareDialogComponent, ShareTarget } from './share-dialog.component';
 
 type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 'submit' | 'moderation' | 'profile' | 'user' | 'imprint' | 'privacy' | 'embed' | 'help';
 
@@ -37,6 +38,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
     LegalComponent,
     EmbedComponent,
     HelpComponent,
+    ShareDialogComponent,
   ],
   styleUrls: ['./app-shell.component.scss'],
   template: `
@@ -60,7 +62,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
         <nav class="nav" [class.open]="mobileNavOpen">
           <button [class.active]="view()==='home'"    (click)="go('home'); mobileNavOpen=false">Start</button>
           <button [class.active]="view()==='browser'" (click)="go('browser'); mobileNavOpen=false">Ideen</button>
-          <button [class.active]="view()==='topics'"  (click)="go('topics'); mobileNavOpen=false">Herausforderungen</button>
+          <button [class.active]="view()==='topics'"  (click)="go('topics'); mobileNavOpen=false">Themenbereiche</button>
           <button [class.active]="view()==='events'"  (click)="go('events'); mobileNavOpen=false">Veranstaltungen</button>
           <button [class.active]="view()==='ranking'" (click)="go('ranking'); mobileNavOpen=false">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -78,8 +80,9 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               <button class="user"
                       [class.active]="view()==='profile' || view()==='moderation'"
                       (click)="userMenuOpen = !userMenuOpen"
-                      [title]="api.currentUser() || ''">
-                ● {{ api.currentUser() || 'Angemeldet' }}
+                      [title]="api.currentDisplayName() || 'Angemeldet'">
+                <span class="user-initials" aria-hidden="true">{{ api.currentInitials() }}</span>
+                <span class="user-name">{{ api.currentDisplayName() || 'Angemeldet' }}</span>
                 @if (unseenCount() > 0) {
                   <span class="notif-badge" [title]="unseenCount() + ' neue Aktivität(en)'">
                     {{ unseenCount() > 99 ? '99+' : unseenCount() }}
@@ -152,6 +155,62 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
     </header>
 
     <main>
+      <!-- Gemeinsame Event-Kachel — von Startseite UND Veranstaltungsseite
+           genutzt (identisches Aussehen). Klick funktioniert aus jeder View. -->
+      <ng-template #eventCard let-e>
+        <div class="topic-card-compact"
+             [class.event-featured]="e.featured"
+             role="button" tabindex="0"
+             (click)="enterEventDrillFromHome(e.slug)"
+             (keyup.enter)="enterEventDrillFromHome(e.slug)">
+          <span class="lead-icon" aria-hidden="true" style="color: var(--wlo-primary)">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+          </span>
+          <div class="body">
+            <h3>
+              {{ e.label }}
+              @if (e.featured) { <span class="ev-pill featured">⭐ Promotion</span> }
+              @if (e.status === 'archived') { <span class="ev-pill archived">Abgelaufen</span> }
+              @if (e.status === 'draft') { <span class="ev-pill draft">Entwurf</span> }
+            </h3>
+            @if (e.description) {
+              <p class="ev-description">{{ e.description }}</p>
+            }
+            @if (eventDateRange(e) || e.location || e.detail_url) {
+              <ul class="ev-meta">
+                @if (eventDateRange(e); as d) {
+                  <li><span class="ev-ico" aria-hidden="true">📅</span>{{ d }}</li>
+                }
+                @if (e.location) {
+                  <li><span class="ev-ico" aria-hidden="true">📍</span>{{ e.location }}</li>
+                }
+                @if (e.detail_url) {
+                  <li><span class="ev-ico" aria-hidden="true">🔗</span>
+                    <a [href]="e.detail_url" target="_blank" rel="noopener"
+                       (click)="$event.stopPropagation()">Veranstaltungs-Website</a>
+                  </li>
+                }
+              </ul>
+            }
+            <span class="count">
+              @if (e.count === 0) {
+                Noch keine Ideen — sei der/die Erste!
+              } @else {
+                {{ e.count }} {{ e.count === 1 ? 'Idee' : 'Ideen' }}
+              }
+            </span>
+          </div>
+          <span class="arrow">→</span>
+        </div>
+      </ng-template>
+
       @switch (view()) {
         @case ('home') {
           <section class="hero">
@@ -159,7 +218,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               <div class="hero-text">
                 <h1>Ideen für bessere OER-Infrastrukturen</h1>
                 <p>Sammle, diskutiere und bewerte Ideen für den nächsten HackathOERn.
-                   Ohne Hürde mitmachen — Einreichen geht auch ohne Login.</p>
+                   Ohne Hürde mithacken — Einreichen geht auch ohne Login.</p>
                 <div class="hero-cta">
                   <button class="btn ghost" (click)="go('browser')">Ideen stöbern</button>
                 </div>
@@ -186,6 +245,41 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                       </button>
                     </h2>
                     @if (fe.description) { <p class="fe-desc">{{ fe.description }}</p> }
+                    @if (fe.location || fe.date_start || fe.detail_url) {
+                      <ul class="fe-info">
+                        @if (eventDateRange(fe); as d) {
+                          <li>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <rect x="3" y="4" width="18" height="18" rx="2"/>
+                              <line x1="16" y1="2" x2="16" y2="6"/>
+                              <line x1="8" y1="2" x2="8" y2="6"/>
+                              <line x1="3" y1="10" x2="21" y2="10"/>
+                            </svg>
+                            {{ d }}
+                          </li>
+                        }
+                        @if (fe.location) {
+                          <li>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                              <circle cx="12" cy="10" r="3"/>
+                            </svg>
+                            {{ fe.location }}
+                          </li>
+                        }
+                        @if (fe.detail_url) {
+                          <li>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                            </svg>
+                            <a [href]="fe.detail_url" target="_blank" rel="noopener">
+                              Details zur Veranstaltung
+                            </a>
+                          </li>
+                        }
+                      </ul>
+                    }
                     <p class="fe-meta">
                       {{ fe.idea_count }} {{ fe.idea_count === 1 ? 'Idee bereits eingereicht' : 'Ideen bereits eingereicht' }}
                       @if (fe.featured_until) {
@@ -221,20 +315,18 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
 
           <section class="container section">
             <div class="section-head">
-              <h2>Herausforderungen durchstöbern</h2>
+              <h2>Themenbereiche durchstöbern</h2>
               <button class="link" (click)="go('topics')">Zur Übersicht →</button>
             </div>
             <div class="topic-grid-compact">
               @for (t of rootTopics(); track t.id; let i = $index) {
                 <button class="topic-card-compact"
                         (click)="openTopic(t)">
-                  <span class="lead-icon" aria-hidden="true">
+                  <span class="lead-icon" aria-hidden="true" style="color: var(--wlo-primary)">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
                          stroke="currentColor" stroke-width="2" stroke-linecap="round"
                          stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="10"/>
-                      <circle cx="12" cy="12" r="6"/>
-                      <circle cx="12" cy="12" r="2"/>
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                     </svg>
                   </span>
                   <div class="body">
@@ -246,6 +338,20 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               }
             </div>
           </section>
+
+          @if (homeBrowseEvents().length) {
+            <section class="container section">
+              <div class="section-head">
+                <h2>Veranstaltungen durchstöbern</h2>
+                <button class="link" (click)="go('events')">Zur Übersicht →</button>
+              </div>
+              <div class="topic-grid-compact">
+                @for (e of homeBrowseEvents(); track e.slug) {
+                  <ng-container *ngTemplateOutlet="eventCard; context: { $implicit: e }"></ng-container>
+                }
+              </div>
+            </section>
+          }
         }
 
         @case ('browser') {
@@ -268,15 +374,29 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
             <div class="controls">
               <input class="search" type="search" placeholder="Suchen…"
                      [(ngModel)]="searchQ" (input)="onSearchInput()" />
-              <!-- Sortierung: Feld + Richtungs-Toggle -->
+              <!-- Sortierung als Filterpille + Richtungs-Toggle -->
               <div class="sort-group">
-                <select [(ngModel)]="sort" (change)="bump()" aria-label="Sortierung">
-                  <option value="modified">Datum (geändert)</option>
-                  <option value="created">Datum (erstellt)</option>
-                  <option value="rating">Bewertung</option>
-                  <option value="comments">Kommentare</option>
-                  <option value="title">Name</option>
-                </select>
+                @if (filterMenuOpen==='sort') { <div class="fmenu-backdrop" (click)="filterMenuOpen=null"></div> }
+                <div class="fpill-wrap">
+                  <button class="fpill" (click)="toggleFilterMenu('sort')" aria-label="Sortierung">
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/>
+                      <line x1="10" y1="18" x2="14" y2="18"/>
+                    </svg>
+                    Sortierung: <span class="fval">{{ sortFieldLabel() }}</span>
+                    <span class="caret">▾</span>
+                  </button>
+                  @if (filterMenuOpen==='sort') {
+                    <div class="fmenu" role="menu">
+                      <button [class.sel]="sort==='modified'" (click)="setSortField('modified')">Datum (geändert)</button>
+                      <button [class.sel]="sort==='created'" (click)="setSortField('created')">Datum (erstellt)</button>
+                      <button [class.sel]="sort==='rating'" (click)="setSortField('rating')">Bewertung</button>
+                      <button [class.sel]="sort==='comments'" (click)="setSortField('comments')">Kommentare</button>
+                      <button [class.sel]="sort==='title'" (click)="setSortField('title')">Name</button>
+                    </div>
+                  }
+                </div>
                 <button type="button" class="sort-dir"
                         (click)="toggleSortDir()"
                         [attr.aria-label]="sortOrder === 'desc' ? 'Absteigend' : 'Aufsteigend'"
@@ -284,79 +404,116 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                   {{ sortOrder === 'desc' ? '↓' : '↑' }}
                 </button>
               </div>
-<!-- Herausforderungen werden komplett über die Pillen-Reihe unten
+<!-- Themenbereich + Herausforderung werden über die Filterpillen unten
                    gewählt — kein separates Dropdown nötig. -->
 
             </div>
 
-            <!-- Facet-Pillen: bleiben grundsätzlich sichtbar, damit Filter
+            <!-- Filterpillen: bleiben grundsätzlich sichtbar, damit Filter
                  nicht unter dem User wegrutschen, sobald eine Kombination 0
-                 Treffer liefert. Die „Bereich:"-Reihe erscheint zusätzlich nur,
-                 wenn eine Herausforderung gewählt ist (sonst gibt's keine
-                 Unter-Sammlungen zum Anzeigen). -->
-            <div class="facet-row">
-              <div class="facet-group">
-                <label>Phase:</label>
-                <button class="facet-chip" [class.on]="!filterPhase"
-                        (click)="setPhase(null)">Alle</button>
-                @for (p of availablePhases(); track p.value) {
-                  <button class="facet-chip" [class.on]="filterPhase===p.value"
-                          (click)="setPhase(p.value)">
-                    {{ phaseLabel(p.value) }} <small>{{ p.count }}</small>
-                  </button>
-                }
-                @if (filterPhase && !phaseInAvailable(filterPhase)) {
-                  <!-- Aktiver Filter, der nicht mehr in den Result-Counts steht
-                       (0 Treffer): trotzdem als „on"-Pille zum Wegklicken. -->
-                  <button class="facet-chip on" (click)="setPhase(null)">
-                    {{ phaseLabel(filterPhase) }} <small>0</small>
-                  </button>
-                }
-              </div>
-              <div class="facet-group">
-                <label>Veranstaltung:</label>
-                <button class="facet-chip" [class.on]="!filterEvent"
-                        (click)="setEvent(null)">Alle</button>
-                @for (e of availableEvents(); track e.value) {
-                  <button class="facet-chip" [class.on]="filterEvent===e.value"
-                          (click)="setEvent(e.value)">
-                    {{ eventLabel(e.value) }} <small>{{ e.count }}</small>
-                  </button>
-                }
-                @if (filterEvent && !eventInAvailable(filterEvent)) {
-                  <button class="facet-chip on" (click)="setEvent(null)">
-                    {{ eventLabel(filterEvent) }} <small>0</small>
-                  </button>
+                 Treffer liefert. Die „Herausforderung:"-Pille erscheint
+                 zusätzlich nur, wenn ein Themenbereich gewählt ist (sonst
+                 gibt's keine Unter-Sammlungen zum Anzeigen). -->
+            @if (filterMenuOpen) { <div class="fmenu-backdrop" (click)="filterMenuOpen=null"></div> }
+            <div class="filter-pills">
+              <!-- Phase -->
+              <div class="fpill-wrap">
+                <button class="fpill" [class.active]="!!filterPhase"
+                        (click)="toggleFilterMenu('phase')">
+                  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/>
+                    <line x1="10" y1="18" x2="14" y2="18"/>
+                  </svg>
+                  Phase: <span class="fval">{{ filterPhase ? phaseLabel(filterPhase) : 'Alle' }}</span>
+                  <span class="caret">▾</span>
+                </button>
+                @if (filterMenuOpen==='phase') {
+                  <div class="fmenu" role="menu">
+                    <button [class.sel]="!filterPhase" (click)="setPhase(null); filterMenuOpen=null">Alle</button>
+                    @for (p of availablePhases(); track p.value) {
+                      <button [class.sel]="filterPhase===p.value" (click)="setPhase(p.value); filterMenuOpen=null">
+                        {{ phaseLabel(p.value) }} ({{ p.count }})
+                      </button>
+                    }
+                  </div>
                 }
               </div>
-              <!-- Herausforderungen als Pillen — Selektion spiegelt den
-                   oberen Dropdown. Bei aktivem Sub-Topic-Drilldown bleibt
-                   die zugehörige Wurzel-Pille markiert (currentRootId). -->
-              <div class="facet-group">
-                <label>Herausforderung:</label>
-                <button class="facet-chip" [class.on]="!currentRootId()"
-                        (click)="clearTopicFilter()">Alle</button>
-                @for (t of rootTopics(); track t.id) {
-                  <button class="facet-chip"
-                          [class.on]="currentRootId() === t.id"
-                          (click)="openTopicById(t.id)">
-                    {{ t.title }}
-                  </button>
+              <!-- Veranstaltung -->
+              <div class="fpill-wrap">
+                <button class="fpill" [class.active]="!!filterEvent"
+                        (click)="toggleFilterMenu('event')">
+                  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                  Veranstaltung: <span class="fval">{{ filterEvent ? eventLabel(filterEvent) : 'Alle' }}</span>
+                  <span class="caret">▾</span>
+                </button>
+                @if (filterMenuOpen==='event') {
+                  <div class="fmenu" role="menu">
+                    <button [class.sel]="!filterEvent" (click)="setEvent(null); filterMenuOpen=null">Alle</button>
+                    @for (e of availableEvents(); track e.value) {
+                      <button [class.sel]="filterEvent===e.value" (click)="setEvent(e.value); filterMenuOpen=null">
+                        {{ eventLabel(e.value) }} ({{ e.count }})
+                      </button>
+                    }
+                  </div>
                 }
               </div>
+              <!-- Themenbereich (oberste Sammlung) -->
+              <div class="fpill-wrap">
+                <button class="fpill" [class.active]="!!currentRootId()"
+                        (click)="toggleFilterMenu('topic')">
+                  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Themenbereich: <span class="fval">{{ rootTitle() }}</span>
+                  <span class="caret">▾</span>
+                </button>
+                @if (filterMenuOpen==='topic') {
+                  <div class="fmenu" role="menu">
+                    <button [class.sel]="!currentRootId()" (click)="clearTopicFilter(); filterMenuOpen=null">Alle</button>
+                    @for (t of rootTopics(); track t.id) {
+                      <button [class.sel]="currentRootId()===t.id" (click)="openTopicById(t.id); filterMenuOpen=null">
+                        {{ t.title }} ({{ ideaCountByTopic[t.id] ?? 0 }})
+                      </button>
+                    }
+                  </div>
+                }
+              </div>
+              <!-- Herausforderung (Unter-Sammlung; nur bei gewähltem Themenbereich) -->
               @if (currentTopic() && subTopicsForFilter().length) {
-                <div class="facet-group">
-                  <label>Bereich:</label>
-                  <button class="facet-chip"
-                          [class.on]="filterTopic === currentRootId()"
-                          (click)="openTopicById(currentRootId()!)">Alle</button>
-                  @for (c of subTopicsForFilter(); track c.id) {
-                    <button class="facet-chip" [class.on]="filterTopic === c.id"
-                            (click)="openTopicById(c.id)">
-                      {{ c.title }} <small>{{ subtopicCount(c.id) }}</small>
-                    </button>
+                <div class="fpill-wrap">
+                  <button class="fpill" [class.active]="!!filterTopic && filterTopic !== currentRootId()"
+                          (click)="toggleFilterMenu('subtopic')">
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H3z"/>
+                    </svg>
+                    Herausforderung: <span class="fval">{{ subTitle() }}</span>
+                    <span class="caret">▾</span>
+                  </button>
+                  @if (filterMenuOpen==='subtopic') {
+                    <div class="fmenu" role="menu">
+                      <button [class.sel]="filterTopic === currentRootId()"
+                              (click)="openTopicById(currentRootId()!); filterMenuOpen=null">Alle</button>
+                      @for (c of subTopicsForFilter(); track c.id) {
+                        <button [class.sel]="filterTopic === c.id" (click)="openTopicById(c.id); filterMenuOpen=null">
+                          {{ c.title }} ({{ subtopicCount(c.id) }})
+                        </button>
+                      }
+                    </div>
                   }
                 </div>
+              }
+              <!-- Zentral: alle Filter zurücksetzen -->
+              @if (hasActiveFilters()) {
+                <button class="filter-clear" (click)="clearAllFilters()" title="Alle Filter & Suche zurücksetzen">
+                  ✕ Filter zurücksetzen
+                </button>
               }
             </div>
 
@@ -370,6 +527,10 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               [event]="filterEvent"
               [category]="filterCategory"
               [limit]="24"
+              [ctaShow]="browserCta().show"
+              [ctaTopicId]="browserCta().id"
+              [ctaTopicTitle]="browserCta().title"
+              (ctaSubmit)="openSubmitForChallenge($event)"
               (ideaSelected)="openIdea($event)"
               (searchAlt)="applyAltSearch($event)">
             </ideendb-tile-grid-inner>
@@ -380,7 +541,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
           <section class="container section">
             @if (topicDrillRoot()) {
               <button class="back-link" (click)="topicDrillRoot.set(null); topicDrillChild.set(null)">
-                ← Zurück zu allen Herausforderungen
+                ← Zurück zu allen Themenbereichen
               </button>
               <div class="topics-hero">
                 <h2>{{ topicDrillRoot()!.title }}</h2>
@@ -388,11 +549,11 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                   {{ ideaCountByTopic[topicDrillRoot()!.id] ?? 0 }}
                   {{ ideaCountByTopic[topicDrillRoot()!.id] === 1 ? 'Idee' : 'Ideen' }}
                   in {{ childrenOf(topicDrillRoot()!.id).length }}
-                  {{ childrenOf(topicDrillRoot()!.id).length === 1 ? 'Bereich' : 'Bereichen' }}.
-                  Wähle oben einen Bereich, um die Liste einzugrenzen.
+                  {{ childrenOf(topicDrillRoot()!.id).length === 1 ? 'Herausforderung' : 'Herausforderungen' }}.
+                  Wähle oben eine Herausforderung, um die Liste einzugrenzen.
                 </p>
               </div>
-              <!-- Bereichs-Filter als Pillen über dem Ideen-Grid -->
+              <!-- Herausforderungs-Filter als Pillen über dem Ideen-Grid -->
               @if (childrenOf(topicDrillRoot()!.id).length) {
                 <div class="topic-pills">
                   <button class="facet-chip" [class.on]="!topicDrillChild()"
@@ -413,25 +574,27 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                 [topicId]="topicDrillChild()?.id || topicDrillRoot()!.id"
                 [sort]="'modified'"
                 [limit]="48"
+                [ctaShow]="drillCta().show"
+                [ctaTopicId]="drillCta().id"
+                [ctaTopicTitle]="drillCta().title"
+                (ctaSubmit)="openSubmitForChallenge($event)"
                 (ideaSelected)="openIdea($event)">
               </ideendb-tile-grid-inner>
             } @else {
               <div class="topics-hero">
-                <h2>Herausforderungen durchstöbern</h2>
-                <p>Elf Handlungsfelder rund um bessere OER-Infrastrukturen. Klick
-                   auf eine Karte, um die Bereiche der Herausforderung zu sehen.</p>
+                <h2>Themenbereiche durchstöbern</h2>
+                <p>Elf Themenbereiche rund um bessere OER-Infrastrukturen. Klick
+                   auf eine Karte, um die Herausforderungen des Themenbereichs zu sehen.</p>
               </div>
               <div class="topic-grid-compact">
                 @for (root of rootTopics(); track root.id; let i = $index) {
                   <button class="topic-card-compact"
                           (click)="enterTopicDrill(root)">
-                    <span class="lead-icon" aria-hidden="true">
+                    <span class="lead-icon" aria-hidden="true" style="color: var(--wlo-primary)">
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
                            stroke="currentColor" stroke-width="2" stroke-linecap="round"
                            stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <circle cx="12" cy="12" r="6"/>
-                        <circle cx="12" cy="12" r="2"/>
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                       </svg>
                     </span>
                     <div class="body">
@@ -455,95 +618,73 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               <button class="back-link" (click)="eventDrill.set(null)">
                 ← Zurück zu allen Veranstaltungen
               </button>
-              <div class="topics-hero event-hero">
-                <div class="event-hero-head">
-                  <div>
-                    <h2>
-                      <svg class="hdr-ico" width="22" height="22" viewBox="0 0 24 24" fill="none"
-                           stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                           stroke-linejoin="round" aria-hidden="true">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                        <line x1="16" y1="2" x2="16" y2="6"/>
-                        <line x1="8" y1="2" x2="8" y2="6"/>
-                        <line x1="3" y1="10" x2="21" y2="10"/>
-                      </svg>
-                      {{ eventLabel(eventDrill()!) }}
-                    </h2>
-                    <p>Alle Ideen, die mit dieser Veranstaltung verknüpft sind.</p>
-                  </div>
-                  <button class="share-btn" (click)="toggleShare()">
-                    <svg class="card-ico" width="16" height="16" viewBox="0 0 24 24"
-                         fill="none" stroke="currentColor" stroke-width="2"
-                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                    </svg>
-                    {{ shareOpen() ? 'Schließen' : 'Teilen / QR-Code' }}
-                  </button>
-                </div>
-
-                @if (shareOpen()) {
-                  <div class="event-share">
-                    <div class="share-cols">
-                      <!-- Spalte 1: Direkt zur Idee-Einreichung -->
-                      <div class="share-col">
-                        <h4>📝 Idee einreichen</h4>
-                        <p class="share-intro">
-                          Teilnehmende landen direkt im Einreich-Formular — die
-                          Veranstaltung ist vorausgewählt. Ideal für den Aufruf
-                          „Reicht eure Ideen ein!".
-                        </p>
-                        <label>Link</label>
-                        <div class="share-link-row">
-                          <input type="text" [value]="eventShareUrl(eventDrill()!)" readonly
-                                 #submitLink (click)="submitLink.select()" />
-                          <button class="btn-copy" (click)="copyEventShareLink(eventDrill()!)">
-                            {{ shareCopied ? '✓' : '📋' }}
-                          </button>
-                        </div>
-                        <label>QR-Code</label>
-                        <div class="share-qr-row">
-                          <img [src]="eventQrUrl(eventDrill()!)" alt="QR-Code Einreichung"
-                               width="160" height="160" />
-                          <div class="qr-actions">
-                            <a [href]="eventQrUrl(eventDrill()!, 600)" target="_blank" rel="noopener">↗ Groß öffnen</a>
-                            <a [href]="eventQrUrl(eventDrill()!, 600)"
-                               [attr.download]="'qr-einreichen-' + eventDrill() + '.png'">⬇ PNG</a>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Spalte 2: Zur Eventseite (Stöbern + Voten) -->
-                      <div class="share-col">
-                        <h4>📅 Eventseite</h4>
-                        <p class="share-intro">
-                          Teilnehmende landen auf der Veranstaltungs-Seite mit
-                          allen Ideen, Voting-Verlauf und Schnellvoting. Ideal
-                          zum Stöbern und Abstimmen.
-                        </p>
-                        <label>Link</label>
-                        <div class="share-link-row">
-                          <input type="text" [value]="eventPageUrl(eventDrill()!)" readonly
-                                 #pageLink (click)="pageLink.select()" />
-                          <button class="btn-copy" (click)="copyEventPageLink(eventDrill()!)">
-                            {{ sharePageCopied ? '✓' : '📋' }}
-                          </button>
-                        </div>
-                        <label>QR-Code</label>
-                        <div class="share-qr-row">
-                          <img [src]="eventPageQrUrl(eventDrill()!)" alt="QR-Code Eventseite"
-                               width="160" height="160" />
-                          <div class="qr-actions">
-                            <a [href]="eventPageQrUrl(eventDrill()!, 600)" target="_blank" rel="noopener">↗ Groß öffnen</a>
-                            <a [href]="eventPageQrUrl(eventDrill()!, 600)"
-                               [attr.download]="'qr-eventseite-' + eventDrill() + '.png'">⬇ PNG</a>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                }
+              <div class="topics-hero">
+                <h2>
+                  <svg class="hdr-ico" width="22" height="22" viewBox="0 0 24 24" fill="none"
+                       stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                       stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                  {{ eventLabel(eventDrill()!) }}
+                </h2>
+                <p>
+                  Alle Ideen rund um diese Veranstaltung — stöbern, mitdiskutieren
+                  und abstimmen. Die Top-3 nach Gesamtstimmen siehst du als Balken,
+                  darunter alle Ideen mit Schnellvoting.
+                </p>
               </div>
+
+              @if (drillEvent(); as ev) {
+                @if (ev.description) { <p class="event-desc">{{ ev.description }}</p> }
+              }
+
+              <!-- Veranstaltungsinfos links, Teilen-Button rechts auf gleicher Höhe. -->
+              <div class="event-meta-row">
+                @if (drillEvent(); as ev) {
+                  @if (ev.location || eventDateRange(ev) || ev.detail_url) {
+                    <ul class="event-meta-info">
+                      @if (eventDateRange(ev); as d) {
+                        <li>
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                          {{ d }}
+                        </li>
+                      }
+                      @if (ev.location) {
+                        <li>
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                          {{ ev.location }}
+                        </li>
+                      }
+                      @if (ev.detail_url) {
+                        <li>
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                          <a [href]="ev.detail_url" target="_blank" rel="noopener">Details zur Veranstaltung</a>
+                        </li>
+                      }
+                    </ul>
+                  }
+                }
+                <button class="share-btn" (click)="shareOpen.set(true)">
+                  <svg class="card-ico" width="16" height="16" viewBox="0 0 24 24"
+                       fill="none" stroke="currentColor" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                  </svg>
+                  Teilen
+                </button>
+              </div>
+
+              <ideendb-share-dialog
+                [open]="shareOpen()"
+                [title]="'Veranstaltung teilen: ' + eventLabel(eventDrill()!)"
+                [intro]="'Zwei Links zum Aufrufen — direkt zur Eventseite oder ins Einreich-Formular mit vorausgewählter Veranstaltung.'"
+                [targets]="eventShareTargets()"
+                (closed)="shareOpen.set(false)">
+              </ideendb-share-dialog>
               <ideendb-rank-trend
                 [apiBase]="apiBase"
                 [event]="eventDrill()"
@@ -566,46 +707,41 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                    einer Veranstaltung.</p>
               </div>
 
-              @if (!eventsForDisplay().length) {
+              @if (noEventsAtAll()) {
                 <div class="empty-state">
                   <p>Noch keine Veranstaltungen kuratiert. Die Mod-Verwaltung kann unter „Moderation → Veranstaltungen" welche anlegen.</p>
                 </div>
-              } @else {
+              }
+
+              <!-- Schwimmbahn: Aktuelle Veranstaltungen (Live, Promotion oben) -->
+              @if (eventsLive().length) {
+                <h3 class="event-lane-title">Aktuelle Veranstaltungen</h3>
                 <div class="topic-grid-compact">
-                  @for (e of eventsForDisplay(); track e.slug) {
-                    <button class="topic-card-compact"
-                            [class.event-archived]="e.status === 'archived'"
-                            [class.event-featured]="e.featured"
-                            (click)="enterEventDrill(e.slug)">
-                      <span class="lead-icon" aria-hidden="true">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-                             stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                             stroke-linejoin="round">
-                          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                          <line x1="16" y1="2" x2="16" y2="6"/>
-                          <line x1="8" y1="2" x2="8" y2="6"/>
-                          <line x1="3" y1="10" x2="21" y2="10"/>
-                        </svg>
-                      </span>
-                      <div class="body">
-                        <h3>
-                          {{ e.label }}
-                          @if (e.featured) { <span class="ev-pill featured">⭐ Featured</span> }
-                          @if (e.status === 'archived') { <span class="ev-pill archived">Archiv</span> }
-                        </h3>
-                        @if (e.description) {
-                          <p class="ev-description">{{ e.description }}</p>
-                        }
-                        <span class="count">
-                          @if (e.count === 0) {
-                            Noch keine Ideen — sei der/die Erste!
-                          } @else {
-                            {{ e.count }} {{ e.count === 1 ? 'Idee' : 'Ideen' }}
-                          }
-                        </span>
-                      </div>
-                      <span class="arrow">→</span>
-                    </button>
+                  @for (e of eventsLive(); track e.slug) {
+                    <ng-container *ngTemplateOutlet="eventCard; context: { $implicit: e }"></ng-container>
+                  }
+                </div>
+              }
+
+              <!-- Schwimmbahn: Abgelaufene Veranstaltungen -->
+              @if (eventsArchived().length) {
+                <h3 class="event-lane-title">Abgelaufene Veranstaltungen</h3>
+                <div class="topic-grid-compact">
+                  @for (e of eventsArchived(); track e.slug) {
+                    <ng-container *ngTemplateOutlet="eventCard; context: { $implicit: e }"></ng-container>
+                  }
+                </div>
+              }
+
+              <!-- Schwimmbahn: Entwürfe — nur für Moderationskräfte sichtbar -->
+              @if (api.isModerator() && eventsDraft().length) {
+                <h3 class="event-lane-title mod">
+                  Entwürfe
+                  <span class="lane-mod-hint">nur für Moderation sichtbar</span>
+                </h3>
+                <div class="topic-grid-compact">
+                  @for (e of eventsDraft(); track e.slug) {
+                    <ng-container *ngTemplateOutlet="eventCard; context: { $implicit: e }"></ng-container>
                   }
                 </div>
               }
@@ -625,9 +761,9 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                 </svg>
                 Rangliste &amp; Trends
               </h2>
-              <p>Bewegungs-Pfeile zeigen, wie Ideen sich seit dem vorigen Snapshot
-                 verändert haben. Der Verlauf-Chart oben skizziert die Top-5 über
-                 die letzten Snapshots — pro Veranstaltung filterbar.</p>
+              <p>Alle Ideen nach aktueller Beliebtheit. Frische Stimmen zählen
+                 mehr als alte (Stimmen-Verfall) — die Pfeile zeigen die
+                 Rangbewegung. Mit WLO-Login direkt in der Liste abstimmen.</p>
             </div>
 
             <ideendb-ranking
@@ -648,6 +784,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
             [repoBaseUrl]="repoBaseUrl()"
             (back)="go('browser')"
             (openTopic)="openTopicById($event)"
+            (openEvent)="enterEventDrillFromHome($event)"
             (requestLogin)="showLogin = true">
           </ideendb-idea-detail>
         }
@@ -656,6 +793,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
           <ideendb-submit-idea
             [apiBase]="apiBase"
             [presetEvent]="presetEventForSubmit"
+            [presetTopic]="presetTopicForSubmit"
             (submitted)="go('home')">
           </ideendb-submit-idea>
         }
@@ -701,7 +839,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
           <button type="button" class="footer-link" (click)="go('imprint')">Impressum</button>
           <button type="button" class="footer-link" (click)="go('privacy')">Datenschutz</button>
         </span>
-        <span class="muted">Powered by edu-sharing · {{ apiBase }}</span>
+        <span class="muted">Powered by edu-sharing</span>
       </div>
     </footer>
 
@@ -741,6 +879,8 @@ export class AppShellComponent implements OnInit {
   currentIdeaId = signal<string | null>(null);
   /** Aus URL-Query gelesener Event-Slug, der ans Submit-Formular durchgereicht wird. */
   presetEventForSubmit: string | null = null;
+  /** Vorausgewählte Herausforderung fürs Submit-Formular (Mitmach-Kachel). */
+  presetTopicForSubmit: string | null = null;
   /** Start-Event-Filter für die Rangliste (aus ?view=ranking&event=…). */
   rankingInitialEvent: string | null = null;
   /** Username für `?view=user&u=<name>`-Aufrufe. */
@@ -814,7 +954,6 @@ export class AppShellComponent implements OnInit {
   // Ranking-View state
   availablePhases = signal<{ value: string; count: number }[]>([]);
   availableEvents = signal<{ value: string; count: number }[]>([]);
-  availableCategories = signal<{ value: string; count: number }[]>([]);
   /** Globale Event-Counts (nie topic-scoped) — für Veranstaltungs-Seite. */
   allAvailableEvents = signal<{ value: string; count: number }[]>([]);
   showLogin = false;
@@ -966,7 +1105,7 @@ export class AppShellComponent implements OnInit {
     this.go('detail');
   }
 
-  /** Drill Level 1 → Level 2: Herausforderungen unter dem Themengebiet. */
+  /** Drill Level 1 → Level 2: Herausforderungen unter dem Themenbereich. */
   enterTopicDrill(t: Topic) {
     this.topicDrillRoot.set(t);
     this.topicDrillChild.set(null);
@@ -980,21 +1119,6 @@ export class AppShellComponent implements OnInit {
       }
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  /** Drill Level 2 → Level 3: Ideen einer einzelnen Herausforderung — inline
-   *  im Themen-Tab, kein View-Wechsel zum Browser. */
-  enterTopicChildDrill(c: Topic) {
-    this.topicDrillChild.set(c);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  /** Index der aktuellen Drill-Root in rootTopics() — für konsistente Farbe
-   *  der Level-2-Karten. */
-  drillRootIndex(): number {
-    const root = this.topicDrillRoot();
-    if (!root) return 0;
-    return Math.max(0, this.rootTopics().findIndex((t) => t.id === root.id));
   }
 
   openTopic(t: Topic) {
@@ -1019,19 +1143,6 @@ export class AppShellComponent implements OnInit {
     this.loadFacets();
   }
 
-  /** Schaut, ob ein aktiver Filter überhaupt noch in den Facet-Counts
-   *  vorkommt. Wenn nicht (0-Treffer-Kombination), wird die aktive Pille
-   *  trotzdem als „on" angezeigt, damit der User sie wegklicken kann. */
-  phaseInAvailable(value: string): boolean {
-    return this.availablePhases().some((p) => p.value === value);
-  }
-  eventInAvailable(value: string): boolean {
-    return this.availableEvents().some((e) => e.value === value);
-  }
-  categoryInAvailable(value: string): boolean {
-    return this.availableCategories().some((c) => c.value === value);
-  }
-
   /** Lädt die Facetten-Counts (Phase/Event/Kategorie) — entweder global
    *  (Browser ohne Topic-Filter) oder auf den Subtree der aktuellen
    *  Sammlung beschränkt, damit die Counts zur Auswahl passen.
@@ -1047,7 +1158,6 @@ export class AppShellComponent implements OnInit {
     this.api.meta(this.filterTopic || null).subscribe((m) => {
       this.availablePhases.set(m.phases || []);
       this.availableEvents.set(m.events || []);
-      this.availableCategories.set(m.categories || []);
     });
   }
 
@@ -1097,7 +1207,49 @@ export class AppShellComponent implements OnInit {
 
   setPhase(v: string | null) { this.filterPhase = v; }
   setEvent(v: string | null) { this.filterEvent = v; }
-  setCategory(v: string | null) { this.filterCategory = v; }
+
+  // ----- Filter-Pillen (Ideenseite, analog zur Rangliste) -----
+  filterMenuOpen: 'phase' | 'event' | 'topic' | 'subtopic' | 'sort' | null = null;
+  toggleFilterMenu(k: 'phase' | 'event' | 'topic' | 'subtopic' | 'sort') {
+    this.filterMenuOpen = this.filterMenuOpen === k ? null : k;
+  }
+  /** Label des aktiven Sortierfelds für die Sortier-Pille. */
+  sortFieldLabel(): string {
+    switch (this.sort) {
+      case 'created': return 'Datum (erstellt)';
+      case 'rating': return 'Bewertung';
+      case 'comments': return 'Kommentare';
+      case 'title': return 'Name';
+      default: return 'Datum (geändert)';
+    }
+  }
+  setSortField(v: SortBy) { this.sort = v; this.filterMenuOpen = null; this.bump(); }
+  /** Titel des gewählten Themenbereichs (Root) für die Pille. */
+  rootTitle(): string {
+    const id = this.currentRootId();
+    if (!id) return 'Alle';
+    return this.rootTopics().find((t) => t.id === id)?.title || 'Alle';
+  }
+  /** Titel des gewählten Unter-Bereichs für die Pille. */
+  subTitle(): string {
+    const id = this.filterTopic;
+    if (!id || id === this.currentRootId()) return 'Alle';
+    return this.subTopicsForFilter().find((c) => c.id === id)?.title || 'Alle';
+  }
+  /** Mindestens ein Filter oder eine Suche aktiv? (für „Filter zurücksetzen") */
+  hasActiveFilters(): boolean {
+    return !!(this.filterPhase || this.filterEvent || this.filterCategory
+      || this.currentRootId() || (this.searchQ && this.searchQ.trim()));
+  }
+  /** Setzt alle Filter + Suche zentral zurück. */
+  clearAllFilters() {
+    this.filterPhase = null;
+    this.filterEvent = null;
+    this.filterCategory = null;
+    this.filterMenuOpen = null;
+    // clearTopicFilter() setzt filterTopic, Topic-Drilldown UND searchQ zurück.
+    this.clearTopicFilter();
+  }
   /** Bei 0-Treffer-Suggestion-Klick: Suchfeld neu setzen + Suche auslösen. */
   applyAltSearch(term: string) {
     this.searchQ = term;
@@ -1112,8 +1264,45 @@ export class AppShellComponent implements OnInit {
    * Auswahl im Formular änderbar. */
   goSubmit() {
     this.presetEventForSubmit = this.defaultSubmitEvent();
+    this.presetTopicForSubmit = null;
     this.go('submit');
   }
+
+  /** Mitmach-Kachel → Einreich-Formular. topicId = vorausgewählte
+   *  Herausforderung (L2) oder null (leerer Themenbereich → keine Vorauswahl).
+   *  Event wird sinnvoll vorbelegt; beides bleibt im Formular änderbar. */
+  openSubmitForChallenge(topicId: string | null) {
+    this.presetTopicForSubmit = topicId;
+    this.presetEventForSubmit = this.defaultSubmitEvent();
+    this.go('submit');
+  }
+
+  /** Mitmach-Kachel-Daten für eine gefilterte Sammlung:
+   *  - leere L2-Herausforderung → show + Vorauswahl (id/title),
+   *  - leerer L1-Themenbereich  → show, aber keine Vorauswahl (id/title null),
+   *  - sonst → nicht zeigen.
+   *  Greift auf die echten (ungefilterten) Zählungen zurück. */
+  ctaFor(topicId: string | null): { show: boolean; id: string | null; title: string | null } {
+    const none = { show: false, id: null, title: null };
+    if (!topicId) return none;
+    const t = this.allTopics().find((x) => x.id === topicId);
+    if (!t) return none;
+    if (t.parent_id) {
+      // L2-Herausforderung → Vorauswahl mitgeben
+      return this.subtopicCount(topicId) === 0
+        ? { show: true, id: t.id, title: t.title }
+        : none;
+    }
+    // L1-Themenbereich → zeigen, aber ohne Vorauswahl
+    return (this.ideaCountByTopic[topicId] ?? 0) === 0
+      ? { show: true, id: null, title: null }
+      : none;
+  }
+
+  /** CTA-Daten für die Browser-Ideenliste (aktiver Topic-Filter). */
+  browserCta() { return this.ctaFor(this.filterTopic); }
+  /** CTA-Daten für den Themenbereich-Drill (gewählte Herausforderung oder „Alle"). */
+  drillCta() { return this.ctaFor(this.topicDrillChild()?.id || this.topicDrillRoot()?.id || null); }
 
   /** Slug des aktuell promoteten „nächsten" Events (höchste sort_order
    * unter den Featured-Events) oder null, wenn nichts promotet wird. */
@@ -1127,6 +1316,7 @@ export class AppShellComponent implements OnInit {
    * mit vorgewähltem Event-Slug (via URL-Parameter). */
   goSubmitForEvent(slug: string) {
     this.presetEventForSubmit = slug;
+    this.presetTopicForSubmit = null;
     this.go('submit');
     // URL aktualisieren, damit Reload/Share-Link den Slug behält
     try {
@@ -1173,11 +1363,54 @@ export class AppShellComponent implements OnInit {
     return d.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
   }
 
+  /** Ein einzelnes Datum (ISO oder freier Text) hübsch formatieren. */
+  private fmtDate(s: string | null | undefined): string {
+    if (!s) return '';
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s.trim(); // freies Format unverändert lassen
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  /** Zeitraum-Label fürs Promotion-Banner: "12.06.2026 – 14.06.2026",
+   *  oder nur Start, oder leer. */
+  eventDateRange(fe: { date_start?: string | null; date_end?: string | null }): string {
+    const a = this.fmtDate(fe.date_start);
+    const b = this.fmtDate(fe.date_end);
+    if (a && b && a !== b) return `${a} – ${b}`;
+    return a || b || '';
+  }
+
+  /** Volle Event-Metadaten (inkl. Ort/Datum/Detail-URL) zum aktuellen Drill. */
+  drillEvent(): TaxonomyEntry | null {
+    const slug = this.eventDrill();
+    if (!slug) return null;
+    return this.eventMeta().find((e) => e.slug === slug) || null;
+  }
+
+  /** Zwei Teilen-Ziele fürs Event-Modal: Eventseite + Einreich-Formular. */
+  eventShareTargets(): ShareTarget[] {
+    const slug = this.eventDrill();
+    if (!slug) return [];
+    return [
+      {
+        label: '📅 Eventseite',
+        intro: 'Veranstaltungs-Seite mit allen Ideen, Voting & Schnellvoting — ideal zum Stöbern und Abstimmen.',
+        url: this.eventPageUrl(slug),
+        qrFilename: 'qr-eventseite-' + slug + '.png',
+      },
+      {
+        label: '📝 Idee einreichen',
+        intro: 'Direkt ins Einreich-Formular mit vorausgewählter Veranstaltung — für den Aufruf „Reicht eure Ideen ein!".',
+        url: this.eventShareUrl(slug),
+        qrFilename: 'qr-einreichen-' + slug + '.png',
+      },
+    ];
+  }
+
   /** Drill in einen Event direkt im Events-Tab — zeigt Ideen-Grid in-place. */
   enterEventDrill(slug: string) {
     this.eventDrill.set(slug);
     this.shareOpen.set(false);
-    this.shareCopied = false;
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -1186,18 +1419,14 @@ export class AppShellComponent implements OnInit {
     return this.eventLabels.get(slug) || slug;
   }
 
-  /** Vollständige Anzeige-Liste für die Veranstaltungs-Übersicht:
-   * - sortiert nach `sort_order` aus der Taxonomie
-   * - Status `draft` wird ausgeblendet (nur Mod-Tab sichtbar)
-   * - Events ohne Ideen erscheinen mit count=0 (statt versteckt)
-   * - jeder Eintrag bringt status + featured-Flag mit fürs UI
-   */
-  eventsForDisplay(): { slug: string; label: string; count: number; status: string; featured: boolean; description: string | null }[] {
+  /** Angereicherte Event-Liste fürs UI (inkl. draft): count + status +
+   *  featured-Flag + Ort/Datum/Detail-URL. Basis für die Schwimmbahnen. */
+  private allEventsEnriched() {
     const counts = new Map<string, number>();
     for (const e of this.allAvailableEvents()) counts.set(e.value, e.count);
     const now = Date.now();
     return this.eventMeta()
-      .filter((e) => (e.status ?? 'live') !== 'draft' && e.active !== false)
+      .filter((e) => e.active !== false)
       .map((e) => ({
         slug: e.slug,
         label: e.label,
@@ -1205,14 +1434,41 @@ export class AppShellComponent implements OnInit {
         status: e.status ?? 'live',
         featured: !!(e.featured_until && new Date(e.featured_until).getTime() > now),
         description: e.description ?? null,
-      }))
-      .sort((a, b) => {
-        // sort_order aus eventMeta zur Sortierung (Mods bestimmen Reihenfolge)
-        const am = this.eventMeta().find((x) => x.slug === a.slug)?.sort_order ?? 100;
-        const bm = this.eventMeta().find((x) => x.slug === b.slug)?.sort_order ?? 100;
-        if (am !== bm) return am - bm;
-        return a.label.localeCompare(b.label);
-      });
+        location: e.location ?? null,
+        date_start: e.date_start ?? null,
+        date_end: e.date_end ?? null,
+        detail_url: e.detail_url ?? null,
+        sort_order: e.sort_order ?? 100,
+      }));
+  }
+  private sortEvents<T extends { sort_order: number; label: string }>(a: T, b: T): number {
+    return a.sort_order !== b.sort_order ? a.sort_order - b.sort_order : a.label.localeCompare(b.label);
+  }
+
+  /** Bahn „Aktuell": Live-Events, Promotion (featured) zuerst, dann sort_order. */
+  eventsLive() {
+    return this.allEventsEnriched()
+      .filter((e) => e.status === 'live')
+      .sort((a, b) => (a.featured !== b.featured ? (a.featured ? -1 : 1) : this.sortEvents(a, b)));
+  }
+  /** Bahn „Abgelaufen": archivierte Events. */
+  eventsArchived() {
+    return this.allEventsEnriched().filter((e) => e.status === 'archived').sort((a, b) => this.sortEvents(a, b));
+  }
+  /** Bahn „Entwürfe": nur Mods (Aufrufer prüft `api.isModerator()`). */
+  eventsDraft() {
+    return this.allEventsEnriched().filter((e) => e.status === 'draft').sort((a, b) => this.sortEvents(a, b));
+  }
+  /** Events fürs Startseiten-„durchstöbern": laufende zuerst; gibt es keine
+   *  laufenden, die abgelaufenen (damit der Block nicht leer bleibt). */
+  homeBrowseEvents() {
+    const live = this.eventsLive();
+    return live.length ? live : this.eventsArchived();
+  }
+  /** True, wenn gar nichts anzuzeigen ist (auch keine Entwürfe für Mods). */
+  noEventsAtAll(): boolean {
+    return !this.eventsLive().length && !this.eventsArchived().length
+      && !(this.api.isModerator() && this.eventsDraft().length);
   }
   /** Analog für Phasen — slug → kuratiertes Label. */
   phaseLabel(slug: string): string {
@@ -1224,14 +1480,6 @@ export class AppShellComponent implements OnInit {
 
   // ===== Share-Link / QR-Code für die aktuell aufgeklappte Veranstaltung =====
   shareOpen = signal(false);
-  shareCopied = false;
-  private shareCopiedTimer?: number;
-  sharePageCopied = false;
-  private sharePageCopiedTimer?: number;
-
-  toggleShare() {
-    this.shareOpen.set(!this.shareOpen());
-  }
 
   /** Submit-Deeplink mit vorausgewählter Veranstaltung. */
   eventShareUrl(slug: string): string {
@@ -1239,35 +1487,10 @@ export class AppShellComponent implements OnInit {
     return `${base}?view=submit&event=${encodeURIComponent(slug)}`;
   }
 
-  /** QR-Code via öffentlichem qrserver.com. Keine PII enthalten. */
-  eventQrUrl(slug: string, size = 240): string {
-    const data = encodeURIComponent(this.eventShareUrl(slug));
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}`;
-  }
-
-  copyEventShareLink(slug: string) {
-    navigator.clipboard?.writeText(this.eventShareUrl(slug));
-    this.shareCopied = true;
-    if (this.shareCopiedTimer) window.clearTimeout(this.shareCopiedTimer);
-    this.shareCopiedTimer = window.setTimeout(() => (this.shareCopied = false), 2000);
-  }
-
   /** Deeplink zur Eventseite (Stöbern + Voten) statt zum Submit-Formular. */
   eventPageUrl(slug: string): string {
     const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
     return `${base}?view=events&event=${encodeURIComponent(slug)}`;
-  }
-
-  eventPageQrUrl(slug: string, size = 240): string {
-    const data = encodeURIComponent(this.eventPageUrl(slug));
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}`;
-  }
-
-  copyEventPageLink(slug: string) {
-    navigator.clipboard?.writeText(this.eventPageUrl(slug));
-    this.sharePageCopied = true;
-    if (this.sharePageCopiedTimer) window.clearTimeout(this.sharePageCopiedTimer);
-    this.sharePageCopiedTimer = window.setTimeout(() => (this.sharePageCopied = false), 2000);
   }
 
   /** Click on event card from anywhere else → browser with filter (legacy). */
@@ -1280,86 +1503,8 @@ export class AppShellComponent implements OnInit {
     this.go('browser');
   }
 
-  /** Deterministic fallback palette — used when the collection has no color
-   *  property. Consistent ordering ensures the same theme keeps its color
-   *  across reloads regardless of how many topics exist. */
-  private themePalette = [
-    '#1e6feb', '#7b2cbf', '#0f7d64', '#d95f02', '#a13a51',
-    '#2e5266', '#b8860b', '#5d4e75', '#1b5e20', '#c2185b', '#004d66',
-  ];
-
-  /** Priority: edu-sharing collection color → stable hash of title → index. */
-  colorFor(t: Topic, fallbackIndex: number): string {
-    if (t.color) return t.color;
-    const hash = this.hash(t.id || t.title || '');
-    return this.themePalette[(hash || fallbackIndex) % this.themePalette.length];
-  }
-
-  /** Stable color for an arbitrary string key (Events etc.). */
-  colorForKey(key: string, fallbackIndex: number): string {
-    const hash = this.hash(key || '');
-    return this.themePalette[(hash || fallbackIndex) % this.themePalette.length];
-  }
-
-  /** Keyword-based icon hint. Returns '' when nothing matches so the template
-   *  can fall back to the title initial — that keeps the view generic across
-   *  any future topic tree. */
-  iconFor(t: Topic): string {
-    const s = (t.title || '').toLowerCase();
-    if (s.includes('auffindbar') || s.includes('nutzung')) return '🔍';
-    if (s.includes('barrierefrei') || s.includes('inklusion')) return '♿';
-    if (s.includes('didakt')) return '🎓';
-    if (s.includes('forschung') || s.includes('monitoring')) return '📊';
-    if (s.includes('innovation') || s.includes('zukunft')) return '✨';
-    if (s.includes('kooperation') || s.includes('community')) return '🤝';
-    if (s.includes('lernort')) return '🏫';
-    if (s.includes('qualität') || s.includes('qualitat')) return '⭐';
-    if (s.includes('rechts') || s.includes('lizenz')) return '⚖️';
-    if (s.includes('technisch') || s.includes('infrastruktur')) return '⚙️';
-    if (s.includes('usability')) return '🖱️';
-    return '';
-  }
-
-  initialOf(title: string): string {
-    const letter = (title || '?').trim()[0] || '?';
-    return letter.toUpperCase();
-  }
-
-  private hash(s: string): number {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-    return Math.abs(h);
-  }
-
   childrenOf(parent: string) {
     return this.allTopics().filter((t) => t.parent_id === parent);
-  }
-
-  prefixFor(t: Topic) {
-    return t.parent_id ? '  └ ' : '';
-  }
-
-  /** Themen + Herausforderungen hierarchisch sortieren — pro Eltern-Thema
-   *  alphabetisch, dann jeweils dessen Unter-Topics direkt darunter. */
-  topicsHierarchical(): Topic[] {
-    const all = this.allTopics();
-    const roots = all
-      .filter((t) => !t.parent_id)
-      .sort((a, b) => a.title.localeCompare(b.title));
-    const out: Topic[] = [];
-    for (const r of roots) {
-      out.push(r);
-      const children = all
-        .filter((t) => t.parent_id === r.id)
-        .sort((a, b) => a.title.localeCompare(b.title));
-      out.push(...children);
-    }
-    // Falls es Waisen-Topics ohne bekannten Parent gibt, hinten dranhängen
-    const orphans = all.filter(
-      (t) => t.parent_id && !roots.some((r) => r.id === t.parent_id),
-    );
-    out.push(...orphans);
-    return out;
   }
 
   onSearchInput() {

@@ -3,11 +3,12 @@ import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnInit, Output, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { InboxItem, TaxonomyEntry, Topic } from '../models';
+import { ShareDialogComponent } from './share-dialog.component';
 
 @Component({
   selector: 'ideendb-moderation',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ShareDialogComponent],
   styles: [`
     :host { display: block; }
     .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
@@ -334,15 +335,50 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
     .bulk-check { width: 18px; height: 18px; cursor: pointer;
                   margin-top: 4px; flex-shrink: 0; }
 
-    /* Aktivitäts-Log */
+    /* Aktivitäts-Log — Filter als MD3-Pillen (analog Ideenseite) */
     .activity-controls {
-      display: flex; flex-wrap: wrap; gap: 10px;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
       margin-bottom: 14px;
-      select, input[type=text] {
-        padding: 7px 10px; border: 1px solid var(--wlo-border);
-        border-radius: 6px; font: inherit; background: var(--wlo-surface, #fff);
+    }
+    .activity-controls .actor-input {
+      height: 36px; box-sizing: border-box; padding: 0 12px; min-width: 170px;
+      border: 1px solid var(--wlo-border); border-radius: 8px;
+      font: inherit; font-size: .9rem; background: var(--wlo-surface, #fff);
+    }
+    .activity-controls .csv-btn { margin-left: auto; }
+    .fpill-wrap { position: relative; }
+    .fpill {
+      display: inline-flex; align-items: center; gap: 7px; height: 36px;
+      padding: 0 14px; border-radius: 8px; font: inherit; font-size: .9rem;
+      border: 1px solid var(--wlo-border); background: var(--wlo-surface, #fff);
+      color: var(--wlo-text, #1a2334); cursor: pointer;
+      transition: background .12s, border-color .12s;
+      .ico { width: 15px; height: 15px; opacity: .7; }
+      .fval { font-weight: 700; color: var(--wlo-primary); }
+      .caret { opacity: .55; font-size: .8em; }
+      &:hover { background: var(--wlo-bg, #f4f6f9); }
+      &.active { background: var(--wlo-primary-soft, #e6edf7); border-color: var(--wlo-primary); }
+    }
+    .fmenu {
+      position: absolute; top: calc(100% + 5px); left: 0; z-index: 30; min-width: 220px;
+      max-height: 340px; overflow-y: auto;
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
+      border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.16);
+      padding: 6px; display: flex; flex-direction: column; gap: 2px;
+      button {
+        text-align: left; background: none; border: none; padding: 9px 12px;
+        border-radius: 8px; cursor: pointer; font: inherit; font-size: .9rem;
+        color: var(--wlo-text, #1a2334); white-space: nowrap;
+        &:hover { background: var(--wlo-bg, #f4f6f9); }
+        &.sel { background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary); font-weight: 600; }
       }
-      input[type=text] { min-width: 180px; }
+    }
+    .fmenu-backdrop { position: fixed; inset: 0; z-index: 25; }
+    .filter-clear {
+      display: inline-flex; align-items: center; gap: 6px; height: 36px;
+      padding: 0 12px; border-radius: 8px; font: inherit; font-size: .85rem; font-weight: 600;
+      border: 1px solid transparent; background: none; color: var(--wlo-muted); cursor: pointer;
+      &:hover { color: var(--wlo-primary); background: var(--wlo-primary-soft, #e6edf7); }
     }
     .activity-list {
       display: flex; flex-direction: column; gap: 4px;
@@ -404,32 +440,27 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       .btn[disabled] { opacity: .55; cursor: not-allowed; }
     }
 
-    /* Tabs */
-    .tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 2px;
-      border-bottom: 2px solid var(--wlo-border);
-      margin-bottom: 24px;
+    /* Moderations-Layout: klebende Navi-Leiste mit Dropdown-Pillen
+       (gleiches Muster wie die Filter auf Ideen-/Aktivitätenseite). */
+    .mod-body { display: block; }
+    .mod-content { min-width: 0; }
+    .mod-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--wlo-surface, #fff);
+      border-bottom: 1px solid var(--wlo-border);
+      margin: 0 0 18px;
     }
-    .tabs button {
-      background: none;
-      border: none;
-      padding: 10px 10px;
-      cursor: pointer;
-      font: inherit;
-      font-size: .92rem;
-      font-weight: 600;
-      color: var(--wlo-muted);
-      border-bottom: 3px solid transparent;
-      margin-bottom: -2px;
-      display: inline-flex; align-items: center; gap: 5px;
-      white-space: nowrap;
-      &:hover { color: var(--wlo-primary); }
-      &.active {
-        color: var(--wlo-primary);
-        border-bottom-color: var(--wlo-primary);
-      }
+    .nav-pills {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 8px 12px;
+    }
+    .nav-pills .pill-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+      background: var(--wlo-primary); color: #fff;
+      font-size: .72rem; font-weight: 700;
     }
 
     /* Textlink-Tabs (z.B. Inbox-Filter) — visuell wie die oberen Tabs,
@@ -444,6 +475,8 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       color: var(--wlo-muted); font-weight: 600;
       font-size: .82rem; margin-right: 6px;
     }
+    /* Aktionen (Aktualisieren / Sync) rechtsbündig in der Filterzeile. */
+    .inbox-toolbar { margin-left: auto; display: inline-flex; gap: 8px; flex-shrink: 0; }
     .link-tab {
       background: none; border: none; padding: 4px 0; margin: 0;
       cursor: pointer; font: inherit; font-size: .92rem; font-weight: 600;
@@ -487,6 +520,17 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       font-family: monospace; font-size: .85rem; color: var(--wlo-muted);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    /* Phasen/Events: Zellen dürfen schrumpfen, Aktionen umbrechen statt
+       rechts aus dem Bild zu laufen. */
+    .tax-tax .tax-row > * { min-width: 0; }
+    .tax-tax .tax-row .row-actions { flex-wrap: wrap; justify-content: flex-end; }
+    .tax-count {
+      margin-left: 8px; font-size: .76rem; color: var(--wlo-muted); white-space: nowrap;
+    }
+    .tax-msg { margin-left: 12px; font-size: .85rem; color: #0f5b24; font-weight: 600; }
+    .btn.micro-btn {
+      margin-left: 8px; padding: 2px 9px; font-size: .76rem; border-radius: 999px;
+    }
     .tax-row input[type="text"], .tax-row input[type="number"] {
       width: 100%; box-sizing: border-box;
       background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
@@ -495,6 +539,40 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
     .tax-row .row-actions {
       display: flex; gap: 6px;
     }
+    /* Sichtbarkeits-Verwaltung (Versteckt-Tab) */
+    .vis-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 9px; border-radius: 999px; font-size: .72rem; font-weight: 600;
+      &.hidden { background: #fdecef; color: #b00020; }
+      &.live   { background: #e6f4ea; color: #0f5b24; }
+    }
+    .all-ideas-panel {
+      margin-top: 10px; padding: 12px;
+      border: 1px solid var(--wlo-border); border-radius: 10px;
+      background: var(--wlo-bg);
+    }
+    .all-ideas-search {
+      display: flex; gap: 8px; margin-bottom: 10px;
+      input[type="text"] {
+        flex: 1; box-sizing: border-box;
+        background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
+        border-radius: 6px; padding: 6px 10px; font: inherit;
+      }
+    }
+    .confirm-del {
+      display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px;
+      font-size: .82rem; font-weight: 600; color: #b00020;
+    }
+    /* Inhalts-Verwaltungs-Liste: Titel umbricht statt die Spalten nach rechts
+       aus dem Bild zu schieben; Aktionen dürfen bei Platzmangel umbrechen. */
+    .mi-list .tax-row {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 130px) 96px 300px;
+    }
+    .mi-list .tax-row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+    .mi-list .owner-cell {
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mi-list .row-actions { flex-wrap: wrap; justify-content: flex-end; }
     .tax-row .pill {
       display: inline-flex; align-items: center; gap: 4px;
       padding: 2px 10px; border-radius: 999px; font-size: .75rem;
@@ -522,9 +600,36 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         background: var(--wlo-cta-bg, #27ABE2); color: var(--wlo-cta-text, #fff);
       }
     }
-    .event-edit-stack {
-      display: flex; flex-direction: column; gap: 6px;
+    /* Veranstaltung bearbeiten — volle Breite, sauberes Formular-Raster
+       (bricht aus dem Tabellen-Grid aus, damit nichts gequetscht wird). */
+    .tax-row.evt-edit { display: block; padding: 16px; }
+    .event-edit-form { display: flex; flex-direction: column; gap: 12px; }
+    .eef-head {
+      font-size: .85rem; color: var(--wlo-muted);
+      code { background: var(--wlo-surface, #fff); padding: 1px 6px; border-radius: 4px; }
     }
+    .eef-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px 14px;
+    }
+    .eef-field {
+      display: flex; flex-direction: column; gap: 4px;
+      font-size: .72rem; color: var(--wlo-muted);
+      text-transform: uppercase; letter-spacing: .04em;
+      input, select {
+        font: inherit; text-transform: none; letter-spacing: normal;
+        color: var(--wlo-text); padding: 7px 9px; box-sizing: border-box; width: 100%;
+        border: 1px solid var(--wlo-border); border-radius: 6px;
+        background: var(--wlo-surface, #fff);
+      }
+    }
+    .eef-wide { grid-column: 1 / -1; }
+    .eef-featured {
+      display: flex; align-items: center; gap: 6px;
+      .link-btn { background: none; border: none; cursor: pointer;
+                  color: var(--wlo-muted); font-size: 1.2rem; line-height: 1; }
+    }
+    .eef-actions { display: flex; justify-content: flex-end; gap: 10px; }
     .voting-global {
       display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
       background: var(--wlo-bg); border: 1px solid var(--wlo-border);
@@ -554,9 +659,10 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
       background: var(--wlo-bg); border: 1px dashed var(--wlo-border);
       border-radius: 10px; padding: 16px; margin-top: 14px;
       display: grid;
-      grid-template-columns: 1fr 1fr 80px auto;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) max-content;
       gap: 10px; align-items: center;
     }
+    .tax-add .btn { white-space: nowrap; }
     .tax-add input { background: var(--wlo-surface, #fff); border:1px solid var(--wlo-border);
                      border-radius:6px; padding:8px; font:inherit;
                      box-sizing:border-box; width:100%; }
@@ -624,125 +730,157 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
   template: `
     <div class="wrap">
       <div class="head">
-        <h1>Moderation</h1>
+        <h1>Moderationsbereich</h1>
         <span class="meta">Angemeldet als <strong>{{ currentUser }}</strong></span>
       </div>
 
-      <div class="tabs">
-        <button [class.active]="tab==='stats'" (click)="tab='stats'; loadStats()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <line x1="12" y1="20" x2="12" y2="10"/>
-            <line x1="18" y1="20" x2="18" y2="4"/>
-            <line x1="6" y1="20" x2="6" y2="16"/>
-          </svg>
-          Statistik
-        </button>
-        <button [class.active]="tab==='inbox'" (click)="tab='inbox'; load()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
-            <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
-          </svg>
-          Postfach ({{ items().length }})
-        </button>
-        <button [class.active]="tab==='reports'" (click)="tab='reports'; loadReports()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          Meldungen @if (reports().length) { ({{ reports().length }}) }
-        </button>
-        <button [class.active]="tab==='activity'" (click)="tab='activity'; loadActivity()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-          </svg>
-          Aktivität
-        </button>
-        <button [class.active]="tab==='topics'" (click)="tab='topics'; loadTopics()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
-          Herausforderungen
-        </button>
-        <button [class.active]="tab==='events'" (click)="tab='events'; loadEvents()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-          </svg>
-          Veranstaltungen
-        </button>
-        <button [class.active]="tab==='phases'" (click)="tab='phases'; loadPhases()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"/>
-            <circle cx="12" cy="12" r="6"/>
-            <circle cx="12" cy="12" r="2"/>
-          </svg>
-          Phasen
-        </button>
-        <button [class.active]="tab==='mods'" (click)="tab='mods'; loadMods()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-          Moderatoren
-        </button>
-        <button [class.active]="tab==='hidden'" (click)="tab='hidden'; loadHidden()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-            <line x1="1" y1="1" x2="23" y2="23"/>
-          </svg>
-          Versteckt @if (hidden().length) { ({{ hidden().length }}) }
-        </button>
-        <button [class.active]="tab==='backup'" (click)="tab='backup'; loadBackups()">
-          <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-            <polyline points="17 21 17 13 7 13 7 21"/>
-            <polyline points="7 3 7 8 15 8"/>
-          </svg>
-          Backup
-        </button>
+      <div class="mod-body">
+      <div class="mod-nav">
+        <div class="nav-pills">
+          @if (navMenuOpen) { <div class="fmenu-backdrop" (click)="navMenuOpen=null"></div> }
+          <button class="fpill" [class.active]="groupOf(tab)==='stats'" (click)="selectNav('stats')">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>
+            </svg>
+            Statistik
+          </button>
+          <button class="fpill" [class.active]="groupOf(tab)==='inbox'" (click)="selectNav('inbox')">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
+              <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+            </svg>
+            Postfach ({{ items().length }})
+          </button>
+          <div class="fpill-wrap">
+            <button class="fpill" [class.active]="groupOf(tab)==='content'" (click)="toggleNavMenu('content')">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              Inhalte@if (groupOf(tab)==='content') {: <span class="fval">{{ tabLabel(tab) }}</span>}
+              <span class="caret">▾</span>
+            </button>
+            @if (navMenuOpen==='content') {
+              <div class="fmenu" role="menu">
+                <button [class.sel]="tab==='topics'" (click)="selectNav('topics')">Themenbereiche</button>
+                <button [class.sel]="tab==='events'" (click)="selectNav('events')">Veranstaltungen</button>
+                <button [class.sel]="tab==='phases'" (click)="selectNav('phases')">Phasen</button>
+              </div>
+            }
+          </div>
+          <div class="fpill-wrap">
+            <button class="fpill" [class.active]="groupOf(tab)==='moderation'" (click)="toggleNavMenu('moderation')">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+              Moderation@if (groupOf(tab)==='moderation') {: <span class="fval">{{ tabLabel(tab) }}</span>}
+              @if (reports().length) { <span class="pill-badge">{{ reports().length }}</span> }
+              <span class="caret">▾</span>
+            </button>
+            @if (navMenuOpen==='moderation') {
+              <div class="fmenu" role="menu">
+                <button [class.sel]="tab==='reports'" (click)="selectNav('reports')">
+                  Meldungen @if (reports().length) { ({{ reports().length }}) }
+                </button>
+                <button [class.sel]="tab==='activity'" (click)="selectNav('activity')">Aktivität</button>
+                <button [class.sel]="tab==='hidden'" (click)="selectNav('hidden')">
+                  Inhalte verwalten @if (hidden().length) { ({{ hidden().length }}) }
+                </button>
+              </div>
+            }
+          </div>
+          <div class="fpill-wrap">
+            <button class="fpill" [class.active]="groupOf(tab)==='system'" (click)="toggleNavMenu('system')">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+              </svg>
+              System@if (groupOf(tab)==='system') {: <span class="fval">{{ tabLabel(tab) }}</span>}
+              <span class="caret">▾</span>
+            </button>
+            @if (navMenuOpen==='system') {
+              <div class="fmenu" role="menu">
+                <button [class.sel]="tab==='mods'" (click)="selectNav('mods')">Moderatoren</button>
+                <button [class.sel]="tab==='backup'" (click)="selectNav('backup')">Backup</button>
+              </div>
+            }
+          </div>
+        </div>
       </div>
 
+      <div class="mod-content">
       @if (tab === 'hidden') {
         <div class="intro">
-          Ideen, die ein Moderator versteckt hat. Sie bleiben in der Datenbank,
-          tauchen aber nicht mehr in öffentlichen Listen oder Detail-Seiten auf.
-          Verstecken/Anzeigen geschieht auf der Idee-Detailseite.
+          Alle Inhalte zentral verwalten — suchen, auf der Ideenseite bearbeiten,
+          verstecken/einblenden oder löschen. Versteckte Ideen stehen oben und
+          sind markiert. <strong>Löschen entfernt die Idee endgültig aus
+          edu-sharing</strong> und lässt sich nicht rückgängig machen.
         </div>
-        @if (hidden().length === 0) {
-          <div class="empty"><p>Keine versteckten Ideen.</p></div>
+        <div class="all-ideas-search">
+          <input type="text" [(ngModel)]="allIdeasQuery"
+                 (keyup.enter)="loadAllIdeas()"
+                 placeholder="Nach Titel filtern…" />
+          <button class="btn" (click)="loadAllIdeas()" [disabled]="allIdeasLoading()">
+            {{ allIdeasLoading() ? 'Lädt…' : 'Suchen' }}
+          </button>
+        </div>
+        @if (allIdeasLoading()) {
+          <div class="loading">Lädt…</div>
+        } @else if (!allIdeas().length) {
+          <div class="empty"><p>Keine Ideen gefunden.</p></div>
         } @else {
-          <div class="tax-list">
-            <div class="tax-row header" style="grid-template-columns: 2fr 1fr 1.4fr 100px">
-              <span>Titel</span><span>Owner</span><span>Grund</span><span></span>
+          <div class="tax-list mi-list">
+            <div class="tax-row header">
+              <span>Titel</span><span>Owner</span><span>Status</span><span></span>
             </div>
-            @for (h of hidden(); track h.id) {
-              <div class="tax-row" style="grid-template-columns: 2fr 1fr 1.4fr 100px">
-                <span><strong>{{ h.title }}</strong></span>
-                <span style="color: var(--wlo-muted)">{{ h.owner_username || '—' }}</span>
-                <span style="color: var(--wlo-muted)">{{ h.hidden_reason || '—' }}</span>
+            @for (it of allIdeas(); track it.id) {
+              <div class="tax-row">
+                <span><strong>{{ it.title }}</strong></span>
+                <span class="owner-cell" style="color: var(--wlo-muted)">{{ it.owner_username || '—' }}</span>
+                <span>
+                  @if (it.hidden) {
+                    <span class="vis-badge hidden">🚫 versteckt</span>
+                  } @else {
+                    <span class="vis-badge live">sichtbar</span>
+                  }
+                </span>
                 <span class="row-actions">
-                  <button class="btn" (click)="openIdeaFromHidden(h)">
-                    Öffnen
-                  </button>
+                  @if (confirmDeleteId === it.id) {
+                    <span class="confirm-del">
+                      Löschen?
+                      <button class="btn danger" (click)="doDeleteIdea(it.id)"
+                              [disabled]="visBusy() === it.id">
+                        {{ visBusy() === it.id ? '…' : 'Ja, löschen' }}
+                      </button>
+                      <button class="btn" (click)="confirmDeleteId=null">Abbrechen</button>
+                    </span>
+                  } @else {
+                    <button class="btn" (click)="openIdeaById(it.id, it.title)">Bearbeiten</button>
+                    @if (it.hidden) {
+                      <button class="btn primary-move" (click)="setVisibility(it, false)"
+                              [disabled]="visBusy() === it.id">
+                        {{ visBusy() === it.id ? '…' : 'Einblenden' }}
+                      </button>
+                    } @else {
+                      <button class="btn" (click)="setVisibility(it, true)"
+                              [disabled]="visBusy() === it.id">
+                        {{ visBusy() === it.id ? '…' : 'Verstecken' }}
+                      </button>
+                    }
+                    <button class="btn danger" (click)="confirmDeleteId=it.id">Löschen</button>
+                  }
                 </span>
               </div>
             }
           </div>
+          <p style="font-size:.8rem; color:var(--wlo-muted); margin-top:6px">
+            Max. 400 Treffer (versteckte zuerst). Bei vielen Ideen den Titel-Filter nutzen.
+          </p>
         }
       }
 
       @if (tab === 'backup') {
         <div class="intro">
           Sichert die App-Datenbank (Activity-Log, Trend-Snapshots, Reports,
-          Mitmachen/Folgen, Taxonomien, Topic-Sortierung) als ZIP. edu-sharing-
+          Mithacken/Folgen, Taxonomien, Topic-Sortierung) als ZIP. edu-sharing-
           Daten (Ideen, Kommentare, Ratings) werden NICHT gesichert — die
           liegen im edu-sharing-Repo. <strong>Konfiguration / Secrets sind
           ebenfalls NICHT im Backup</strong> — die gehören in System-/Docker-
@@ -824,7 +962,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         @if (stats(); as s) {
           <div class="stats-grid">
             <div class="stat-card"><span class="num">{{ s.totals.ideas }}</span>Ideen</div>
-            <div class="stat-card"><span class="num">{{ s.totals.themes }}</span>Herausforderungen</div>
+            <div class="stat-card"><span class="num">{{ s.totals.themes }}</span>Themenbereiche</div>
             <div class="stat-card"><span class="num">{{ s.totals.challenges }}</span>Herausforderungen</div>
             <div class="stat-card"><span class="num">{{ s.totals.comments }}</span>Kommentare</div>
             <div class="stat-card">
@@ -846,7 +984,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                   <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
                   <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                 </svg>
-                Mitmachen
+                Mithacken
               </span>
             </div>
             <div class="stat-card">
@@ -905,9 +1043,8 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
             <div class="stats-section">
               <h3>
                 <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="10"/>
-                  <circle cx="12" cy="12" r="6"/>
-                  <circle cx="12" cy="12" r="2"/>
+                  <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                  <line x1="4" y1="22" x2="4" y2="15"/>
                 </svg>
                 Phasen-Verteilung
               </h3>
@@ -1055,7 +1192,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
       @if (tab === 'topics') {
         <div class="intro">
-          Herausforderungen (Ebene 1) und Bereiche (Ebene 2) verwalten —
+          Themenbereiche (Ebene 1) und Herausforderungen (Ebene 2) verwalten —
           anlegen, umbenennen, sortieren, leere löschen. Reihenfolge mit ▲▼
           pro Zeile, Speichern-Button schreibt die neue sort_order in einem
           Rutsch. <strong>Löschen</strong> erfordert, dass die Sammlung leer ist.
@@ -1063,9 +1200,9 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
         <div class="topic-create-row">
           <select [(ngModel)]="newTopic.parent_id">
-            <option [ngValue]="null">— Top-Level (neue Herausforderung) —</option>
+            <option [ngValue]="null">— Oberste Ebene (neuer Themenbereich) —</option>
             @for (t of rootThemes(); track t.id) {
-              <option [ngValue]="t.id">↳ unter „{{ t.title }}" (Bereich)</option>
+              <option [ngValue]="t.id">↳ unter „{{ t.title }}" (Herausforderung)</option>
             }
           </select>
           <input type="text" [(ngModel)]="newTopic.title"
@@ -1214,34 +1351,67 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
       @if (tab === 'activity') {
         <div class="intro">
-          Chronologisches Log relevanter Schreib-Aktionen in der App
-          (Einreichungen, Edits, Verschieben, Löschen, Anhänge, Meldungen,
-          Mod-Verwaltung). Ratings und Kommentare werden hier nicht gelistet.
+          Chronologisches Protokoll aller Schreib-Aktionen in der App — Einreichen,
+          Bearbeiten, Verschieben, Löschen, Anhänge, Meldungen und Verwaltung.
+          Filtere nach Aktion, Zeitraum oder Nutzer:in. Bewertungen und das
+          Schreiben von Kommentaren werden nicht protokolliert.
         </div>
         <div class="activity-controls">
-          <select [(ngModel)]="activityFilterAction" (ngModelChange)="loadActivity()">
-            <option value="">Alle Aktionen</option>
-            @for (a of activityActions(); track a) {
-              <option [value]="a">{{ formatAction(a) }}</option>
+          @if (activityMenuOpen) { <div class="fmenu-backdrop" (click)="activityMenuOpen=null"></div> }
+          <div class="fpill-wrap">
+            <button class="fpill" [class.active]="!!activityFilterAction"
+                    (click)="toggleActivityMenu('action')" aria-label="Nach Aktion filtern">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
+              </svg>
+              Aktion: <span class="fval">{{ activityFilterAction ? formatAction(activityFilterAction) : 'Alle' }}</span>
+              <span class="caret">▾</span>
+            </button>
+            @if (activityMenuOpen==='action') {
+              <div class="fmenu" role="menu">
+                <button [class.sel]="!activityFilterAction" (click)="setActivityAction('')">Alle Aktionen</button>
+                @for (a of activityActions(); track a) {
+                  <button [class.sel]="activityFilterAction===a" (click)="setActivityAction(a)">{{ formatAction(a) }}</button>
+                }
+              </div>
             }
-          </select>
-          <input type="text" placeholder="Akteur (Username)"
+          </div>
+          <div class="fpill-wrap">
+            <button class="fpill" [class.active]="!!activityFilterSince"
+                    (click)="toggleActivityMenu('since')" aria-label="Nach Zeitraum filtern">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              Zeitraum: <span class="fval">{{ sinceLabel(activityFilterSince) }}</span>
+              <span class="caret">▾</span>
+            </button>
+            @if (activityMenuOpen==='since') {
+              <div class="fmenu" role="menu">
+                <button [class.sel]="!activityFilterSince" (click)="setActivitySince('')">Alle</button>
+                <button [class.sel]="activityFilterSince==='1h'" (click)="setActivitySince('1h')">Letzte Stunde</button>
+                <button [class.sel]="activityFilterSince==='24h'" (click)="setActivitySince('24h')">Letzte 24 Stunden</button>
+                <button [class.sel]="activityFilterSince==='7d'" (click)="setActivitySince('7d')">Letzte 7 Tage</button>
+                <button [class.sel]="activityFilterSince==='30d'" (click)="setActivitySince('30d')">Letzte 30 Tage</button>
+              </div>
+            }
+          </div>
+          <input class="actor-input" type="text" placeholder="Nutzer:in filtern…"
                  [(ngModel)]="activityFilterActor"
                  (keyup.enter)="loadActivity()" />
-          <select [(ngModel)]="activityFilterSince" (ngModelChange)="loadActivity()">
-            <option value="">Alle</option>
-            <option value="1h">Letzte Stunde</option>
-            <option value="24h">Letzte 24h</option>
-            <option value="7d">Letzte 7 Tage</option>
-            <option value="30d">Letzte 30 Tage</option>
-          </select>
-          <button class="btn" (click)="exportActivityCsv()">
+          @if (activityFilterAction || activityFilterSince || activityFilterActor) {
+            <button class="filter-clear" (click)="clearActivityFilters()" title="Filter zurücksetzen">
+              ✕ Zurücksetzen
+            </button>
+          }
+          <button class="btn csv-btn" (click)="exportActivityCsv()">
             <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            CSV
+            CSV-Export
           </button>
         </div>
         @if (activityLoading()) {
@@ -1313,16 +1483,15 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
       @if (tab === 'inbox') {
         <div class="intro">
-          Hier liegen Einreichungen aus der edu-sharing-Inbox. Ohne Sammlung
-          gelistete Items müssen einer Herausforderung zugeordnet werden —
-          dafür rechts ein Ziel wählen und „Verschieben". Dubletten und Spam
-          lassen sich direkt löschen.
+          Neu eingereichte Ideen landen hier. Ordne jede einer Herausforderung
+          zu — Ziel rechts wählen und „Verschieben" — oder lösche Dubletten und
+          Spam direkt.
         </div>
         <div class="inbox-filter-row">
           <span class="inbox-filter-label">Anzeigen:</span>
           <button class="link-tab" [class.on]="inboxFilter === 'uncategorized'"
                   (click)="setInboxFilter('uncategorized')">
-            Ohne Sammlung
+            Inbox
             @if (inboxCounts['uncategorized'] !== undefined) { ({{ inboxCounts['uncategorized'] }}) }
           </button>
           <button class="link-tab" [class.on]="inboxFilter === 'all'"
@@ -1332,17 +1501,96 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
           </button>
           <button class="link-tab" [class.on]="inboxFilter === 'categorized'"
                   (click)="setInboxFilter('categorized')">
-            In Sammlung
+            In Herausforderung
             @if (inboxCounts['categorized'] !== undefined) { ({{ inboxCounts['categorized'] }}) }
           </button>
-          <button class="link-tab" [class.on]="inboxFilter === 'app-submits'"
-                  (click)="setInboxFilter('app-submits')">
-            App-Einreichungen
-            @if (inboxCounts['app-submits'] !== undefined) { ({{ inboxCounts['app-submits'] }}) }
+          <button class="link-tab" [class.on]="inboxFilter === 'diff'"
+                  (click)="setInboxFilter('diff')">
+            Sync-Differenz
+            @if (inboxCounts['diff'] !== undefined) { ({{ inboxCounts['diff'] }}) }
           </button>
+          <span class="inbox-toolbar">
+            <button class="btn" (click)="load()" [disabled]="loading()">↻ Aktualisieren</button>
+            <button class="btn" (click)="resync()" [disabled]="syncing()">
+              {{ syncing() ? 'Synchronisiert…' : 'edu-sharing Sync auslösen' }}
+            </button>
+          </span>
         </div>
 
-        @if (loading()) {
+        @if (inboxFilter === 'diff') {
+          @if (syncDiffLoading()) {
+            <div class="loading">Gleiche ab…</div>
+          } @else {
+            @if (syncDiffData(); as d) {
+              <div class="intro" style="margin-bottom:12px">
+                Dry-Run-Abgleich: {{ d.cache_count }} im App-Cache · {{ d.live_count }}
+                in Sammlungen referenziert. Bei Auffälligkeiten den „edu-sharing Sync"
+                oben auslösen.
+              </div>
+              @if (d.in_sync && !staleHidden().length) {
+                <div class="empty"><p>✅ App-Cache und edu-sharing sind synchron.</p></div>
+              } @else {
+                @if (d.in_sync) {
+                  <div class="intro" style="margin-bottom:12px">
+                    ✅ Keine Sync-Probleme. Die folgenden Ideen sind absichtlich
+                    versteckt (kein Handlungsbedarf) — Verwaltung im Tab „Versteckt".
+                  </div>
+                }
+                @if (d.missing.length) {
+                  <h3 style="margin:8px 0 6px; font-size:1rem">Fehlen im App-Cache ({{ d.missing.length }})</h3>
+                  <p style="font-size:.85rem; color:var(--wlo-muted); margin:0 0 8px">
+                    In einer Herausforderung referenziert, aber (noch) nicht synchronisiert — erscheinen nicht in der App.
+                  </p>
+                  @for (m of d.missing; track m.id) {
+                    <div class="item">
+                      <div class="head"><div class="titlewrap">
+                        <h3>{{ m.title || '(ohne Titel)' }}</h3>
+                        <div class="tags">
+                          <span class="tag target">➜ {{ m.challenge }}</span>
+                          <span class="slug" style="font-size:.78rem">{{ m.id }}</span>
+                        </div>
+                      </div></div>
+                    </div>
+                  }
+                }
+                @if (staleReal().length) {
+                  <h3 style="margin:16px 0 6px; font-size:1rem">Karteileichen im Cache ({{ staleReal().length }})</h3>
+                  <p style="font-size:.85rem; color:var(--wlo-muted); margin:0 0 8px">
+                    Im App-Cache, aber in keiner Sammlung mehr referenziert (Knoten gelöscht/umgehängt) — werden beim nächsten Sync bereinigt.
+                  </p>
+                  @for (s of staleReal(); track s.id) {
+                    <div class="item">
+                      <div class="head"><div class="titlewrap">
+                        <h3>{{ s.title || '(ohne Titel)' }}</h3>
+                        <div class="tags"><span class="slug" style="font-size:.78rem">{{ s.id }}</span></div>
+                      </div></div>
+                    </div>
+                  }
+                }
+                @if (staleHidden().length) {
+                  <h3 style="margin:16px 0 6px; font-size:1rem">Versteckte Ideen ({{ staleHidden().length }})</h3>
+                  <p style="font-size:.85rem; color:var(--wlo-muted); margin:0 0 8px">
+                    Im Cache, aber nicht referenziert — weil von einer Moderationskraft
+                    versteckt. Kein Sync-Problem; Verwaltung im Tab „Versteckt".
+                  </p>
+                  @for (s of staleHidden(); track s.id) {
+                    <div class="item">
+                      <div class="head"><div class="titlewrap">
+                        <h3>{{ s.title || '(ohne Titel)' }}</h3>
+                        <div class="tags">
+                          <span class="vis-badge hidden">🚫 versteckt</span>
+                          <span class="slug" style="font-size:.78rem">{{ s.id }}</span>
+                        </div>
+                      </div></div>
+                    </div>
+                  }
+                }
+              }
+            } @else {
+              <div class="empty"><p>Kein Abgleich geladen.</p></div>
+            }
+          }
+        } @else if (loading()) {
         <div class="loading">Lädt…</div>
       } @else if (!items().length) {
         <div class="empty">
@@ -1394,7 +1642,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                   }
                   @if (it.in_collection) {
                     <span class="tag" style="background:#e6f6ec;color:#137333">
-                      ✓ In Sammlung
+                      ✓ In Herausforderung
                     </span>
                   }
                 </div>
@@ -1460,9 +1708,8 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                         @if (p.phase) {
                           <dt>
                             <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                              <circle cx="12" cy="12" r="10"/>
-                              <circle cx="12" cy="12" r="6"/>
-                              <circle cx="12" cy="12" r="2"/>
+                              <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                              <line x1="4" y1="22" x2="4" y2="15"/>
                             </svg>
                             Phase
                           </dt><dd>{{ p.phase }}</dd>
@@ -1618,20 +1865,17 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         }
       }
 
-        <div style="margin-top:24px; display:flex; justify-content:space-between; align-items:center;">
-          <button class="btn" (click)="load()" [disabled]="loading()">↻ Aktualisieren</button>
-          <button class="btn" (click)="resync()" [disabled]="syncing()">
-            {{ syncing() ? 'Synchronisiert…' : 'edu-sharing Sync auslösen' }}
-          </button>
-        </div>
       }
 
       @if (tab === 'events') {
         <div class="intro">
           Veranstaltungen für die Auswahl im Einreichungsformular. Slug ist intern
           (kleinbuchstaben, Bindestriche), Label ist die Anzeige. Status steuert
-          die Sichtbarkeit (Entwurf = nur Mod, Live = wählbar, Archiv = abgeschlossen).
+          die Sichtbarkeit (Entwurf = nur Mod, Live = wählbar, Abgelaufen = abgeschlossen).
           Wenn „Featured bis" gesetzt ist, erscheint das Event prominent auf der Startseite.
+          <strong>Bewertung stoppen</strong> pausiert nur das Bewerten (Einreichungsphase),
+          <strong>Deaktivieren</strong> blendet die Veranstaltung aus der Auswahl (Tags bleiben),
+          <strong>Löschen</strong> entfernt sie überall inkl. der Tags an Ideen.
         </div>
 
         <!-- Globales Bewertungssystem -->
@@ -1652,58 +1896,83 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
           <span class="vm-hint">
             Gilt überall, wo keine veranstaltungs-spezifische Einstellung gesetzt ist.
           </span>
+          <label class="vm-opt" title="Master-Schalter: schaltet das Bewerten überall an/aus">
+            <input type="checkbox" [checked]="ratingEnabledGlobal()"
+                   (change)="setRatingEnabled($any($event.target).checked)" />
+            Bewertungen aktiv (global)
+          </label>
         </div>
 
         <div class="tax-toolbar">
           <strong>{{ events().length }} Veranstaltungen</strong>
+          @if (taxMsg()) { <span class="tax-msg">{{ taxMsg() }}</span> }
         </div>
-        <div class="tax-list">
+        <div class="tax-list tax-tax">
           <div class="tax-row header">
             <span>Slug</span>
             <span>Label / Status</span>
             <span>Beschreibung</span>
-            <span>Sort</span>
+            <span>Reihenfolge</span>
             <span></span>
           </div>
-          @for (e of events(); track e.slug) {
-            <div class="tax-row" [class.editing]="editingEvent?.slug === e.slug">
+          @for (e of eventsSorted(); track e.slug) {
+            <div class="tax-row" [class.editing]="editingEvent?.slug === e.slug"
+                 [class.evt-edit]="editingEvent?.slug === e.slug">
               @if (editingEvent?.slug === e.slug) {
-                <span class="slug">{{ e.slug }}</span>
-                <div class="event-edit-stack">
-                  <input type="text" [(ngModel)]="editingEvent!.label" placeholder="Label" />
-                  <div class="event-edit-meta">
-                    <label class="micro">Status
+                <div class="event-edit-form">
+                  <div class="eef-head">Veranstaltung bearbeiten · <code>{{ e.slug }}</code></div>
+                  <div class="eef-grid">
+                    <label class="eef-field eef-wide">Label
+                      <input type="text" [(ngModel)]="editingEvent!.label" placeholder="Anzeigename" />
+                    </label>
+                    <label class="eef-field">Status
                       <select [(ngModel)]="editingEvent!.status">
-                        <option value="draft">Entwurf</option>
-                        <option value="live">Live</option>
-                        <option value="archived">Archiv</option>
+                        <option value="draft">Entwurf (nur Mod)</option>
+                        <option value="live">Live (wählbar)</option>
+                        <option value="archived">Abgelaufen</option>
                       </select>
                     </label>
-                    <label class="micro">Featured bis
-                      <input type="datetime-local"
-                             [ngModel]="featuredUntilLocal(editingEvent!.featured_until)"
-                             (ngModelChange)="editingEvent!.featured_until = $any($event) ? toIsoUtc($any($event)) : null" />
-                    </label>
-                    @if (editingEvent!.featured_until) {
-                      <button type="button" class="link-btn"
-                              (click)="editingEvent!.featured_until = null">×</button>
-                    }
-                    <label class="micro">Bewertung
-                      <select [ngModel]="editingEvent!.voting_mode || ''"
-                              (ngModelChange)="editingEvent!.voting_mode = $any($event)">
-                        <option value="">— global —</option>
-                        <option value="stars">★ Sterne</option>
-                        <option value="thumbs">👍 Daumen</option>
+                    <label class="eef-field">Bewertung
+                      <select [ngModel]="editingEvent!.rating_open === false ? 'stopped' : 'open'"
+                              (ngModelChange)="editingEvent!.rating_open = $any($event) !== 'stopped'">
+                        <option value="open">offen</option>
+                        <option value="stopped">gestoppt (Einreichungsphase)</option>
                       </select>
+                    </label>
+                    <label class="eef-field">Featured bis
+                      <span class="eef-featured">
+                        <input type="datetime-local"
+                               [ngModel]="featuredUntilLocal(editingEvent!.featured_until)"
+                               (ngModelChange)="editingEvent!.featured_until = $any($event) ? toIsoUtc($any($event)) : null" />
+                        @if (editingEvent!.featured_until) {
+                          <button type="button" class="link-btn" title="Featured entfernen"
+                                  (click)="editingEvent!.featured_until = null">×</button>
+                        }
+                      </span>
+                    </label>
+                    <label class="eef-field">Ort
+                      <input type="text" [(ngModel)]="editingEvent!.location" placeholder="z.B. Berlin / online" />
+                    </label>
+                    <label class="eef-field">Datum von
+                      <input type="date" [(ngModel)]="editingEvent!.date_start" />
+                    </label>
+                    <label class="eef-field">Datum bis
+                      <input type="date" [(ngModel)]="editingEvent!.date_end" />
+                    </label>
+                    <label class="eef-field eef-wide">Detail-URL
+                      <input type="url" [(ngModel)]="editingEvent!.detail_url"
+                             placeholder="https://… (Veranstaltungsseite)" />
+                    </label>
+                    <label class="eef-field eef-wide">Aufruftext (für Startseite)
+                      <input type="text" [(ngModel)]="editingEvent!.description"
+                             placeholder="Kurzer Aufruf, erscheint im Featured-Banner" />
                     </label>
                   </div>
+                  <div class="eef-actions">
+                    <button class="btn" (click)="editingEvent = null">Abbrechen</button>
+                    <button class="btn primary-move" (click)="saveEvent()">Speichern</button>
+                  </div>
                 </div>
-                <input type="text" [(ngModel)]="editingEvent!.description" placeholder="Aufruftext (für Startseite)" />
-                <input type="number" [(ngModel)]="editingEvent!.sort_order" />
-                <span class="row-actions">
-                  <button class="btn primary-move" (click)="saveEvent()">Speichern</button>
-                  <button class="btn" (click)="editingEvent = null">Abbrechen</button>
-                </span>
               } @else {
                 <span class="slug">{{ e.slug }}</span>
                 <span>
@@ -1716,23 +1985,33 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                     <span class="status-pill featured" style="margin-left:6px"
                           title="Bis {{ e.featured_until }}">⭐ Featured</span>
                   }
+                  @if (e.rating_open === false) {
+                    <span class="status-pill" data-status="draft" style="margin-left:6px"
+                          title="Bewertung gestoppt (Einreichungsphase)">⏸ Bewertung gestoppt</span>
+                  }
+                  <span class="tax-count">{{ usageEvent(e.slug) }} Ideen</span>
+                  <button class="btn micro-btn" (click)="setEventRating(e, e.rating_open === false)"
+                          [title]="e.rating_open === false ? 'Bewertung für diese Veranstaltung starten' : 'Bewertung stoppen (Einreichungsphase)'">
+                    {{ e.rating_open === false ? '▶ Bewertung starten' : '⏸ Bewertung stoppen' }}
+                  </button>
                 </span>
                 <span style="color: var(--wlo-muted); font-size: .88rem">{{ e.description || '—' }}</span>
-                <span style="color: var(--wlo-muted)">{{ e.sort_order }}</span>
+                <span class="sort-handle">
+                  <button (click)="moveEventUp(e)"
+                          [disabled]="eventIsFirst(e) || eventSortBusy === e.slug" title="Nach oben">▲</button>
+                  <button (click)="moveEventDown(e)"
+                          [disabled]="eventIsLast(e) || eventSortBusy === e.slug" title="Nach unten">▼</button>
+                </span>
                 <span class="row-actions">
                   <button class="btn" (click)="openShareDialog(e)" title="Share-Link + QR-Code">🔗 Teilen</button>
                   <button class="btn" (click)="startEditEvent(e)">✎</button>
-                  <button class="btn" (click)="toggleActive('event', e)">
-                    {{ e.active ? '⏸' : '▶' }}
+                  <button class="btn" (click)="toggleActive('event', e)"
+                          [title]="e.active ? 'Aus der Auswahl ausblenden — Tags an Ideen bleiben' : 'Wieder aktivieren'">
+                    {{ e.active ? 'Deaktivieren' : 'Aktivieren' }}
                   </button>
-                  <button class="btn danger" (click)="deleteEvent(e.slug)"
-                          aria-label="Löschen">
-                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                      <polyline points="3 6 5 6 21 6"/>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                      <line x1="10" y1="11" x2="10" y2="17"/>
-                      <line x1="14" y1="11" x2="14" y2="17"/>
-                    </svg>
+                  <button class="btn danger" (click)="deleteEvent(e)"
+                          [disabled]="taxBusy === e.slug">
+                    {{ taxBusy === e.slug ? '…' : 'Löschen' }}
                   </button>
                 </span>
               }
@@ -1746,7 +2025,6 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         <div class="tax-add">
           <input type="text" placeholder="Slug (z.B. hackathoern-3)" [(ngModel)]="newEvent.slug" />
           <input type="text" placeholder="Label (z.B. HackathOERn 3)" [(ngModel)]="newEvent.label" />
-          <input type="number" placeholder="Sort" [(ngModel)]="newEvent.sort_order" />
           <button class="btn primary-move"
                   [disabled]="!newEvent.slug.trim() || !newEvent.label.trim()"
                   (click)="addEvent()">+ Hinzufügen</button>
@@ -1764,14 +2042,17 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
 
         @if (modsGroups.length) {
           <div style="margin-bottom: 14px; font-size: .88rem">
-            <strong>Quellen:</strong>
+            <strong>edu-sharing-Gruppen:</strong>
             @for (g of modsGroupStatus; track g.group) {
               <span class="pill"
                     [style.background]="g.ok ? 'var(--wlo-primary-soft)' : 'var(--wlo-accent-soft)'"
                     [style.color]="g.ok ? 'var(--wlo-text)' : '#8a3a00'"
-                    [title]="g.error || ''"
-                    style="margin: 0 6px 6px 0; display: inline-flex; gap: 4px">
-                <code style="background: transparent; padding: 0">{{ g.group }}</code>
+                    [title]="g.error || g.group"
+                    style="margin: 0 6px 6px 0; display: inline-flex; gap: 5px; align-items: center">
+                <strong>{{ g.display_name || g.group }}</strong>
+                @if (g.display_name) {
+                  <code style="background: transparent; padding: 0; opacity: .65">{{ g.group }}</code>
+                }
                 · {{ g.count }}
                 @if (!g.ok) {
                   <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
@@ -1785,12 +2066,15 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
           </div>
         }
 
+        <div class="tax-toolbar">
+          <strong>Mitglieder der edu-sharing-Moderationsgruppen ({{ moderators().length }})</strong>
+        </div>
         <div class="tax-list">
           <div class="tax-row header" style="grid-template-columns: 1fr 1fr 1.4fr 1.6fr">
             <span>Username</span>
             <span>Name</span>
             <span>E-Mail</span>
-            <span>Quelle</span>
+            <span>Gruppe</span>
           </div>
           @for (m of moderators(); track m.username) {
             <div class="tax-row" style="grid-template-columns: 1fr 1fr 1.4fr 1.6fr">
@@ -1804,10 +2088,7 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
                     Bootstrap (.env)
                   </span>
                 } @else {
-                  <code style="background: var(--wlo-bg); padding: 2px 6px;
-                               border-radius: 4px; font-size: .78rem">
-                    {{ m.source }}
-                  </code>
+                  <span [title]="m.source">{{ groupLabel(m.source) }}</span>
                 }
               </span>
             </div>
@@ -1823,127 +2104,70 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         }
       }
 
-      @if (shareEvent) {
-        <div class="share-overlay" (click)="closeShare($event)">
-          <div class="share-box" (click)="$event.stopPropagation()">
-            <div class="share-head">
-              <h2>
-                <svg class="stat-ico lg" viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                  <line x1="16" y1="2" x2="16" y2="6"/>
-                  <line x1="8" y1="2" x2="8" y2="6"/>
-                  <line x1="3" y1="10" x2="21" y2="10"/>
-                </svg>
-                {{ shareEvent.label }} — teilen
-              </h2>
-              <button class="x" (click)="shareEvent=null">×</button>
-            </div>
-            <p>
-              Der Link öffnet die Idee-Einreichung mit dieser Veranstaltung
-              vorausgewählt. Eingereichte Ideen werden automatisch zugeordnet.
-            </p>
-
-            <label>Share-Link</label>
-            <div class="share-link">
-              <input type="text" [value]="shareUrl(shareEvent.slug)" readonly
-                     #linkInput (click)="linkInput.select()" />
-              <button class="btn primary-move" (click)="copyShareLink(shareEvent.slug)">
-                @if (copied) {
-                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                  Kopiert
-                } @else {
-                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                  </svg>
-                  Kopieren
-                }
-              </button>
-            </div>
-
-            <label style="margin-top: 16px">QR-Code zum Ausdrucken / auf Folien</label>
-            <div class="share-qr">
-              <img [src]="qrUrl(shareEvent.slug)" alt="QR-Code" />
-              <div class="qr-actions">
-                <a [href]="qrUrl(shareEvent.slug, 600)" target="_blank" rel="noopener">
-                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                    <polyline points="15 3 21 3 21 9"/>
-                    <line x1="10" y1="14" x2="21" y2="3"/>
-                  </svg>
-                  Hochauflösend öffnen (600×600)
-                </a>
-                <a [href]="qrUrl(shareEvent.slug, 600)" download="qr-{{shareEvent.slug}}.png">
-                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                  </svg>
-                  Als PNG herunterladen
-                </a>
-              </div>
-            </div>
-
-            <p class="share-note">
-              Tipp: Drucke den QR-Code auf Veranstaltungs-Plakate, leg ihn am
-              Workshop-Tisch oder klick „Hochauflösend öffnen" für die Folien.
-              Der Link enthält keinen geheimen Token — wer ihn hat, kann eine
-              Idee einreichen, die diesem Event zugeordnet wird.
-            </p>
-          </div>
-        </div>
-      }
+      <ideendb-share-dialog
+        [open]="!!shareEvent"
+        [title]="(shareEvent?.label || '') + ' — teilen'"
+        [intro]="'Der Link öffnet die Idee-Einreichung mit dieser Veranstaltung vorausgewählt. Eingereichte Ideen werden automatisch zugeordnet — ideal für Plakate, Folien oder den Workshop-Tisch.'"
+        [url]="shareEvent ? shareUrl(shareEvent.slug) : ''"
+        [qrFilename]="'qr-' + (shareEvent?.slug || 'event') + '.png'"
+        (closed)="shareEvent = null">
+      </ideendb-share-dialog>
 
       @if (tab === 'phases') {
         <div class="intro">
-          Phasen einer Idee — vom ersten Gedanken bis zur Umsetzung. Default-Liste
-          ist beim Start gesetzt; das Team kann erweitern oder umbenennen.
+          Phasen einer Idee — vom ersten Gedanken bis zur Umsetzung. Reihenfolge
+          mit ▲▼ pro Zeile. <strong>Deaktivieren</strong> blendet eine Phase nur
+          aus Filtern und der Auswahl aus; bereits getaggte Ideen behalten sie.
+          <strong>Löschen</strong> entfernt die Phase überall — inklusive des Tags
+          an allen betroffenen Ideen (endgültig).
         </div>
         <div class="tax-toolbar">
           <strong>{{ phases().length }} Phasen</strong>
+          @if (taxMsg()) { <span class="tax-msg">{{ taxMsg() }}</span> }
         </div>
-        <div class="tax-list">
+        <div class="tax-list tax-tax">
           <div class="tax-row header">
             <span>Slug</span>
-            <span>Label</span>
+            <span>Label / Status</span>
             <span>Beschreibung</span>
-            <span>Sort</span>
+            <span>Reihenfolge</span>
             <span></span>
           </div>
-          @for (p of phases(); track p.slug) {
+          @for (p of phasesSorted(); track p.slug) {
             <div class="tax-row" [class.editing]="editingPhase?.slug === p.slug">
               @if (editingPhase?.slug === p.slug) {
                 <span class="slug">{{ p.slug }}</span>
                 <input type="text" [(ngModel)]="editingPhase!.label" />
                 <input type="text" [(ngModel)]="editingPhase!.description" />
-                <input type="number" [(ngModel)]="editingPhase!.sort_order" />
+                <span style="color: var(--wlo-muted)">—</span>
                 <span class="row-actions">
                   <button class="btn primary-move" (click)="savePhase()">Speichern</button>
                   <button class="btn" (click)="editingPhase = null">Abbrechen</button>
                 </span>
               } @else {
                 <span class="slug">{{ p.slug }}</span>
-                <span><strong>{{ p.label }}</strong>
+                <span>
+                  <strong>{{ p.label }}</strong>
                   <span class="pill" [class.on]="p.active" [class.off]="!p.active"
                         style="margin-left:8px">{{ p.active ? 'aktiv' : 'inaktiv' }}</span>
+                  <span class="tax-count">{{ usagePhase(p.slug) }} Ideen</span>
                 </span>
                 <span style="color: var(--wlo-muted); font-size: .88rem">{{ p.description || '—' }}</span>
-                <span style="color: var(--wlo-muted)">{{ p.sort_order }}</span>
+                <span class="sort-handle">
+                  <button (click)="movePhaseUp(p)"
+                          [disabled]="phaseIsFirst(p) || phaseSortBusy === p.slug" title="Nach oben">▲</button>
+                  <button (click)="movePhaseDown(p)"
+                          [disabled]="phaseIsLast(p) || phaseSortBusy === p.slug" title="Nach unten">▼</button>
+                </span>
                 <span class="row-actions">
-                  <button class="btn" (click)="startEditPhase(p)">✎</button>
-                  <button class="btn" (click)="toggleActive('phase', p)">
-                    {{ p.active ? '⏸' : '▶' }}
+                  <button class="btn" (click)="startEditPhase(p)" title="Bearbeiten">✎</button>
+                  <button class="btn" (click)="toggleActive('phase', p)"
+                          [title]="p.active ? 'Aus Filtern/Auswahl ausblenden — Tags an Ideen bleiben' : 'Wieder aktivieren'">
+                    {{ p.active ? 'Deaktivieren' : 'Aktivieren' }}
                   </button>
-                  <button class="btn danger" (click)="deletePhase(p.slug)"
-                          aria-label="Löschen">
-                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                      <polyline points="3 6 5 6 21 6"/>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                      <line x1="10" y1="11" x2="10" y2="17"/>
-                      <line x1="14" y1="11" x2="14" y2="17"/>
-                    </svg>
+                  <button class="btn danger" (click)="deletePhase(p)"
+                          [disabled]="taxBusy === p.slug">
+                    {{ taxBusy === p.slug ? '…' : 'Löschen' }}
                   </button>
                 </span>
               }
@@ -1953,12 +2177,13 @@ import { InboxItem, TaxonomyEntry, Topic } from '../models';
         <div class="tax-add">
           <input type="text" placeholder="Slug (z.B. konzept)" [(ngModel)]="newPhase.slug" />
           <input type="text" placeholder="Label" [(ngModel)]="newPhase.label" />
-          <input type="number" placeholder="Sort" [(ngModel)]="newPhase.sort_order" />
           <button class="btn primary-move"
                   [disabled]="!newPhase.slug.trim() || !newPhase.label.trim()"
                   (click)="addPhase()">+ Hinzufügen</button>
         </div>
       }
+      </div>
+      </div>
     </div>
   `,
 })
@@ -1984,8 +2209,70 @@ export class ModerationComponent implements OnInit {
 
   // Tabs + Taxonomie-Verwaltung
   tab: 'stats' | 'inbox' | 'reports' | 'activity' | 'topics' | 'events' | 'phases' | 'mods' | 'hidden' | 'backup' = 'inbox';
+
+  // Gruppen-Navigation: 5 Oberkategorien, jede mit Unter-Tabs. Pro Gruppe
+  // merken wir den zuletzt geöffneten Unter-Tab, damit der Rücksprung passt.
+  lastTabInGroup: Record<string, string> = {
+    stats: 'stats', inbox: 'inbox', content: 'topics',
+    moderation: 'reports', system: 'mods',
+  };
+  /** Welche Oberkategorie gehört zu einem Unter-Tab? */
+  groupOf(t: string): string {
+    if (t === 'topics' || t === 'events' || t === 'phases') return 'content';
+    if (t === 'reports' || t === 'activity' || t === 'hidden') return 'moderation';
+    if (t === 'mods' || t === 'backup') return 'system';
+    return t; // 'stats' | 'inbox' (Einzel-Gruppen ohne Unter-Tabs)
+  }
+  /** Konkreten Tab aktivieren, Gruppen-Merker setzen und Daten laden. */
+  selectTab(t: string) {
+    this.tab = t as any;
+    this.lastTabInGroup[this.groupOf(t)] = t;
+    this.loadFor(t);
+  }
+
+  // Dropdown-Pillen-Navigation: welche Gruppen-Pille hat ihr Menü offen?
+  navMenuOpen: 'content' | 'moderation' | 'system' | null = null;
+  toggleNavMenu(g: 'content' | 'moderation' | 'system') {
+    this.navMenuOpen = this.navMenuOpen === g ? null : g;
+  }
+  /** Tab aus dem Pillen-Menü wählen und das Menü schließen. */
+  selectNav(t: string) {
+    this.navMenuOpen = null;
+    this.selectTab(t);
+  }
+  /** Kurzes Label eines Unter-Tabs (für die aktive Pille + Menüs). */
+  tabLabel(t: string): string {
+    return ({
+      stats: 'Statistik', inbox: 'Postfach', topics: 'Themenbereiche',
+      events: 'Veranstaltungen', phases: 'Phasen', reports: 'Meldungen',
+      activity: 'Aktivität', hidden: 'Inhalte verwalten',
+      mods: 'Moderatoren', backup: 'Backup',
+    } as Record<string, string>)[t] || t;
+  }
+  private loadFor(t: string) {
+    switch (t) {
+      case 'stats': this.loadStats(); break;
+      case 'inbox': this.load(); break;
+      case 'reports': this.loadReports(); break;
+      case 'activity': this.loadActivity(); break;
+      case 'topics': this.loadTopics(); break;
+      case 'events': this.loadEvents(); this.loadTaxonomyUsage(); break;
+      case 'phases': this.loadPhases(); this.loadTaxonomyUsage(); break;
+      case 'mods': this.loadMods(); break;
+      case 'hidden': this.loadHidden(); this.loadAllIdeas(); break;
+      case 'backup': this.loadBackups(); break;
+    }
+  }
   hidden = signal<{ id: string; title: string; owner_username?: string;
                     hidden_reason?: string; modified_at?: string }[]>([]);
+
+  // Sichtbarkeits-Verwaltung „Alle Ideen" (im Versteckt-Tab)
+  allIdeasQuery = '';
+  allIdeas = signal<{ id: string; title: string; owner_username?: string;
+                      hidden: number; hidden_reason?: string; modified_at?: string }[]>([]);
+  allIdeasLoading = signal(false);
+  /** ID der Idee, deren Sichtbarkeit gerade umgeschaltet wird (Button-Spinner). */
+  visBusy = signal<string | null>(null);
 
   // ===== Backup =====
   backups = signal<{
@@ -2052,7 +2339,7 @@ export class ModerationComponent implements OnInit {
     if (!file) return;
     if (!confirm(
       `WARNUNG: Restore aus „${file.name}" überschreibt die gesamte App-Datenbank ` +
-      `(Activity-Log, Trends, Reports, Mitmachen/Folgen, Taxonomien, ` +
+      `(Activity-Log, Trends, Reports, Mithacken/Folgen, Taxonomien, ` +
       `Topic-Sortierung). Vor dem Austausch wird automatisch ein „pre-restore"-` +
       `Backup angelegt. edu-sharing-Daten bleiben unangetastet.\n\nFortfahren?`
     )) {
@@ -2323,6 +2610,34 @@ export class ModerationComponent implements OnInit {
   activityFilterAction = '';
   activityFilterActor = '';
   activityFilterSince: '' | '1h' | '24h' | '7d' | '30d' = '';
+  // Welche Filter-Pille hat ihr Menü gerade offen?
+  activityMenuOpen: 'action' | 'since' | null = null;
+
+  toggleActivityMenu(m: 'action' | 'since') {
+    this.activityMenuOpen = this.activityMenuOpen === m ? null : m;
+  }
+  setActivityAction(a: string) {
+    this.activityFilterAction = a;
+    this.activityMenuOpen = null;
+    this.loadActivity();
+  }
+  setActivitySince(s: '' | '1h' | '24h' | '7d' | '30d') {
+    this.activityFilterSince = s;
+    this.activityMenuOpen = null;
+    this.loadActivity();
+  }
+  /** Label für die Zeitraum-Pille. */
+  sinceLabel(s: string): string {
+    return ({ '1h': 'Letzte Stunde', '24h': 'Letzte 24 Stunden',
+      '7d': 'Letzte 7 Tage', '30d': 'Letzte 30 Tage' } as Record<string, string>)[s] || 'Alle';
+  }
+  clearActivityFilters() {
+    this.activityFilterAction = '';
+    this.activityFilterSince = '';
+    this.activityFilterActor = '';
+    this.activityMenuOpen = null;
+    this.loadActivity();
+  }
 
   loadActivity() {
     this.activityLoading.set(true);
@@ -2347,59 +2662,97 @@ export class ModerationComponent implements OnInit {
 
   formatAction(a: string): string {
     const labels: Record<string, string> = {
+      // Ideen
       idea_submitted: 'Idee eingereicht',
       idea_edited: 'Idee bearbeitet',
       idea_deleted: 'Idee gelöscht',
       idea_duplicated: 'Idee dupliziert',
       idea_moved: 'Idee verschoben',
+      idea_topic_changed: 'Idee umsortiert',
+      idea_contact_changed: 'Kontaktdaten geändert',
+      idea_hidden: 'Idee versteckt',
+      idea_unhidden: 'Idee wieder eingeblendet',
+      phase_changed: 'Phase gewechselt',
+      // Anhänge
       attachment_uploaded: 'Anhang hochgeladen',
+      attachment_renamed: 'Anhang umbenannt',
+      attachment_replaced: 'Anhang ersetzt',
       attachment_deleted: 'Anhang gelöscht',
       attachment_folder_created: 'Anhänge-Sammlung angelegt',
       attachment_folder_deleted: 'Anhänge-Sammlung gelöscht',
+      // Mithacken / Team
+      team_join_requested: 'Mithacken angefragt',
+      team_approved: 'Mithackende:n angenommen',
+      team_unapproved: 'Annahme zurückgezogen',
+      team_edit_granted: 'Bearbeitungsrecht erteilt',
+      team_edit_revoked: 'Bearbeitungsrecht entzogen',
+      team_member_updated: 'Team-Mitglied aktualisiert',
+      team_member_removed: 'Team-Mitglied entfernt',
+      // Meldungen
       report_submitted: 'Meldung eingegangen',
       report_resolved: 'Meldung erledigt',
+      // Kommentare / Postfach
+      comment_deleted: 'Kommentar gelöscht',
       inbox_deleted: 'Inbox-Eintrag gelöscht',
-      mod_added: 'Moderator:in hinzugefügt',
-      mod_removed: 'Moderator:in entfernt',
+      // Themenbereiche / Struktur
+      topic_created: 'Themenbereich/Herausforderung angelegt',
+      topic_edited: 'Themenbereich/Herausforderung bearbeitet',
+      topic_deleted: 'Themenbereich/Herausforderung gelöscht',
+      topic_preview_set: 'Vorschaubild gesetzt',
+      topics_sorted: 'Reihenfolge geändert',
       taxonomy_event_changed: 'Veranstaltung geändert',
       taxonomy_event_deleted: 'Veranstaltung gelöscht',
-      taxonomy_phase_changed: 'Phase geändert',
-      taxonomy_phase_deleted: 'Phase gelöscht',
-      auth_failed: '❌ Auth fehlgeschlagen',
+      taxonomy_phase_changed: 'Phasen-Eintrag geändert',
+      taxonomy_phase_deleted: 'Phasen-Eintrag gelöscht',
+      // Moderatoren / Profile / System
+      mod_added: 'Moderator:in hinzugefügt',
+      mod_removed: 'Moderator:in entfernt',
+      profile_meta_updated: 'Profil aktualisiert',
+      setting_changed: 'Einstellung geändert',
+      auth_failed: 'Anmeldung fehlgeschlagen',
+      // Backup
       backup_created: 'Backup erstellt',
       backup_deleted: 'Backup gelöscht',
       backup_restored: 'Backup wiederhergestellt',
-      topic_created: 'Herausforderung/Bereich angelegt',
-      topic_edited: 'Herausforderung/Bereich bearbeitet',
-      topic_deleted: 'Herausforderung/Bereich gelöscht',
-      topic_preview_set: 'Vorschaubild gesetzt',
-      topics_sorted: 'Reihenfolge geändert',
-      phase_changed: 'Phase gewechselt',
+      // Veröffentlichungs-Metadaten
+      publication_meta_backfilled: 'Veröffentlichungsdaten nachgetragen',
+      publication_meta_bulk_backfilled: 'Veröffentlichungsdaten gesammelt nachgetragen',
     };
-    return labels[a] || a;
+    if (labels[a]) return labels[a];
+    // Fallback für künftige Aktionen: snake_case lesbar machen statt roh anzeigen
+    return a ? a.charAt(0).toUpperCase() + a.slice(1).replace(/_/g, ' ') : a;
   }
   actionIcon(a: string): string {
-    if (a.startsWith('idea_submitted')) return '✨';
-    if (a.startsWith('idea_edited')) return '✎';
-    if (a.startsWith('idea_deleted') || a === 'inbox_deleted') return '🗑';
+    if (a === 'idea_submitted') return '✨';
+    if (a === 'idea_edited') return '✎';
+    if (a === 'idea_deleted' || a === 'inbox_deleted' || a === 'comment_deleted') return '🗑';
     if (a === 'idea_duplicated') return '⎘';
-    if (a === 'idea_moved') return '➡';
-    if (a.startsWith('attachment_uploaded')) return '⬆';
-    if (a.startsWith('attachment_deleted')) return '🗑';
-    if (a.startsWith('attachment_folder_created')) return '📁';
-    if (a.startsWith('attachment_folder_deleted')) return '🗑';
-    if (a === 'report_submitted') return '⚠';
-    if (a === 'report_resolved') return '✓';
-    if (a.startsWith('mod_')) return '👥';
-    if (a.startsWith('taxonomy_')) return '🏷';
+    if (a === 'idea_moved' || a === 'idea_topic_changed') return '➡';
+    if (a === 'idea_hidden') return '🚫';
+    if (a === 'idea_unhidden') return '👁';
+    if (a === 'idea_contact_changed') return '✉';
+    if (a === 'phase_changed') return '⏱';
+    if (a === 'attachment_uploaded') return '⬆';
+    if (a === 'attachment_renamed') return '✎';
+    if (a === 'attachment_replaced') return '⇄';
+    if (a === 'attachment_deleted' || a === 'attachment_folder_deleted') return '🗑';
+    if (a === 'attachment_folder_created') return '📁';
+    if (a.startsWith('report')) return a === 'report_submitted' ? '⚠' : '✓';
+    if (a.startsWith('team_') || a.startsWith('mod_')) return '👥';
+    if (a.startsWith('taxonomy_') || a.startsWith('topic')) return '🏷';
+    if (a === 'profile_meta_updated') return '👤';
+    if (a === 'setting_changed') return '⚙';
+    if (a === 'auth_failed') return '⛔';
+    if (a.startsWith('backup_')) return '💾';
+    if (a.startsWith('publication_meta')) return '🗓';
     return '·';
   }
 
   renderActivity(a: any): string {
-    const label = this.formatAction(a.action);
+    const label = this.escape(this.formatAction(a.action));
     const target = a.target_label
       ? `<strong>${this.escape(a.target_label)}</strong>`
-      : (a.target_id ? `<code>${a.target_id.substr(0, 8)}…</code>` : '');
+      : (a.target_id ? `<code>${this.escape(a.target_id.substr(0, 8))}…</code>` : '');
     let extra = '';
     if (a.detail) {
       if (a.action === 'idea_moved' && a.detail.to_topic_title) {
@@ -2490,7 +2843,11 @@ export class ModerationComponent implements OnInit {
 
   // Moderatoren-Anzeige (read-only)
   modsGroups: string[] = [];
-  modsGroupStatus: { group: string; ok: boolean; error?: string | null; count: number }[] = [];
+  modsGroupStatus: { group: string; display_name?: string | null; ok: boolean; error?: string | null; count: number }[] = [];
+  /** Klartext-Bezeichnung einer Gruppe (Fallback: technische ID). */
+  groupLabel(id: string): string {
+    return this.modsGroupStatus.find((g) => g.group === id)?.display_name || id;
+  }
   moderators = signal<{
     username: string; first_name?: string; last_name?: string;
     email?: string; source: string;
@@ -2499,14 +2856,12 @@ export class ModerationComponent implements OnInit {
 
   // Share-Dialog für Veranstaltung
   shareEvent: TaxonomyEntry | null = null;
-  copied = false;
-  private copiedTimer?: number;
 
   ngOnInit() {
     this.api.setBase(this.apiBase);
     this.api.topics().subscribe((ts) => {
       this.topicsById = Object.fromEntries(ts.map((t) => [t.id, t]));
-      // Challenge-Ebene (Level 2) als Move-Ziel — Moderator sortiert Ideen
+      // Challenge-Ebene (Ebene 2) als Move-Ziel — Moderator sortiert Ideen
       // konkret in eine Herausforderung, nicht in den Themen-Oberbereich.
       this.challenges.set(ts.filter((t) => t.parent_id).sort(
         (a, b) => this.topicTitleFor(a.id).localeCompare(this.topicTitleFor(b.id)),
@@ -2517,21 +2872,40 @@ export class ModerationComponent implements OnInit {
     this.loadReports();
   }
 
-  inboxFilter: 'uncategorized' | 'all' | 'categorized' | 'app-submits' = 'uncategorized';
+  inboxFilter: 'uncategorized' | 'all' | 'categorized' | 'diff' = 'uncategorized';
   inboxCounts: Record<string, number | undefined> = {};
 
-  setInboxFilter(f: 'uncategorized' | 'all' | 'categorized' | 'app-submits') {
-    if (this.inboxFilter === f) return;
-    this.inboxFilter = f;
-    this.load();
+  // Sync-Differenz (App-Cache ↔ edu-sharing)
+  syncDiffData = signal<{
+    missing: { id: string; title: string; challenge: string }[];
+    stale: { id: string; title: string; hidden?: boolean }[];
+    hidden_stale_count?: number;
+    live_count: number; cache_count: number; in_sync: boolean;
+  } | null>(null);
+  syncDiffLoading = signal(false);
+
+  /** Echte Karteileichen (nicht referenziert + nicht versteckt). */
+  staleReal() {
+    const d = this.syncDiffData();
+    return d ? d.stale.filter((s) => !s.hidden) : [];
+  }
+  /** Nicht referenzierte, aber absichtlich versteckte Ideen — kein Problem. */
+  staleHidden() {
+    const d = this.syncDiffData();
+    return d ? d.stale.filter((s) => s.hidden) : [];
   }
 
-  /** Holt die Counts für alle vier Filter parallel, damit die
-   *  Filter-Buttons live „(N)" zeigen. Wird beim Tab-Open + nach
-   *  Move/Delete-Aktionen aufgerufen. */
+  setInboxFilter(f: 'uncategorized' | 'all' | 'categorized' | 'diff') {
+    if (this.inboxFilter === f) return;
+    this.inboxFilter = f;
+    if (f === 'diff') this.loadSyncDiff();
+    else this.load();
+  }
+
+  /** Holt die Counts der drei Inbox-Filter parallel für die „(N)"-Anzeige. */
   private loadInboxCounts() {
-    const filters: ('uncategorized' | 'all' | 'categorized' | 'app-submits')[] =
-      ['uncategorized', 'all', 'categorized', 'app-submits'];
+    const filters: ('uncategorized' | 'all' | 'categorized')[] =
+      ['uncategorized', 'all', 'categorized'];
     for (const f of filters) {
       this.api.inbox(f).subscribe({
         next: (r) => (this.inboxCounts[f] = (r as { total?: number }).total ?? r.count),
@@ -2540,9 +2914,24 @@ export class ModerationComponent implements OnInit {
     }
   }
 
+  /** Lädt den Sync-Abgleich (Dry-Run) — fehlende + verwaiste Cache-Einträge. */
+  loadSyncDiff() {
+    this.syncDiffLoading.set(true);
+    this.api.syncDiff().subscribe({
+      next: (r) => {
+        this.syncDiffData.set(r);
+        this.inboxCounts['diff'] = r.missing.length + r.stale.length;
+        this.syncDiffLoading.set(false);
+      },
+      error: () => this.syncDiffLoading.set(false),
+    });
+  }
+
   load() {
+    if (this.inboxFilter === 'diff') { this.loadSyncDiff(); return; }
+    const filter = this.inboxFilter;
     this.loading.set(true);
-    this.api.inbox(this.inboxFilter).subscribe({
+    this.api.inbox(filter).subscribe({
       next: (r) => {
         this.items.set(r.items);
         this.loading.set(false);
@@ -2646,14 +3035,23 @@ export class ModerationComponent implements OnInit {
   }
 
   blankEventEntry(): TaxonomyEntry {
-    return { ...this.blankEntry(), status: 'live', featured_until: null, voting_mode: '' };
+    return {
+      ...this.blankEntry(),
+      status: 'live', featured_until: null, voting_mode: '',
+      location: null, date_start: null, date_end: null, detail_url: null,
+    };
   }
 
   // --- Globales Bewertungssystem (Sterne vs. Daumen) ---
   votingGlobal = signal<'stars' | 'thumbs'>('stars');
+  // --- Globaler Bewertungs-Schalter (Master: an/aus) ---
+  ratingEnabledGlobal = signal(true);
   loadVotingGlobal() {
     this.api.getSettings().subscribe({
-      next: (s) => this.votingGlobal.set(s.voting_mode_global || 'stars'),
+      next: (s) => {
+        this.votingGlobal.set(s.voting_mode_global || 'stars');
+        this.ratingEnabledGlobal.set(s.rating_enabled !== false);
+      },
       error: () => {},
     });
   }
@@ -2661,6 +3059,12 @@ export class ModerationComponent implements OnInit {
     this.votingGlobal.set(m);  // optimistisch
     this.api.updateSettings({ voting_mode_global: m }).subscribe({
       error: () => this.loadVotingGlobal(),  // Rollback durch Neuladen
+    });
+  }
+  setRatingEnabled(on: boolean) {
+    this.ratingEnabledGlobal.set(on);  // optimistisch
+    this.api.updateSettings({ rating_enabled: on }).subscribe({
+      error: () => this.loadVotingGlobal(),
     });
   }
 
@@ -2678,7 +3082,7 @@ export class ModerationComponent implements OnInit {
   statusLabel(s: string | undefined | null): string {
     switch (s) {
       case 'draft': return 'Entwurf';
-      case 'archived': return 'Archiv';
+      case 'archived': return 'Abgelaufen';
       default: return 'Live';
     }
   }
@@ -2738,20 +3142,37 @@ export class ModerationComponent implements OnInit {
   }
   addEvent() {
     const slug = this.normalizeSlug(this.newEvent.slug);
+    // Neue Events ans Ende der Reihenfolge (max + 10) — Sortierung danach per ▲▼.
+    const maxOrder = this.events().reduce((m, e) => Math.max(m, e.sort_order ?? 0), 0);
     const entry: TaxonomyEntry = {
       ...this.newEvent,
       slug,
       status: this.newEvent.status ?? 'live',
       featured_until: this.newEvent.featured_until ?? null,
+      sort_order: maxOrder + 10,
     };
     this.api.upsertEvent(entry).subscribe(() => {
       this.newEvent = this.blankEventEntry();
       this.loadEvents();
     });
   }
-  deleteEvent(slug: string) {
-    if (!confirm(`Veranstaltung "${slug}" wirklich löschen? Bereits zugeordnete Ideen behalten ihr Keyword, aber die Auswahl im Formular entfällt.`)) return;
-    this.api.deleteEvent(slug).subscribe(() => this.loadEvents());
+  deleteEvent(e: TaxonomyEntry) {
+    const n = this.usageEvent(e.slug);
+    const warn = n > 0
+      ? `\n\n⚠ ${n} Idee(n) sind dieser Veranstaltung zugeordnet. Das „event:${e.slug}"-Tag wird von diesen Ideen in edu-sharing entfernt.`
+      : '\n\nAktuell ist keine Idee dieser Veranstaltung zugeordnet.';
+    if (!confirm(`Veranstaltung „${e.label}" endgültig löschen?${warn}\n\nNicht umkehrbar. Zum nur Ausblenden lieber „Deaktivieren".`)) return;
+    this.taxBusy = e.slug;
+    this.taxMsg.set('');
+    this.api.deleteEvent(e.slug).subscribe({
+      next: (r) => {
+        this.taxBusy = null;
+        this.taxMsg.set(this.delSummary('Veranstaltung', r));
+        this.loadEvents();
+        this.loadTaxonomyUsage();
+      },
+      error: () => { this.taxBusy = null; },
+    });
   }
 
   startEditPhase(p: TaxonomyEntry) {
@@ -2766,17 +3187,35 @@ export class ModerationComponent implements OnInit {
   }
   addPhase() {
     const slug = this.normalizeSlug(this.newPhase.slug);
-    const entry: TaxonomyEntry = { ...this.newPhase, slug };
+    // Sortierung läuft über ▲▼ — neue Phase hinten anstellen (max+10).
+    const maxOrder = this.phases().reduce((m, p) => Math.max(m, p.sort_order ?? 0), 0);
+    const entry: TaxonomyEntry = { ...this.newPhase, slug, sort_order: maxOrder + 10 };
     this.api.upsertPhase(entry).subscribe(() => {
       this.newPhase = this.blankEntry();
       this.loadPhases();
     });
   }
-  deletePhase(slug: string) {
-    if (!confirm(`Phase "${slug}" wirklich löschen?`)) return;
-    this.api.deletePhase(slug).subscribe(() => this.loadPhases());
+  deletePhase(p: TaxonomyEntry) {
+    const n = this.usagePhase(p.slug);
+    const warn = n > 0
+      ? `\n\n⚠ ${n} Idee(n) tragen diese Phase. Das „phase:${p.slug}"-Tag wird von diesen Ideen in edu-sharing entfernt.`
+      : '\n\nAktuell trägt keine Idee diese Phase.';
+    if (!confirm(`Phase „${p.label}" endgültig löschen?${warn}\n\nNicht umkehrbar. Zum nur Ausblenden lieber „Deaktivieren".`)) return;
+    this.taxBusy = p.slug;
+    this.taxMsg.set('');
+    this.api.deletePhase(p.slug).subscribe({
+      next: (r) => {
+        this.taxBusy = null;
+        this.taxMsg.set(this.delSummary('Phase', r));
+        this.loadPhases();
+        this.loadTaxonomyUsage();
+      },
+      error: () => { this.taxBusy = null; },
+    });
   }
 
+  /** Aktiv/Inaktiv umschalten (Deaktivieren blendet nur aus Filtern/Auswahl
+   *  aus — die Tags an den Ideen bleiben erhalten, anders als beim Löschen). */
   toggleActive(kind: 'event' | 'phase', e: TaxonomyEntry) {
     const updated: TaxonomyEntry = { ...e, active: !e.active };
     const op = kind === 'event'
@@ -2784,34 +3223,126 @@ export class ModerationComponent implements OnInit {
     op.subscribe(() => kind === 'event' ? this.loadEvents() : this.loadPhases());
   }
 
+  /** Bewertung einer Veranstaltung starten/stoppen (rating_open) — getrennt
+   *  vom Deaktivieren. „Gestoppt" = Einreichungsphase, Idee nicht bewertbar. */
+  setEventRating(e: TaxonomyEntry, open: boolean) {
+    this.api.upsertEvent({ ...e, rating_open: open }).subscribe(() => this.loadEvents());
+  }
+
+  // ===== Phasen/Events: Nutzungszahlen + Lösch-Feedback =====
+  taxUsage = signal<{ phases: Record<string, number>; events: Record<string, number> }>(
+    { phases: {}, events: {} },
+  );
+  taxBusy: string | null = null;
+  taxMsg = signal<string>('');
+  loadTaxonomyUsage() {
+    this.api.taxonomyUsage().subscribe({
+      next: (r) => this.taxUsage.set({ phases: r.phases || {}, events: r.events || {} }),
+      error: () => {},
+    });
+  }
+  usagePhase(slug: string): number { return this.taxUsage().phases[slug] || 0; }
+  usageEvent(slug: string): number { return this.taxUsage().events[slug] || 0; }
+  private delSummary(what: string, r: { removed: number; failed: number; total: number }): string {
+    if (!r || !r.total) return `${what} gelöscht.`;
+    const base = `${what} gelöscht — Tag von ${r.removed} Idee(n) entfernt`;
+    return r.failed ? `${base}, ${r.failed} fehlgeschlagen.` : `${base}.`;
+  }
+
+  // ===== Phasen-Reihenfolge per ▲▼ (analog zu den Events) =====
+  phaseSortBusy: string | null = null;
+  phasesSorted(): TaxonomyEntry[] {
+    return [...this.phases()].sort(
+      (a, b) => ((a.sort_order ?? 100) - (b.sort_order ?? 100)) || a.label.localeCompare(b.label),
+    );
+  }
+  phaseIsFirst(p: TaxonomyEntry): boolean { return this.phasesSorted()[0]?.slug === p.slug; }
+  phaseIsLast(p: TaxonomyEntry): boolean {
+    const s = this.phasesSorted();
+    return s[s.length - 1]?.slug === p.slug;
+  }
+  movePhaseUp(p: TaxonomyEntry) { this.swapPhase(p, -1); }
+  movePhaseDown(p: TaxonomyEntry) { this.swapPhase(p, +1); }
+  private swapPhase(p: TaxonomyEntry, dir: -1 | 1) {
+    const sorted = this.phasesSorted();
+    const i = sorted.findIndex((x) => x.slug === p.slug);
+    const j = i + dir;
+    if (j < 0 || j >= sorted.length) return;
+    [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
+    const updates: TaxonomyEntry[] = [];
+    sorted.forEach((ph, idx) => {
+      const want = (idx + 1) * 10;
+      if ((ph.sort_order ?? -1) !== want) updates.push({ ...ph, sort_order: want });
+    });
+    if (!updates.length) return;
+    const bySlug = new Map(updates.map((u) => [u.slug, u.sort_order!]));
+    this.phases.set(this.phases().map((ph) =>
+      bySlug.has(ph.slug) ? { ...ph, sort_order: bySlug.get(ph.slug)! } : ph,
+    ));
+    this.phaseSortBusy = p.slug;
+    let done = 0;
+    const fin = () => { if (++done >= updates.length) { this.phaseSortBusy = null; this.loadPhases(); } };
+    for (const u of updates) {
+      this.api.upsertPhase(u).subscribe({
+        next: fin,
+        error: () => { this.phaseSortBusy = null; this.loadPhases(); },
+      });
+    }
+  }
+
+  // ===== Event-Reihenfolge per ▲▼ (statt manueller sort_order-Zahl) =====
+  eventSortBusy: string | null = null;
+  /** Events nach sort_order sortiert (Anzeige-Reihenfolge). */
+  eventsSorted(): TaxonomyEntry[] {
+    return [...this.events()].sort(
+      (a, b) => ((a.sort_order ?? 100) - (b.sort_order ?? 100)) || a.label.localeCompare(b.label),
+    );
+  }
+  eventIsFirst(e: TaxonomyEntry): boolean { return this.eventsSorted()[0]?.slug === e.slug; }
+  eventIsLast(e: TaxonomyEntry): boolean {
+    const s = this.eventsSorted();
+    return s[s.length - 1]?.slug === e.slug;
+  }
+  moveEventUp(e: TaxonomyEntry) { this.swapEvent(e, -1); }
+  moveEventDown(e: TaxonomyEntry) { this.swapEvent(e, +1); }
+  private swapEvent(e: TaxonomyEntry, dir: -1 | 1) {
+    const sorted = this.eventsSorted();
+    const i = sorted.findIndex((x) => x.slug === e.slug);
+    const j = i + dir;
+    if (j < 0 || j >= sorted.length) return;
+    [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
+    // sauber in 10er-Schritten neu nummerieren; nur geänderte persistieren.
+    const updates: TaxonomyEntry[] = [];
+    sorted.forEach((ev, idx) => {
+      const want = (idx + 1) * 10;
+      if ((ev.sort_order ?? -1) !== want) updates.push({ ...ev, sort_order: want });
+    });
+    if (!updates.length) return;
+    // optimistisch im Signal
+    const bySlug = new Map(updates.map((u) => [u.slug, u.sort_order!]));
+    this.events.set(this.events().map((ev) =>
+      bySlug.has(ev.slug) ? { ...ev, sort_order: bySlug.get(ev.slug)! } : ev,
+    ));
+    this.eventSortBusy = e.slug;
+    let done = 0;
+    const fin = () => { if (++done >= updates.length) { this.eventSortBusy = null; this.loadEvents(); } };
+    for (const u of updates) {
+      this.api.upsertEvent(u).subscribe({
+        next: fin,
+        error: () => { this.eventSortBusy = null; this.loadEvents(); },
+      });
+    }
+  }
+
   // ===== Share-Dialog für Events =====
   openShareDialog(e: TaxonomyEntry) {
     this.shareEvent = e;
-    this.copied = false;
-  }
-
-  closeShare(ev: MouseEvent) {
-    if (ev.target === ev.currentTarget) this.shareEvent = null;
   }
 
   /** App-URL mit ?view=submit&event=<slug> für QR/Link. */
   shareUrl(slug: string): string {
     const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
     return `${base}?view=submit&event=${encodeURIComponent(slug)}`;
-  }
-
-  /** QR-Bild über öffentlichen Service. Keine PII enthalten — nur App-URL + Slug. */
-  qrUrl(slug: string, size = 240): string {
-    const data = encodeURIComponent(this.shareUrl(slug));
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}`;
-  }
-
-  copyShareLink(slug: string) {
-    const url = this.shareUrl(slug);
-    navigator.clipboard?.writeText(url);
-    this.copied = true;
-    clearTimeout(this.copiedTimer);
-    this.copiedTimer = window.setTimeout(() => (this.copied = false), 2000);
   }
 
   // ===== Pflicht-Metadaten nachpflegen =====
@@ -2846,8 +3377,53 @@ export class ModerationComponent implements OnInit {
     });
   }
 
-  openIdeaFromHidden(h: { id: string; title: string }) {
-    this.ideaSelected.emit({ id: h.id, title: h.title } as any);
+  /** „Bearbeiten" in der Inhalts-Verwaltung → Ideenseite öffnen (dort liegt
+   *  der vorhandene Bearbeiten-Dialog, der so nachgenutzt wird). */
+  openIdeaById(id: string, title: string) {
+    this.ideaSelected.emit({ id, title } as any);
+  }
+
+  // Endgültiges Löschen einer Idee — zweistufig (Inline-Bestätigung).
+  confirmDeleteId: string | null = null;
+  doDeleteIdea(id: string) {
+    this.visBusy.set(id);
+    this.api.deleteIdea(id).subscribe({
+      next: () => {
+        this.visBusy.set(null);
+        this.confirmDeleteId = null;
+        this.loadAllIdeas();
+        this.loadHidden();
+      },
+      error: () => this.visBusy.set(null),
+    });
+  }
+
+  loadAllIdeas() {
+    this.allIdeasLoading.set(true);
+    this.api.allIdeasAdmin(this.allIdeasQuery).subscribe({
+      next: (r) => {
+        this.allIdeas.set(r.items || []);
+        this.allIdeasLoading.set(false);
+      },
+      error: () => {
+        this.allIdeas.set([]);
+        this.allIdeasLoading.set(false);
+      },
+    });
+  }
+
+  /** Sichtbarkeit einer Idee umschalten (Verstecken / Einblenden). Reversibel. */
+  setVisibility(it: { id: string; hidden: number }, hide: boolean) {
+    this.visBusy.set(it.id);
+    const call = hide ? this.api.hideIdea(it.id) : this.api.unhideIdea(it.id);
+    call.subscribe({
+      next: () => {
+        this.visBusy.set(null);
+        this.loadAllIdeas();
+        this.loadHidden();
+      },
+      error: () => this.visBusy.set(null),
+    });
   }
 
   // ===== Moderatoren-Anzeige (read-only) =====

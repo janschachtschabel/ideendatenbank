@@ -1,16 +1,15 @@
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, effect, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { Attachment, Idea, TaxonomyEntry, Topic, VotingMode } from '../models';
 import { VotingService } from '../voting.service';
 import { ShareDialogComponent } from './share-dialog.component';
-import { ShareMenuComponent } from './share-menu.component';
 
 @Component({
   selector: 'ideendb-idea-detail',
   standalone: true,
-  imports: [CommonModule, FormsModule, ShareMenuComponent, ShareDialogComponent],
+  imports: [CommonModule, FormsModule, ShareDialogComponent],
   styles: [`
     :host { display: block; }
 
@@ -45,22 +44,55 @@ import { ShareMenuComponent } from './share-menu.component';
     .header-meta a { color: var(--wlo-accent, #f5b600); text-decoration: none;
                      &:hover { text-decoration: underline; } }
     .header-meta .muted-username { opacity: .7; font-size: .85rem; }
+    .header-meta .contact-meta { display: inline-flex; align-items: baseline; gap: 4px;
+                                 small { opacity: .7; font-size: .82rem; } }
+    .header-meta .meta-item { display: inline-flex; align-items: baseline; gap: 4px; }
+    .header-meta .meta-role { font-weight: 600; opacity: .82; }
     .header-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    /* Alle Header-Pillen (Status/Event/Kategorie) einheitlich im
+       Kachel-Blau — identisch zu den Badges auf der Startseite. */
     .tag {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 4px 12px; border-radius: 999px; font-size: .78rem; font-weight: 600;
       text-transform: uppercase; letter-spacing: .04em;
-      background: rgba(127,127,127,.18); color: var(--wlo-hero-text, #fff);
-      border: 1px solid rgba(127,127,127,.28);
+      background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary, #002855);
+      border: 1px solid transparent;
     }
-    .tag.phase { background: var(--wlo-accent, #f5b600); color: #1a2235; border-color: transparent; }
+    .tag.phase { background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary, #002855); border-color: transparent; }
     .tag.event::before { content: '📅 '; }
     .tag.cat::before { content: '# '; opacity: .8; }
+    /* Event-Pille als klickbarer Link zur Veranstaltungsseite. Optik bleibt
+       exakt wie die statische Pille (kein Link-Blau, kein Unterstrich) — nur
+       Cursor + dezenter Hover signalisieren die Klickbarkeit. */
+    button.tag { font-family: inherit; margin: 0; cursor: pointer; }
+    button.tag.event:hover { filter: brightness(.96); }
+    button.tag.event:focus-visible { outline: 2px solid var(--wlo-primary, #002855); outline-offset: 2px; }
 
     /* === Body grid === */
     .wrap { max-width: 1200px; margin: -18px auto 0; padding: 0 24px 60px;
             display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; position: relative; }
     @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+
+    /* Vorschaubild als Cover oben in der Hauptspalte. Zentriert + „contain",
+       damit niedrig aufgelöste edu-sharing-Thumbnails nicht hochskaliert und
+       unscharf werden; große Bilder werden auf max-height begrenzt. */
+    .cover { margin: 0 0 16px; border-radius: 14px; overflow: hidden;
+             border: 1px solid var(--wlo-border); background: var(--wlo-bg, #f4f6f9);
+             box-shadow: 0 2px 12px rgba(0, 40, 85, .07);
+             display: flex; justify-content: center; }
+    .cover img { display: block; max-width: 100%; max-height: 340px; width: auto;
+                 object-fit: contain; }
+
+    /* Teilen-Karte: ein klarer Button öffnet das Teilen-Fenster. */
+    .share-card .share-hint { margin: 0 0 12px; font-size: .82rem; color: var(--wlo-muted); }
+    .share-open-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 11px 16px; border-radius: 10px; cursor: pointer;
+      background: var(--wlo-primary, #002855); color: #fff; border: none;
+      font: inherit; font-weight: 700; font-size: .95rem;
+      transition: background .12s ease, transform .1s ease;
+      &:hover { background: var(--wlo-primary-600, #003c7e); transform: translateY(-1px); }
+    }
 
     .card { background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 12px;
             padding: 28px; }
@@ -262,6 +294,13 @@ import { ShareMenuComponent } from './share-menu.component';
       color: var(--wlo-muted); text-transform: uppercase;
       letter-spacing: .04em; margin-bottom: 4px;
     }
+    /* Hilfstext unter einem Quick-Edit-Label: normale Schreibweise (keine
+       Großbuchstaben), dezent. */
+    .quick-edit .quick-note {
+      margin: -2px 0 6px; font-size: .78rem; font-weight: 400;
+      color: var(--wlo-muted); text-transform: none; letter-spacing: 0;
+      line-height: 1.35;
+    }
     .quick-status {
       margin-top: 8px; font-size: .82rem; color: #0f5b24;
       background: #e6f4ea; border-radius: 6px; padding: 4px 10px;
@@ -377,6 +416,43 @@ import { ShareMenuComponent } from './share-menu.component';
       margin-right: -6px; border: 2px solid #fff;
       &.more { background: var(--wlo-muted); }
     }
+    /* Mithack-Liste: Avatar (Initialen) + Klarname pro Zeile. */
+    .participant-list {
+      list-style: none; margin: 0 0 10px; padding: 0;
+      display: flex; flex-direction: column; gap: 7px;
+      li { display: flex; align-items: center; gap: 9px; }
+      .mini-avatar { margin-right: 0; flex-shrink: 0; }
+      .participant-name {
+        font-size: .9rem; color: var(--wlo-text);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .more-row .participant-name { color: var(--wlo-muted); font-size: .85rem; }
+    }
+    /* Team-Status + Verwaltung in der Mithack-Liste */
+    .participant-list li .participant-name {
+      flex: 1 1 auto; min-width: 0; white-space: normal; overflow: visible;
+      display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap;
+    }
+    .participant-list li.is-busy { opacity: .5; pointer-events: none; }
+    .team-badge {
+      flex-shrink: 0; font-size: .72rem; line-height: 1.2; padding: 1px 5px;
+      border-radius: 5px; font-weight: 700;
+      &.ok { background: #e6f4ea; color: #1a7f37; }
+      &.edit { background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary, #002855); }
+    }
+    .participant-list .team-actions { display: inline-flex; gap: 3px; flex-shrink: 0; margin-left: auto; }
+    .team-btn {
+      width: 24px; height: 24px; border-radius: 6px; cursor: pointer; font-size: .8rem; line-height: 1;
+      border: 1px solid var(--wlo-border); background: var(--wlo-surface, #fff); color: var(--wlo-text);
+      display: inline-flex; align-items: center; justify-content: center; padding: 0;
+      &:hover { border-color: var(--wlo-primary); color: var(--wlo-primary); }
+      &.on { background: var(--wlo-primary, #002855); color: #fff; border-color: var(--wlo-primary); }
+      &.danger:hover { border-color: #c5221f; color: #c5221f; }
+    }
+    .team-hint {
+      margin: 2px 0 8px; font-size: .76rem; color: var(--wlo-muted);
+      &.ok { color: #1a7f37; font-weight: 600; }
+    }
 
     /* === Comments === */
     .comments-card { margin-top: 24px; }
@@ -396,23 +472,6 @@ import { ShareMenuComponent } from './share-menu.component';
                      padding-left: 12px; background: var(--wlo-bg); border-radius: 6px; margin-top: 4px; }
     .reply-hint { background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary); padding: 1px 8px; border-radius: 999px;
                   font-size: .72rem; font-weight: 600; margin-left: 8px; }
-    .embed-toggle, .embed-copy {
-      background: none; border: 1px solid var(--wlo-border);
-      color: var(--wlo-text); padding: 6px 12px; border-radius: 6px;
-      cursor: pointer; font-size: .82rem; font-weight: 600;
-      margin-top: 12px;
-      /* Schließt rechts mit dem E-Mail-Button ab — die ▾-Schaltfläche
-         in der share-menu-Zeile ist 38px breit, der gap dazwischen 6px. */
-      width: calc(100% - 44px);
-      box-sizing: border-box;
-      &:hover { border-color: var(--wlo-primary); color: var(--wlo-primary); }
-    }
-    .embed-snippet {
-      background: var(--wlo-bg); padding: 10px 12px; border-radius: 6px;
-      font-size: .75rem; overflow-x: auto; margin: 10px 0 6px;
-      white-space: pre-wrap; word-break: break-all;
-    }
-    .embed-hint { font-size: .78rem; color: var(--wlo-muted); margin: 6px 0 0; }
     .hidden-badge { background: var(--wlo-accent-soft, #fff8db); color: #8a5a00;
                     padding: 6px 10px; border-radius: 6px; font-size: .8rem;
                     font-weight: 600; margin: 8px 0 0; text-align: center; }
@@ -478,6 +537,11 @@ import { ShareMenuComponent } from './share-menu.component';
     .edit-actions {
       display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;
     }
+    /* Im Flexrow das vertikale Stack-Verhalten von .action-btn aufheben:
+       feste, gleiche Breite statt width:100% + margin-top. */
+    .edit-actions .action-btn {
+      width: auto; min-width: 120px; flex: 0 0 auto; margin-top: 0;
+    }
     .edit-actions .primary {
       background: var(--wlo-primary); color: #fff; border-color: var(--wlo-primary);
       &:hover:not(:disabled) { background: var(--wlo-primary-600); color: #fff; }
@@ -496,6 +560,20 @@ import { ShareMenuComponent } from './share-menu.component';
     .edit-box .upload-row .meta {
       color: var(--wlo-muted); font-size: .85rem;
     }
+    /* Serienobjekt-Anhang-Liste im Bearbeiten-Dialog */
+    .edit-box .dlg-attach-list { list-style: none; margin: 2px 0; padding: 0;
+      display: flex; flex-direction: column; gap: 6px; }
+    .edit-box .dlg-attach {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 6px 10px; border: 1px solid var(--wlo-border); border-radius: 8px;
+      background: var(--wlo-bg, #f4f6f9); font-size: .85rem;
+    }
+    .edit-box .dlg-attach .dlg-attach-name {
+      font-weight: 600; color: var(--wlo-text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px;
+    }
+    .edit-box .dlg-attach .dlg-attach-size { color: var(--wlo-muted); font-size: .78rem; }
+    .edit-box .dlg-attach .spacer { flex: 1 1 auto; }
     .edit-box .preview-thumb {
       display: inline-flex; align-items: center; gap: 10px;
       img {
@@ -581,7 +659,7 @@ import { ShareMenuComponent } from './share-menu.component';
                     [disabled]="topicChangeBusy">
               <option value="">— keine —</option>
               @for (t of challengeTopics(); track t.id) {
-                <option [value]="t.id">{{ t.title }}</option>
+                <option [value]="t.id">{{ challengeLabel(t) }}</option>
               }
             </select>
             @if (topicChangeStatus) {
@@ -610,6 +688,12 @@ import { ShareMenuComponent } from './share-menu.component';
           </select>
           <label>Veranstaltungen <small style="font-weight:400; color:var(--wlo-muted)">(Mehrfachauswahl)</small></label>
           <div class="edit-event-chips">
+            <label class="event-chip" [class.on]="editSelectedEvents.size === 0">
+              <input type="checkbox"
+                     [checked]="editSelectedEvents.size === 0"
+                     (change)="clearEditEvents()" />
+              Ohne Veranstaltung
+            </label>
             @for (e of events; track e.slug) {
               <label class="event-chip" [class.on]="editSelectedEvents.has(e.slug)">
                 <input type="checkbox"
@@ -621,12 +705,6 @@ import { ShareMenuComponent } from './share-menu.component';
           </div>
           <label>Beschreibung</label>
           <textarea [(ngModel)]="edit.description" rows="6"></textarea>
-          <label>Autor / Kontext</label>
-          <input [(ngModel)]="edit.author" />
-          <label>Projekt-Link</label>
-          <input [(ngModel)]="edit.project_url" type="url" placeholder="https://…" />
-          <label>Schlagwörter (Komma-getrennt, ohne phase:/event:-Präfix)</label>
-          <input [(ngModel)]="edit.keywordsCsv" />
 
           <!-- Vorschaubild ersetzen ───────────────────────────────────── -->
           <div class="upload-row">
@@ -645,28 +723,91 @@ import { ShareMenuComponent } from './share-menu.component';
             @if (previewUploadError) { <div class="error">{{ previewUploadError }}</div> }
           </div>
 
-          <!-- Hauptdatei ersetzen — nur sinnvoll für kind=io ───────────── -->
-          <div class="upload-row">
-            <label>Hauptdatei</label>
-            @if (i.attachments?.length) {
+          <!-- Hauptdatei ersetzen — nur für Altideen, die noch eine echte
+               Hauptdatei am Idee-Node tragen. Neue Ideen führen Dateien
+               ausschließlich als Serienobjekte (unten). ─────────────────── -->
+          @if (primaryFile(i); as pf) {
+            <div class="upload-row">
+              <label>Hauptdatei</label>
               <div class="meta">
-                Aktuell: {{ i.attachments![0]!.name || '–' }}
-                @if (i.attachments![0]!.size) {
-                  · {{ formatSize(i.attachments![0]!.size!) }}
-                }
+                Aktuell: {{ pf.name || '–' }}
+                @if (pf.size) { · {{ formatSize(pf.size!) }} }
               </div>
+              <label class="upload-btn">
+                <input type="file"
+                       (change)="onContentPick($event, i.id)" hidden />
+                {{ contentUploadBusy ? contentUploadStatus : '📎 Hauptdatei ersetzen' }}
+              </label>
+              @if (contentUploadError) { <div class="error">{{ contentUploadError }}</div> }
+              <p class="hint" style="margin-top:6px; font-size:.8rem">
+                Lädt eine neue Version. Die alte bleibt in der Versionshistorie.
+                Neue Anhänge bitte unten als eigene Dokumente — die lassen sich
+                gefahrlos austauschen und entfernen.
+              </p>
+            </div>
+          }
+
+          <!-- Serienobjekt-Anhänge direkt im Dialog verwalten ──────────── -->
+          <div class="upload-row">
+            <label>Weitere Anhänge (Serienobjekte)</label>
+            @if (serialAttachments(i).length) {
+              <ul class="dlg-attach-list">
+                @for (a of serialAttachments(i); track a.id) {
+                  <li class="dlg-attach">
+                    @if (renamingAttachmentId === a.id) {
+                      <input class="rename-input" type="text"
+                             [(ngModel)]="renameAttachmentValue"
+                             (keyup.enter)="confirmRenameAttachment(i, a)"
+                             (keyup.escape)="renamingAttachmentId=null" />
+                      <button type="button" class="link-action"
+                              (click)="confirmRenameAttachment(i, a)">✓ Speichern</button>
+                      <button type="button" class="link-action"
+                              (click)="renamingAttachmentId=null">✕</button>
+                    } @else {
+                      <span class="dlg-attach-name" [title]="a.name">{{ a.title || a.name || 'Datei' }}</span>
+                      @if (a.size) { <span class="dlg-attach-size">· {{ formatSize(a.size) }}</span> }
+                      <span class="spacer"></span>
+                      <button type="button" class="link-action"
+                              (click)="startRenameAttachment(a)">✎ Umbenennen</button>
+                      <label class="link-action" style="cursor:pointer">
+                        <input type="file" hidden
+                               (change)="onReplaceAttachmentPick($event, i, a)" />
+                        {{ attachmentReplacingId === a.id ? 'Tausche…' : '⇄ Austauschen' }}
+                      </label>
+                      @if (canDelete(i)) {
+                        <button type="button" class="link-danger"
+                                (click)="deleteAttachment(i, a.id!)"
+                                [disabled]="attachmentDeletingId === a.id">
+                          {{ attachmentDeletingId === a.id ? 'Lösche…' : '🗑 Entfernen' }}
+                        </button>
+                      }
+                    }
+                  </li>
+                }
+              </ul>
+            } @else {
+              <div class="meta">Noch keine zusätzlichen Anhänge.</div>
             }
             <label class="upload-btn">
-              <input type="file"
-                     (change)="onContentPick($event, i.id)" hidden />
-              {{ contentUploadBusy ? contentUploadStatus : '📎 Hauptdatei ersetzen' }}
+              <input type="file" (change)="onAttachmentPick($event, i.id)" hidden />
+              ➕ {{ folderUploadBusy ? folderUploadStatus : 'Datei als Anhang hochladen' }}
             </label>
-            @if (contentUploadError) { <div class="error">{{ contentUploadError }}</div> }
-            <p class="hint" style="margin-top:6px; font-size:.8rem">
-              Lädt eine neue Version. Die alte bleibt in der Versionshistorie. Für
-              zusätzliche Anhänge unten den „+ Datei als Anhang"-Button benutzen.
-            </p>
+            @if (folderUploadError) { <div class="error">{{ folderUploadError }}</div> }
           </div>
+
+          <label>Name</label>
+          <input [(ngModel)]="edit.author" placeholder="Name der/des Ideengeber:in" />
+          <label>Projekt-Link</label>
+          <input [(ngModel)]="edit.project_url" type="url" placeholder="https://…" />
+          <label>Schlagwörter (Komma-getrennt, ohne phase:/event:-Präfix)</label>
+          <input [(ngModel)]="edit.keywordsCsv" />
+          <label>Kontakt für Rückfragen
+            <small style="font-weight:400; color:var(--wlo-muted)">
+              (E-Mail oder Link · nur für Eingeloggte sichtbar · leer = löschen)
+            </small>
+          </label>
+          <input [(ngModel)]="edit.contact" type="text" maxlength="200"
+                 placeholder="z.B. name@uni.de — leer lassen entfernt den Kontakt" />
 
           @if (editError) { <div class="edit-error">{{ editError }}</div> }
           <div class="edit-actions">
@@ -705,11 +846,21 @@ import { ShareMenuComponent } from './share-menu.component';
           <h1>{{ i.title }}</h1>
           <div class="header-meta">
             @if (ownerLabel(i); as label) {
-              @if (i.owner_username && ownerProfileUrl(i)) {
-                <a class="author-link" [href]="ownerProfileUrl(i)">👤 {{ label }}</a>
-              } @else {
-                <span>👤 {{ label }}</span>
-              }
+              <span class="meta-item">
+                👤 <span class="meta-role">Ideengeber:in:</span>
+                @if (i.owner_username && ownerProfileUrl(i)) {
+                  <a class="author-link" [href]="ownerProfileUrl(i)">{{ label }}</a>
+                } @else { <span>{{ label }}</span> }
+              </span>
+            }
+            @if (i.contact) {
+              <span class="contact-meta" title="Kontakt der/des Ideengeber:in für Rückfragen & Mithackende">
+                ✉ <span class="meta-role">Kontakt:</span>
+                @if (contactHref(i.contact); as href) {
+                  <a [href]="href">{{ i.contact }}</a>
+                } @else { {{ i.contact }} }
+                <small>· für Rückfragen &amp; Mithackende</small>
+              </span>
             }
             @if (i.modified_at) { <span>📅 geändert {{ formatDate(i.modified_at) }}</span> }
             @if (i.created_at && i.created_at !== i.modified_at) {
@@ -721,7 +872,11 @@ import { ShareMenuComponent } from './share-menu.component';
           </div>
           <div class="header-tags">
             @if (i.phase) { <span class="tag phase">Phase: {{ i.phase }}</span> }
-            @for (ev of i.events; track ev) { <span class="tag event">{{ ev }}</span> }
+            @for (ev of i.events; track ev) {
+              <button type="button" class="tag event"
+                      (click)="openEvent.emit(ev)"
+                      [title]="'Zur Veranstaltungsseite „' + eventLabel(ev) + '“'">{{ eventLabel(ev) }}</button>
+            }
             @for (cat of i.categories; track cat) { <span class="tag cat">{{ cat }}</span> }
           </div>
         </div>
@@ -730,10 +885,16 @@ import { ShareMenuComponent } from './share-menu.component';
       <div class="wrap">
         <!-- Main content column -->
         <div>
+          @if (i.preview_url) {
+            <figure class="cover">
+              <img [src]="previewSrc(i.preview_url)"
+                   [alt]="'Vorschaubild: ' + i.title" loading="lazy" />
+            </figure>
+          }
           <section class="card">
             <h2>Beschreibung</h2>
             @if (i.description) {
-              <div class="desc" [innerHTML]="i.description"></div>
+              <div class="desc">{{ i.description }}</div>
             } @else {
               <p class="empty-desc">
                 Noch keine Beschreibung vorhanden. Hilf der Idee auf die Sprünge — kommentiere
@@ -796,13 +957,36 @@ import { ShareMenuComponent } from './share-menu.component';
                                   (click)="startRenameAttachment(a)">
                             ✎ Umbenennen
                           </button>
-                          <button type="button" class="link-danger"
-                                  (click)="deleteAttachment(i, a.id!)"
-                                  [disabled]="attachmentDeletingId === a.id">
-                            {{ attachmentDeletingId === a.id ? 'Lösche…' : '🗑 Entfernen' }}
+                          <label class="link-action" style="cursor:pointer">
+                            <input type="file" hidden
+                                   (change)="onReplaceAttachmentPick($event, i, a)" />
+                            {{ attachmentReplacingId === a.id ? 'Tausche…' : '⇄ Austauschen' }}
+                          </label>
+                          @if (canDelete(i)) {
+                            <button type="button" class="link-danger"
+                                    (click)="deleteAttachment(i, a.id!)"
+                                    [disabled]="attachmentDeletingId === a.id">
+                              {{ attachmentDeletingId === a.id ? 'Lösche…' : '🗑 Entfernen' }}
+                            </button>
+                          }
+                        } @else if (isPrimaryFile(a) && a.id && canEdit(i)) {
+                          <!-- Primäre Hauptdatei = Idee-Node: Umbenennen (Titel)
+                               + Datei ersetzen (neue Version). KEIN Löschen. -->
+                          <button type="button" class="link-action"
+                                  (click)="startRenameAttachment(a)">
+                            ✎ Umbenennen
                           </button>
+                          <label class="link-action" style="cursor:pointer">
+                            <input type="file" (change)="onContentPick($event, i.id)" hidden />
+                            {{ contentUploadBusy ? contentUploadStatus : '⤓ Datei ersetzen' }}
+                          </label>
                         }
                       </div>
+                      @if (contentUploadError && isPrimaryFile(a)) {
+                        <div class="error" style="flex-basis:100%; color:#b00020; font-size:.8rem; margin-top:4px">
+                          {{ contentUploadError }}
+                        </div>
+                      }
                     </div>
                   }
                 </div>
@@ -909,7 +1093,9 @@ import { ShareMenuComponent } from './share-menu.component';
               <span class="thumb-count-big">👍 {{ i.rating_count }}</span>
               <span class="thumb-sub">{{ i.rating_count === 1 ? 'Stimme' : 'Stimmen' }}</span>
             </div>
-            @if (!api.hasCredentials()) {
+            @if (!i.rating_open) {
+              <div class="notice">{{ ratingClosedHint(i) }}</div>
+            } @else if (!api.hasCredentials()) {
               <div class="notice">Zum Abstimmen anmelden.</div>
             } @else {
               <button type="button" class="thumb-vote-btn"
@@ -953,7 +1139,9 @@ import { ShareMenuComponent } from './share-menu.component';
             }
 
             <!-- Eigene Bewertung: klickbar -->
-            @if (!api.hasCredentials()) {
+            @if (!i.rating_open) {
+              <div class="notice">{{ ratingClosedHint(i) }}</div>
+            } @else if (!api.hasCredentials()) {
               <div class="notice">Zum Bewerten anmelden.</div>
             } @else {
               <div class="own-rating-label">
@@ -984,28 +1172,20 @@ import { ShareMenuComponent } from './share-menu.component';
           }
           </div>
 
-          <div class="side-card">
+          <div class="side-card share-card">
             <h3>Teilen</h3>
-            <ideendb-share-menu
-              [url]="shareUrl"
-              [title]="i.title">
-            </ideendb-share-menu>
-            <button class="embed-toggle" type="button" (click)="qrOpen = true">
-              🔲 QR-Code generieren
+            <p class="share-hint">
+              Direkt-Link, QR-Code und Embed-Snippet
+            </p>
+            <button class="share-open-btn" type="button" (click)="qrOpen = true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+              Teilen …
             </button>
-            <button class="embed-toggle" type="button" (click)="toggleEmbed()">
-              {{ embedOpen ? 'Embed-Code ausblenden' : embedLabel }}
-            </button>
-            @if (embedOpen) {
-              <pre class="embed-snippet">{{ embedSnippet }}</pre>
-              <button class="embed-copy" type="button" (click)="copyEmbed()">
-                {{ embedCopied ? '✓ Kopiert' : 'Code kopieren' }}
-              </button>
-              <p class="embed-hint">
-                Setze das Snippet auf einer beliebigen Webseite ein —
-                die App lädt sich als Web-Komponente von dieser Instanz.
-              </p>
-            }
           </div>
           <ideendb-share-dialog
             [open]="qrOpen"
@@ -1021,20 +1201,17 @@ import { ShareMenuComponent } from './share-menu.component';
             <div class="side-card quick-edit">
               <h3>Status & Veranstaltung</h3>
               <p class="hint" style="margin: 0 0 10px; font-size: .82rem;">
-                Änderung wird sofort am edu-sharing-Node gespeichert (Keywords).
+                Änderung wird sofort gespeichert.
               </p>
               @if (api.isModerator()) {
-                <label>Herausforderung
-                  <small style="font-weight:400; color:var(--wlo-muted)">
-                    · Reference wird umgehängt
-                  </small>
-                </label>
+                <label>Herausforderung</label>
+                <p class="quick-note">Idee wird neu einsortiert</p>
                 <select [ngModel]="i.topic_id || ''"
                         (ngModelChange)="onChangeTopic(i.id, $event)"
                         [disabled]="topicChangeBusy">
                   <option value="">— keine —</option>
                   @for (t of challengeTopics(); track t.id) {
-                    <option [value]="t.id">{{ t.title }}</option>
+                    <option [value]="t.id">{{ challengeLabel(t) }}</option>
                   }
                 </select>
                 @if (topicChangeStatus) {
@@ -1078,16 +1255,51 @@ import { ShareMenuComponent } from './share-menu.component';
 
           @if (interactions(); as x) {
             <div class="side-card">
-              <h3>Mitmachen <small style="font-weight:400;text-transform:none;letter-spacing:0;opacity:.7">({{ x.interest.count }})</small></h3>
+              <h3>Mithacken <small style="font-weight:400;text-transform:none;letter-spacing:0;opacity:.7">({{ x.interest.count }})</small></h3>
               @if (x.interest.users.length) {
-                <div class="avatar-row">
-                  @for (u of x.interest.users.slice(0,6); track u.user_key) {
-                    <span class="mini-avatar" [title]="u.name">{{ initialsOf(u.name) }}</span>
+                <ul class="participant-list">
+                  @for (u of x.interest.users.slice(0,12); track u.user_key) {
+                    <li [class.is-busy]="teamBusy === u.user_key">
+                      <span class="mini-avatar" aria-hidden="true">{{ initialsOf(u.name) }}</span>
+                      <span class="participant-name">
+                        {{ u.name }}
+                        @if (u.approved) {
+                          <span class="team-badge ok" title="Angenommenes Teammitglied">✓</span>
+                        }
+                        @if (u.can_edit) {
+                          <span class="team-badge edit" title="Darf die Idee mitbearbeiten">✎</span>
+                        }
+                      </span>
+                      @if (x.interest.can_manage) {
+                        <span class="team-actions">
+                          @if (!u.approved) {
+                            <button class="team-btn" title="Ins Team annehmen"
+                                    (click)="setTeam(u.user_key, { status: 'approved' })">✓</button>
+                          } @else {
+                            <button class="team-btn" [class.on]="u.can_edit"
+                                    [title]="u.can_edit ? 'Bearbeitungsrecht entziehen' : 'Bearbeitungsrecht geben'"
+                                    (click)="setTeam(u.user_key, { can_edit: !u.can_edit })">✎</button>
+                          }
+                          <button class="team-btn danger" title="Aus Team entfernen"
+                                  (click)="removeTeam(u.user_key)">✕</button>
+                        </span>
+                      }
+                    </li>
                   }
-                  @if (x.interest.count > 6) {
-                    <span class="mini-avatar more">+{{ x.interest.count - 6 }}</span>
+                  @if (x.interest.count > 12) {
+                    <li class="more-row">
+                      <span class="mini-avatar more" aria-hidden="true">+{{ x.interest.count - 12 }}</span>
+                      <span class="participant-name">weitere</span>
+                    </li>
                   }
-                </div>
+                </ul>
+                @if (x.interest.can_manage) {
+                  <p class="team-hint">✓ annehmen · ✎ Bearbeitungsrecht · ✕ entfernen</p>
+                } @else if (x.interest.mine && x.interest.mine_status === 'pending') {
+                  <p class="team-hint">Deine Teilnahme wartet auf Bestätigung durch die Ideengeber:in.</p>
+                } @else if (x.interest.mine && x.interest.mine_status === 'approved') {
+                  <p class="team-hint ok">✓ Du bist angenommenes Teammitglied.</p>
+                }
               }
               @if (api.hasCredentials()) {
                 <button class="action-btn" [class.on]="x.interest.mine"
@@ -1104,7 +1316,7 @@ import { ShareMenuComponent } from './share-menu.component';
                       <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
                       <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                     </svg>
-                    Ich will mitmachen
+                    Ich will mithacken
                   }
                 </button>
                 <button class="action-btn" [class.on]="x.follow.mine"
@@ -1118,7 +1330,7 @@ import { ShareMenuComponent } from './share-menu.component';
                 </button>
               } @else {
                 <p style="color: var(--wlo-muted); font-size: .85rem; margin: 6px 0 0;">
-                  Zum Mitmachen oder Folgen anmelden.
+                  Zum Mithacken oder Folgen anmelden.
                 </p>
               }
             </div>
@@ -1216,9 +1428,31 @@ export class IdeaDetailComponent implements OnChanges {
   api = inject(ApiService);
   private voting = inject(VotingService);
 
+  /** Erste (initiale) Auswertung des Auth-Effects überspringen. */
+  private _authReady = false;
+  /** Reagiert auf Login/Logout (api.authTick): lädt die Idee mit der
+   *  aktuellen Auth neu, damit can_edit/can_delete/Kontakt und die davon
+   *  abhängigen Felder sofort – ohne Seiten-Reload – erscheinen bzw.
+   *  verschwinden. */
+  private _authReloadEffect = effect(() => {
+    this.api.authTick();                       // Abhängigkeit registrieren
+    if (!this._authReady) { this._authReady = true; return; }
+    if (this.ideaId) this.load({ keepCurrent: true });
+  });
+
   /** Detailseite ist nicht event-gescoped → globaler Bewertungs-Modus. */
   mode(): VotingMode {
     return this.voting.effective(null);
+  }
+  /** Hinweistext, wenn die Bewertung für diese Idee aktuell nicht offen ist
+   *  (global aus / Einreichungsphase / bereits abgeschlossen). */
+  ratingClosedHint(i: Idea): string {
+    // Grund kommt vom Backend (robust gegen veralteten globalen Schalter).
+    if ((i.rating_closed_reason || (this.voting.ratingActive() ? 'phase' : 'global')) === 'global') {
+      return 'Im Moment ist keine Bewertung möglich.';
+    }
+    if ((i.rating_count || 0) > 0) return 'Bewertung abgeschlossen.';
+    return 'Bewertung startet nach der Einreichungsphase.';
   }
   thumbBusy = false;
 
@@ -1254,6 +1488,9 @@ export class IdeaDetailComponent implements OnChanges {
   /** Klick auf den Topic-Crumb im Header — die Eltern-Shell soll auf die
    *  Ideen-Liste umschalten und nach diesem Topic vorfiltern. */
   @Output() openTopic = new EventEmitter<string>();
+  /** Klick auf eine Event-Pille im Header — die Shell öffnet die
+   *  Veranstaltungsseite zu diesem Slug (SPA-Wechsel, kein Reload). */
+  @Output() openEvent = new EventEmitter<string>();
 
   idea = signal<Idea | null>(null);
   newComment = '';
@@ -1271,7 +1508,13 @@ export class IdeaDetailComponent implements OnChanges {
   rateStatusOk = true;
 
   interactions = signal<{
-    interest: { count: number; users: { name: string; user_key: string }[]; mine: boolean };
+    interest: {
+      count: number;
+      users: { name: string; user_key: string; status: string; approved: boolean; can_edit: boolean }[];
+      mine: boolean;
+      mine_status: string | null;
+      can_manage: boolean;
+    };
     follow: { count: number; mine: boolean };
   } | null>(null);
 
@@ -1364,8 +1607,11 @@ export class IdeaDetailComponent implements OnChanges {
   quickError = '';
   edit = {
     title: '', description: '', author: '', project_url: '',
-    phase: '', event: '', keywordsCsv: '',
+    phase: '', event: '', keywordsCsv: '', contact: '',
   };
+  /** Kontakt-Stand beim Öffnen des Edit-Dialogs — um beim Speichern nur bei
+   *  echter Änderung den (separaten) App-DB-Endpoint zu rufen. */
+  private editContactInitial = '';
   phases: TaxonomyEntry[] = [];
   events: TaxonomyEntry[] = [];
   /** Topic-Liste für Anzeige (Breadcrumb) + Herausforderungs-Wechsel (Mod).
@@ -1440,13 +1686,25 @@ export class IdeaDetailComponent implements OnChanges {
     return this.topics().find((t) => t.id === i.topic_id)?.title || '';
   }
 
+  /** Event-Slug → Anzeigename aus der Event-Taxonomie (Fallback: Slug). */
+  eventLabel(slug: string): string {
+    return this.events.find((e) => e.slug === slug)?.label || slug;
+  }
+
   /** Liste der Sub-Topics (Ebene 2 / Challenges) für den Mod-Dropdown.
    *  Top-Level-Themen filtern wir raus — Ideen hängen typischerweise
-   *  unter einer Challenge, nicht direkt im Themengebiet. */
+   *  unter einer Herausforderung, nicht direkt im Themenbereich. */
   challengeTopics(): Topic[] {
     return this.topics()
       .filter((t) => t.parent_id)
-      .sort((a, b) => a.title.localeCompare(b.title));
+      .sort((a, b) => this.challengeLabel(a).localeCompare(this.challengeLabel(b)));
+  }
+
+  /** Option-Label mit Themenbereich-Pfad „Themenbereich › Herausforderung",
+   *  damit gleichnamige Herausforderungen unterscheidbar sind. */
+  challengeLabel(t: Topic): string {
+    const parent = t.parent_id ? this.topics().find((x) => x.id === t.parent_id) : null;
+    return parent ? `${parent.title} › ${t.title}` : t.title;
   }
 
   onChangeTopic(ideaId: string, newTopicId: string) {
@@ -1512,6 +1770,7 @@ export class IdeaDetailComponent implements OnChanges {
   // ===== Idee / Anhänge löschen ===========================
   deleteBusy = false;
   attachmentDeletingId: string | null = null;
+  attachmentReplacingId: string | null = null;
   renamingAttachmentId: string | null = null;
   renameAttachmentValue = '';
 
@@ -1522,6 +1781,16 @@ export class IdeaDetailComponent implements OnChanges {
    *  (konsistent mit Kommentaren). */
   ownerLabel(i: any): string {
     return (i.owner_display_name || i.author || i.owner_username || '').trim();
+  }
+
+  /** Klickbarer Link aus dem Kontakt: mailto: bei E-Mail, href bei http(s)-URL,
+   *  sonst null (→ als Klartext anzeigen). */
+  contactHref(c: string | null | undefined): string | null {
+    const v = (c || '').trim();
+    if (!v) return null;
+    if (/^https?:\/\//i.test(v)) return v;
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return 'mailto:' + v;
+    return null;
   }
 
   /** Erzeugt einen URL zur öffentlichen Profilseite des Owners, oder
@@ -1542,6 +1811,27 @@ export class IdeaDetailComponent implements OnChanges {
     );
   }
 
+  /** Nur die Serienobjekt-Anhänge (Child-IOs, `from_folder`) — die primäre
+   *  Hauptdatei ist der Idee-Node selbst und wird separat („Hauptdatei
+   *  ersetzen") behandelt. */
+  serialAttachments(i: Idea): Attachment[] {
+    return (i.attachments || []).filter((a) => a.from_folder);
+  }
+
+  /** Primäre Hauptdatei = der Idee-Node selbst (kein Serienobjekt). Sie ist
+   *  technisch nicht separierbar: Umbenennen ändert den Idee-/Dokumenttitel,
+   *  Ersetzen lädt eine neue Version. Löschen ist hier bewusst NICHT möglich
+   *  (das würde die ganze Idee löschen — dafür der „Idee löschen"-Button). */
+  isPrimaryFile(a: Attachment): boolean {
+    return !a.from_folder;
+  }
+
+  /** Die (Alt-)Hauptdatei am Idee-Node selbst, falls vorhanden — sonst null.
+   *  Neue Ideen haben keine; sie führen Dateien nur als Serienobjekte. */
+  primaryFile(i: Idea): Attachment | null {
+    return (i.attachments || []).find((a) => !a.from_folder) || null;
+  }
+
   startRenameAttachment(a: Attachment) {
     this.renamingAttachmentId = a.id;
     this.renameAttachmentValue = a.title || a.name || '';
@@ -1550,6 +1840,28 @@ export class IdeaDetailComponent implements OnChanges {
     if (!a.id) return;
     const newName = this.renameAttachmentValue.trim();
     if (!newName) return;
+    // Primäre Hauptdatei = Idee-Node selbst → über editIdea den Titel ändern.
+    // Der Attachment-Endpoint würde den Idee-Node als „nicht Child der Idee"
+    // (409) ablehnen, deshalb hier der eigene Pfad.
+    if (this.isPrimaryFile(a)) {
+      this.api.editIdea(i.id, { title: newName }).subscribe({
+        next: () => {
+          this.renamingAttachmentId = null;
+          const cur = this.idea();
+          if (cur) {
+            this.idea.set({
+              ...cur,
+              title: newName,
+              attachments: (cur.attachments || []).map((x) =>
+                x.id === a.id ? { ...x, title: newName } : x,
+              ),
+            });
+          }
+        },
+        error: (e) => alert(`Umbenennen fehlgeschlagen: ${e?.error?.detail || e?.message}`),
+      });
+      return;
+    }
     this.api.renameAttachment(i.id, a.id, newName).subscribe({
       next: (r) => {
         this.renamingAttachmentId = null;
@@ -1565,6 +1877,37 @@ export class IdeaDetailComponent implements OnChanges {
         }
       },
       error: (e) => alert(`Umbenennen fehlgeschlagen: ${e?.error?.detail || e?.message}`),
+    });
+  }
+
+  /** Datei eines (Serienobjekt-)Anhangs austauschen — neue Version hochladen.
+   *  Nur für Child-Anhänge; der Idee-Hauptknoten bleibt unangetastet. */
+  onReplaceAttachmentPick(ev: Event, i: Idea, a: Attachment) {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file || !a.id) return;
+    this.attachmentReplacingId = a.id;
+    this.api.replaceAttachment(i.id, a.id, file).subscribe({
+      next: (r) => {
+        this.attachmentReplacingId = null;
+        input.value = '';
+        // Optimistisch Name/Größe aktualisieren, dann Reload für frische URLs.
+        const cur = this.idea();
+        if (cur) {
+          this.idea.set({
+            ...cur,
+            attachments: (cur.attachments || []).map((x) =>
+              x.id === a.id ? { ...x, name: r.name, size: r.size } : x,
+            ),
+          });
+        }
+        setTimeout(() => this.load({ keepCurrent: true }), 400);
+      },
+      error: (e) => {
+        this.attachmentReplacingId = null;
+        input.value = '';
+        alert(`Austauschen fehlgeschlagen: ${e?.error?.detail || e?.message}`);
+      },
     });
   }
 
@@ -1657,6 +2000,37 @@ export class IdeaDetailComponent implements OnChanges {
     });
   }
 
+  teamBusy: string | null = null;
+  /** Owner/Mod: Mithackende:n annehmen / Bearbeitungsrecht (de)aktivieren. */
+  setTeam(userKey: string, patch: { status?: 'pending' | 'approved'; can_edit?: boolean }) {
+    this.teamBusy = userKey;
+    this.api.setTeamMember(this.ideaId, userKey, patch).subscribe({
+      next: () => {
+        this.teamBusy = null;
+        this.api.getInteractions(this.ideaId).subscribe((x) => this.interactions.set(x));
+      },
+      error: (e) => {
+        this.teamBusy = null;
+        alert(`Aktion fehlgeschlagen: ${e?.error?.detail || e?.message}`);
+      },
+    });
+  }
+  /** Owner/Mod: Mithackende:n aus dem Team entfernen. */
+  removeTeam(userKey: string) {
+    if (!confirm('Diese Person aus dem Team entfernen?')) return;
+    this.teamBusy = userKey;
+    this.api.removeTeamMember(this.ideaId, userKey).subscribe({
+      next: () => {
+        this.teamBusy = null;
+        this.api.getInteractions(this.ideaId).subscribe((x) => this.interactions.set(x));
+      },
+      error: (e) => {
+        this.teamBusy = null;
+        alert(`Entfernen fehlgeschlagen: ${e?.error?.detail || e?.message}`);
+      },
+    });
+  }
+
   get shareUrl(): string {
     // Wenn wir in einer Embed-/Frame-Situation laufen, ist window.location
     // evtl. nicht ideal. Wir bauen einen sauberen Share-URL auf Basis von
@@ -1677,16 +2051,7 @@ export class IdeaDetailComponent implements OnChanges {
   idea-id="${this.ideaId}"></ideendb-app>`;
   }
 
-  embedOpen = false;
-  embedCopied = false;
   qrOpen = false;
-  embedLabel = '</> Als Webkomponente einbetten';
-  toggleEmbed() { this.embedOpen = !this.embedOpen; }
-  copyEmbed() {
-    navigator.clipboard?.writeText(this.embedSnippet);
-    this.embedCopied = true;
-    setTimeout(() => (this.embedCopied = false), 2000);
-  }
 
   refreshBusy = false;
   refreshFromRepo(i: Idea) {
@@ -1889,7 +2254,9 @@ export class IdeaDetailComponent implements OnChanges {
       phase: i.phase || '',
       event: (i.events && i.events[0]) || '',
       keywordsCsv: userKws.join(', '),
+      contact: i.contact || '',
     };
+    this.editContactInitial = i.contact || '';
     this.editSelectedEvents = new Set(i.events || []);
     this.editError = '';
     this.editing = true;
@@ -1899,6 +2266,10 @@ export class IdeaDetailComponent implements OnChanges {
   toggleEditEvent(slug: string) {
     if (this.editSelectedEvents.has(slug)) this.editSelectedEvents.delete(slug);
     else this.editSelectedEvents.add(slug);
+  }
+  /** „Ohne Veranstaltung" wählen — leert die Mehrfachauswahl. */
+  clearEditEvents() {
+    this.editSelectedEvents = new Set<string>();
   }
 
   cancelEdit(e: MouseEvent) {
@@ -1920,9 +2291,20 @@ export class IdeaDetailComponent implements OnChanges {
       events: Array.from(this.editSelectedEvents),
     }).subscribe({
       next: () => {
-        this.editBusy = false;
-        this.editing = false;
-        this.load();
+        // Kontakt liegt in der App-DB (separater Endpoint) — nur bei echter
+        // Änderung speichern/löschen.
+        const newContact = this.edit.contact.trim();
+        const contactChanged = newContact !== (this.editContactInitial || '').trim();
+        const finish = () => {
+          this.editBusy = false;
+          this.editing = false;
+          this.load();
+        };
+        if (contactChanged) {
+          this.api.setIdeaContact(id, newContact || null).subscribe({ next: finish, error: finish });
+        } else {
+          finish();
+        }
       },
       error: (e) => {
         this.editBusy = false;

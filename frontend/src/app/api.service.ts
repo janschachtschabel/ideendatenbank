@@ -1,5 +1,5 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { Observable } from 'rxjs';
 import { FeaturedEvent, Idea, IdeaList, InboxItem, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
 
@@ -11,10 +11,25 @@ import { FeaturedEvent, Idea, IdeaList, InboxItem, SortBy, TaxonomyEntry, Topic,
  */
 export const API_BASE_DEFAULT = '/api/v1';
 
+/** Antwort beim Löschen einer Phase/Veranstaltung: wie viele Ideen-Tags
+ *  entfernt wurden (removed), wie viele Knoten dabei scheiterten (failed). */
+export interface TaxDeleteResult {
+  ok: boolean;
+  removed: number;
+  failed: number;
+  total: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private http = inject(HttpClient);
   base = API_BASE_DEFAULT;
+
+  /** Zählt bei jeder Änderung des Anmeldezustands hoch (Login fertig, Logout).
+   *  Komponenten können per `effect()` darauf reagieren und auth-abhängige
+   *  Server-Daten (z.B. can_edit, contact) ohne Seiten-Reload neu laden. */
+  authTick = signal(0);
+  private bumpAuth() { this.authTick.update((v) => v + 1); }
 
   setBase(url: string) {
     this.base = url.replace(/\/+$/, '');
@@ -35,6 +50,14 @@ export class ApiService {
     catch { return null; }
   }
 
+  /** Echter Name (Vor-/Nachname aus edu-sharing), nach /me gesetzt.
+   *  Fallback bleibt der Login-Username. */
+  private _displayName: string | null = this.loadStoredDisplayName();
+  private loadStoredDisplayName(): string | null {
+    try { return sessionStorage.getItem(ApiService.STORAGE_KEY + '.name'); }
+    catch { return null; }
+  }
+
   setCredentials(user: string, pass: string) {
     this.authHeader = 'Basic ' + btoa(unescape(encodeURIComponent(`${user}:${pass}`)));
     this._user = user;
@@ -46,24 +69,45 @@ export class ApiService {
   clearCredentials() {
     this.authHeader = null;
     this._user = null;
+    this._displayName = null;
     this._isModerator = false;
     try {
       sessionStorage.removeItem(ApiService.STORAGE_KEY);
       sessionStorage.removeItem(ApiService.STORAGE_KEY + '.user');
+      sessionStorage.removeItem(ApiService.STORAGE_KEY + '.name');
     } catch { /* */ }
+    this.bumpAuth();
   }
   hasCredentials() { return this.authHeader !== null; }
   currentUser(): string | null { return this._user; }
+
+  /** Anzeigename: echter Name falls bekannt, sonst Login-Username. */
+  currentDisplayName(): string | null { return this._displayName || this._user; }
+
+  /** Initialen (max. 2) aus dem Anzeigenamen, z.B. "Jan Schacht" → "JS". */
+  currentInitials(): string {
+    const n = (this.currentDisplayName() || '').trim();
+    if (!n) return '?';
+    return n.split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase() ?? '').join('')
+      || n[0]?.toUpperCase() || '?';
+  }
 
   /** Cache für /me-Response, geladen nach Login. */
   private _isModerator = false;
   isModerator(): boolean { return this._isModerator; }
 
-  refreshMe(): Observable<{ authenticated: boolean; username?: string; is_moderator?: boolean }> {
+  refreshMe(): Observable<{ authenticated: boolean; username?: string; display_name?: string; is_moderator?: boolean }> {
     return new Observable((sub) => {
       this.http.get<any>(`${this.base}/me`, { headers: this.authHeaders() }).subscribe({
         next: (r) => {
           this._isModerator = !!r.is_moderator;
+          this._displayName = r.display_name || this._user;
+          try {
+            if (this._displayName) {
+              sessionStorage.setItem(ApiService.STORAGE_KEY + '.name', this._displayName);
+            }
+          } catch { /* quota */ }
+          this.bumpAuth();   // Login vollständig → auth-abhängige Views neu laden
           sub.next(r);
           sub.complete();
         },
@@ -111,6 +155,8 @@ export class ApiService {
     events?: string[];
     captcha_token?: string | null;
     captcha_answer?: string | null;
+    contact?: string | null;
+    contact_consent?: boolean;
   }): Observable<{ ok: boolean; moderation: string; node_id: string; message: string }> {
     return this.http.post<any>(`${this.base}/ideas`, payload, {
       headers: this.authHeaders(),
@@ -125,12 +171,37 @@ export class ApiService {
   }
 
   getInteractions(ideaId: string): Observable<{
-    interest: { count: number; users: { name: string; user_key: string }[]; mine: boolean };
+    interest: {
+      count: number;
+      users: { name: string; user_key: string; status: string; approved: boolean; can_edit: boolean }[];
+      mine: boolean;
+      mine_status: string | null;
+      can_manage: boolean;
+    };
     follow: { count: number; mine: boolean };
   }> {
     return this.http.get<any>(`${this.base}/ideas/${ideaId}/interactions`, {
       headers: this.authHeaders(),
     });
+  }
+
+  /** Owner/Mod: Mithackende:n annehmen (status) und/oder Bearbeitungsrecht
+   *  erteilen (can_edit). */
+  setTeamMember(ideaId: string, userKey: string,
+                patch: { status?: 'pending' | 'approved'; can_edit?: boolean }):
+      Observable<{ ok: boolean }> {
+    return this.http.put<any>(
+      `${this.base}/ideas/${ideaId}/team/${encodeURIComponent(userKey)}`,
+      patch, { headers: this.authHeaders() },
+    );
+  }
+
+  /** Owner/Mod: Mithackende:n ganz aus dem Team entfernen. */
+  removeTeamMember(ideaId: string, userKey: string): Observable<{ ok: boolean }> {
+    return this.http.delete<any>(
+      `${this.base}/ideas/${ideaId}/team/${encodeURIComponent(userKey)}`,
+      { headers: this.authHeaders() },
+    );
   }
 
   toggleInterest(ideaId: string): Observable<{ state: 'added' | 'removed' }> {
@@ -145,12 +216,24 @@ export class ApiService {
     });
   }
 
-  inbox(filter: 'uncategorized' | 'all' | 'categorized' | 'app-submits' = 'uncategorized'):
+  inbox(filter: 'uncategorized' | 'all' | 'categorized' = 'uncategorized'):
     Observable<{ count: number; items: InboxItem[]; filter: string }> {
     // Auth-Header ist Pflicht — _require_moderator gated den Endpoint.
     return this.http.get<any>(`${this.base}/inbox`, {
       headers: this.authHeaders(),
       params: { filter },
+    });
+  }
+
+  /** Sync-Differenz App-Cache ↔ edu-sharing (Mod-Diagnose). */
+  syncDiff(): Observable<{
+    missing: { id: string; title: string; challenge: string }[];
+    stale: { id: string; title: string; hidden?: boolean }[];
+    hidden_stale_count?: number;
+    live_count: number; cache_count: number; in_sync: boolean;
+  }> {
+    return this.http.get<any>(`${this.base}/moderation/sync-diff`, {
+      headers: this.authHeaders(),
     });
   }
 
@@ -167,7 +250,7 @@ export class ApiService {
   // ---- Moderatoren-Anzeige (read-only; verwaltet wird in edu-sharing) ----
   listModerators(): Observable<{
     groups: string[];
-    group_status: { group: string; ok: boolean; error?: string | null; count: number }[];
+    group_status: { group: string; display_name?: string | null; ok: boolean; error?: string | null; count: number }[];
     count: number;
     managed_externally: boolean;
     members: { username: string; first_name?: string; last_name?: string;
@@ -208,8 +291,15 @@ export class ApiService {
       headers: this.authHeaders(),
     });
   }
-  deleteEvent(slug: string): Observable<unknown> {
-    return this.http.delete(`${this.base}/admin/events/${slug}`, {
+  deleteEvent(slug: string): Observable<TaxDeleteResult> {
+    return this.http.delete<TaxDeleteResult>(`${this.base}/admin/events/${slug}`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  /** Nutzungszahlen je Phase/Veranstaltung (für Lösch-Warnung + Anzeige). */
+  taxonomyUsage(): Observable<{ phases: Record<string, number>; events: Record<string, number> }> {
+    return this.http.get<any>(`${this.base}/admin/taxonomy-usage`, {
       headers: this.authHeaders(),
     });
   }
@@ -231,8 +321,8 @@ export class ApiService {
       headers: this.authHeaders(),
     });
   }
-  deletePhase(slug: string): Observable<unknown> {
-    return this.http.delete(`${this.base}/admin/phases/${slug}`, {
+  deletePhase(slug: string): Observable<TaxDeleteResult> {
+    return this.http.delete<TaxDeleteResult>(`${this.base}/admin/phases/${slug}`, {
       headers: this.authHeaders(),
     });
   }
@@ -246,6 +336,14 @@ export class ApiService {
   }
   myInterest(): Observable<{ count: number; items: Idea[] }> {
     return this.http.get<any>(`${this.base}/me/interest`, { headers: this.authHeaders() });
+  }
+  /** Mithack-Anfragen + Team auf den eigenen Ideen (für „Mein Bereich"). */
+  myTeamRequests(): Observable<{
+    count: number; pending: number;
+    items: { idea_id: string; idea_title: string; user_key: string; name: string;
+             status: string; approved: boolean; can_edit: boolean; created_at: string }[];
+  }> {
+    return this.http.get<any>(`${this.base}/me/team-requests`, { headers: this.authHeaders() });
   }
   // ---- Backup / Restore ----
   listBackups(): Observable<{
@@ -409,12 +507,6 @@ export class ApiService {
     });
   }
 
-  duplicateIdea(id: string): Observable<{ ok: boolean; node_id: string }> {
-    return this.http.post<any>(`${this.base}/ideas/${id}/duplicate`, null, {
-      headers: this.authHeaders(),
-    });
-  }
-
   deleteAttachment(ideaId: string, attachmentId: string): Observable<{ ok: boolean }> {
     return this.http.delete<any>(
       `${this.base}/ideas/${ideaId}/attachments/${attachmentId}`,
@@ -498,6 +590,18 @@ export class ApiService {
     );
   }
 
+  /** Tauscht die Datei eines bestehenden Anhangs aus (neue Version). */
+  replaceAttachment(ideaId: string, attachmentId: string, file: File):
+      Observable<{ ok: boolean; name: string; size: number }> {
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    return this.http.put<any>(
+      `${this.base}/ideas/${ideaId}/attachments/${attachmentId}/content`,
+      fd,
+      { headers: this.authHeaders() },
+    );
+  }
+
   listActivity(opts: {
     action?: string; actor?: string; target_id?: string;
     since?: string; limit?: number; offset?: number;
@@ -521,7 +625,8 @@ export class ApiService {
   }
 
   ranking(opts: { sort?: 'rating' | 'comments' | 'interest' | 'likes';
-                  event?: string | null; limit?: number } = {}):
+                  event?: string | null; limit?: number;
+                  basis?: 'decay' | 'absolute' } = {}):
       Observable<{
         sort: string;
         event: string | null;
@@ -533,6 +638,8 @@ export class ApiService {
           prev_rank: number | null;
           delta: number | null;
           score: number;
+          score_decay?: number;
+          score_absolute?: number;
           idea: Idea | null;
           history: { at: string; score: number; rank: number }[];
         }[];
@@ -541,6 +648,7 @@ export class ApiService {
     if (opts.sort)  params = params.set('sort', opts.sort);
     if (opts.event) params = params.set('event', opts.event);
     if (opts.limit) params = params.set('limit', String(opts.limit));
+    if (opts.basis) params = params.set('basis', opts.basis);
     return this.http.get<any>(`${this.base}/ranking`, { params });
   }
 
@@ -556,6 +664,13 @@ export class ApiService {
    * den edu-sharing-500-Bug und liefert trotzdem 200. */
   unrateIdea(id: string): Observable<unknown> {
     return this.http.delete(`${this.base}/ideas/${id}/rating`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  /** Kontakt einer Idee setzen/ändern (leer = löschen). Nur Owner/Mod. */
+  setIdeaContact(id: string, contact: string | null): Observable<{ ok: boolean; contact: string | null }> {
+    return this.http.put<any>(`${this.base}/ideas/${id}/contact`, { contact }, {
       headers: this.authHeaders(),
     });
   }
@@ -599,12 +714,7 @@ export class ApiService {
   }
 
   /** Pflicht-Metadaten (Lizenz/Sprache/...) für die WLO-Freischaltung
-   *  bei bestehenden Ideen nachpflegen. Single oder Bulk. Mod-only. */
-  backfillPublicationMeta(ideaId: string): Observable<{ ok: boolean; changed: boolean; fields: string[] }> {
-    return this.http.post<any>(
-      `${this.base}/admin/ideas/${ideaId}/backfill-publication-meta`,
-      {}, { headers: this.authHeaders() });
-  }
+   *  bei bestehenden Ideen (Bulk) nachpflegen. Mod-only. */
   backfillPublicationMetaBulk(limit = 200): Observable<{
     ok: boolean; processed: number; updated: number; errors: any[];
   }> {
@@ -622,29 +732,11 @@ export class ApiService {
     });
   }
 
-  phaseHistory(ideaId: string): Observable<{ count: number;
-    items: { ts: string; actor?: string | null; from?: string | null; to?: string | null }[] }> {
-    return this.http.get<any>(`${this.base}/ideas/${ideaId}/phase-history`);
-  }
-
-  myReports(): Observable<{ count: number; items: {
-    id: number; idea_id: string; idea_title?: string; reason: string;
-    created_at: string; resolved_at?: string | null;
-  }[] }> {
-    return this.http.get<any>(`${this.base}/me/reports`, { headers: this.authHeaders() });
-  }
-
   ideaReportStatus(ideaId: string): Observable<{
     reported: boolean; created_at?: string; resolved_at?: string | null;
     status?: 'open' | 'resolved';
   }> {
     return this.http.get<any>(`${this.base}/ideas/${ideaId}/report-status`, {
-      headers: this.authHeaders(),
-    });
-  }
-
-  bulkResolveReports(ids: number[]): Observable<{ ok: boolean; count: number }> {
-    return this.http.post<any>(`${this.base}/admin/reports/bulk-resolve`, { ids }, {
       headers: this.authHeaders(),
     });
   }
@@ -694,6 +786,17 @@ export class ApiService {
       {},
       { headers: this.authHeaders() },
     );
+  }
+
+  /** Alle Ideen inkl. versteckte (Mod) — für die Sichtbarkeits-Verwaltung. */
+  allIdeasAdmin(q?: string): Observable<{ count: number; items: {
+    id: string; title: string; owner_username?: string;
+    hidden: number; hidden_reason?: string; modified_at?: string;
+  }[] }> {
+    const params = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+    return this.http.get<any>(`${this.base}/admin/all-ideas${params}`, {
+      headers: this.authHeaders(),
+    });
   }
 
   // ---- Notifications ----

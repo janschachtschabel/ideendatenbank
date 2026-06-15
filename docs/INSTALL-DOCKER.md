@@ -60,7 +60,6 @@ Bevor du loslegst, sammle folgende Werte. Du brauchst sie für die
 | **Community-Inbox-ID** | UUID der Sammlung, in die anonyme Submits geschrieben werden (typischerweise eine Inbox des HackathOERn-Kontextes im edu-sharing-Repo) |
 | **Root-Sammlung-ID** | UUID der obersten Themen-Sammlung („Ideendatenbank-Wurzel"); darunter liegen die Themen-Sammlungen mit ihren Herausforderungen |
 | **Mod-Gruppen-Name(n)** | edu-sharing-Group-Authority(s), deren Mitglieder Mod-Rechte erhalten sollen — z.B. die Org-Admin-Gruppe deines Kontextes |
-| **(optional) Bootstrap-Mod-Username** | Klartext-Username eines Notnagel-Mods, der unabhängig von der Gruppe Mod ist |
 
 Diese Werte sind **kontext-spezifisch**. Frag im Zweifel das
 WLO-Team — sie pflegen die konkreten Sammlungs-IDs.
@@ -130,7 +129,7 @@ SYNC_INTERVAL_SECONDS=300
 BACKUP_ENABLED=true
 BACKUP_DIR=/data/backups
 BACKUP_INTERVAL_HOURS=24
-BACKUP_KEEP=14
+BACKUP_KEEP=14            # Default ist 3; 14 = ~2 Wochen tägliche Backups behalten
 # Auto-Restore beim Erststart aktivieren? Nur falls Marker-Datei
 # `AUTO_RESTORE_OK` im Backup-Verzeichnis liegt — Sicherheits-Opt-in.
 # Default-Marker-Name reicht in den meisten Fällen.
@@ -140,11 +139,6 @@ BACKUP_AUTO_RESTORE_MARKER=AUTO_RESTORE_OK
 # Komma-Liste der edu-sharing-Gruppen, deren Mitglieder Mod-Status
 # bekommen. Default-Bsp.: Repo-Admins + Org-Admins eines Kontexts.
 MODERATION_FALLBACK_GROUPS=GROUP_ALFRESCO_ADMINISTRATORS,GROUP_<kontext>_ORG_ADMINISTRATORS
-
-# Notnagel: Komma-Liste von Usernamen, die unabhängig von der Gruppe
-# Mod sind. Leer lassen im Normalbetrieb; nur befüllen, wenn der
-# Gruppen-Lookup nicht funktioniert.
-MODERATION_BOOTSTRAP_USERS=
 
 # === Upload-Limits (Bytes) ===
 # Defaults reichen für die meisten Setups — nur anpassen, wenn die
@@ -262,7 +256,9 @@ Bei Problemen — was die App vom User „sieht":
 ```bash
 curl -s -u '<username>:<passwort>' \
   https://<deine-domain>/api/v1/me/memberships | python3 -m json.tool
-# → zeigt deine ES-Gruppen + Treffer in der Mod-Liste
+# → Antwort enthält: is_moderator (bool), matched_groups (deine Gruppen, die als
+#   Mod zählen), expected_groups (= konfigurierte MODERATION_FALLBACK_GROUPS),
+#   groups (alle deine ES-Gruppen). Ist matched_groups leer, fehlt dir die Mod-Gruppe.
 ```
 
 Wenn der Login per Username klappt aber Mod-Status fehlt: in der `.env`
@@ -441,7 +437,7 @@ tail -30 /var/lib/docker/volumes/ideendb-data/_data/backup-to-gdrive.log
 ### Verschlüsselung (DSGVO-Empfehlung)
 
 Die Ideendatenbank-Backups enthalten personenbezogene Daten (Usernamen,
-Aktivitäts-Log, Report-Texte, Mitmachen/Folgen-Marker). Bei Speicherung
+Aktivitäts-Log, Report-Texte, Mithacken/Folgen-Marker). Bei Speicherung
 auf Google Drive ist eine **Client-seitige Verschlüsselung empfohlen**.
 
 Einfachster Weg — zweiter rclone-Remote als Crypt-Layer über dem ersten:
@@ -618,9 +614,9 @@ JSON. Einfach an Uptime-Monitoring-Service deiner Wahl anhängen
 | Sync läuft permanent in 401 | `EDU_GUEST_USER`/`EDU_GUEST_PASS` falsch oder Account hat keinen Inbox-Zugriff |
 | „CORS-Fehler" im Browser | `APP_CORS_ORIGINS` enthält deine Domain nicht (Schreibweise muss exakt der im Browser sichtbaren entsprechen, inkl. `https://`) |
 | Upload bricht stumm bei ~1 MB ab | nginx `client_max_body_size` zu niedrig |
-| Mod-Status wird nicht erkannt | Login mit Username (nicht E-Mail) versuchen; in `MODERATION_BOOTSTRAP_USERS` als Notnagel eintragen |
+| Mod-Status wird nicht erkannt | Login mit Username (nicht E-Mail) versuchen; prüfen, ob der User in einer der `MODERATION_FALLBACK_GROUPS` ist (`GET /api/v1/me/memberships`) |
 | Auto-Restore springt nicht an | Marker-Datei `AUTO_RESTORE_OK` fehlt im Backup-Verzeichnis |
-| Anonymer Submit gibt 400 „Captcha…" | Mathe-Captcha im Frontend gelöst werden — bei API-Tests `GET /api/v1/captcha` aufrufen und Antwort mitsenden |
+| Anonymer Submit gibt 400 „Captcha…" | Anonyme Submits brauchen ein Captcha: `GET /api/v1/captcha` liefert `{token, question}`; die Frage lösen und beim `POST /api/v1/ideas` `captcha_token` (= `token`) + `captcha_answer` (= das Rechenergebnis) im JSON-Body mitschicken. Eingeloggte User brauchen kein Captcha. |
 
 ---
 

@@ -35,6 +35,51 @@
   }
 }
 
+/* Mitmach-Kachel für eine leere Herausforderung. Nutzt die Theme-Primärfarbe
+   (passt sich automatisch ans Farbtemplate an) und grenzt sich durch getönten
+   Hintergrund + gestrichelten Rahmen klar von den (weißen) Ideen-Kacheln ab. */
+.cta-tile {
+  cursor: pointer;
+  border: 2px dashed var(--wlo-primary, #002855);
+  background: var(--wlo-primary-soft, #e6edf7);
+  color: var(--wlo-primary, #002855);
+  min-height: 220px;
+
+  &:hover, &:focus-visible {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0, 40, 85, .14);
+    border-style: solid;
+    border-color: var(--wlo-primary, #002855);
+    outline: none;
+  }
+
+  .cta-inner {
+    flex: 1;
+    padding: 24px 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
+  }
+  .cta-plus {
+    width: 52px; height: 52px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 2rem; font-weight: 700; line-height: 1;
+    background: var(--wlo-primary, #002855); color: #fff;
+  }
+  .cta-title { margin: 0; font-size: 1.05rem; font-weight: 700; color: inherit; }
+  .cta-text { margin: 0; font-size: .86rem; line-height: 1.4; opacity: .85; color: inherit; }
+  .cta-btn {
+    margin-top: 6px;
+    display: inline-block; padding: 8px 18px; border-radius: 999px;
+    background: var(--wlo-cta-bg, var(--wlo-primary, #002855));
+    color: var(--wlo-cta-text, #fff);
+    font-weight: 700; font-size: .9rem;
+  }
+}
+
 .thumb {
   width: 100%;
   aspect-ratio: 16 / 9;

@@ -193,6 +193,7 @@ import { Component, Input } from '@angular/core';
         <a href="#dsv-logs">Server-Logfiles</a>
         <a href="#dsv-hoster">Hosting</a>
         <a href="#dsv-edusharing">edu-sharing</a>
+        <a href="#dsv-appdb">App-Zusatzdaten</a>
         <a href="#dsv-account">Konto &amp; Einreichung</a>
         <a href="#dsv-audit">Audit-Log</a>
         <a href="#dsv-kontakt">Kontakt</a>
@@ -395,6 +396,38 @@ import { Component, Input } from '@angular/core';
       <p>
         Anonyme Einreichungen erfolgen über einen technischen Service-Account
         und werden zunächst redaktionell geprüft.
+      </p>
+
+      <h2 id="dsv-appdb">In der App gespeicherte Zusatzdaten</h2>
+      <p>
+        Einige Daten werden bewusst <strong>nicht</strong> im edu-sharing-Repository,
+        sondern ausschließlich in der Datenbank dieser Anwendung verarbeitet:
+      </p>
+      <ul>
+        <li>
+          <strong>Kontaktdaten der Einreichenden</strong> (z.&nbsp;B. E-Mail
+          oder Link): Werden <em>nur mit ausdrücklicher Einwilligung</em>
+          (Art. 6 Abs. 1 lit. a DSGVO) gespeichert und ausschließlich
+          <em>angemeldeten Nutzer:innen</em> neben der Idee angezeigt. Zweck:
+          Rückfragen und Vernetzung mit Mithackenden. Die Einwilligung ist
+          jederzeit mit Wirkung für die Zukunft widerrufbar; auf Wunsch löschen
+          wir den Kontakt (siehe „Ihre Rechte").
+        </li>
+        <li>
+          <strong>Zeitpunkte abgegebener Bewertungen</strong>: Für die
+          zeitliche Gewichtung der Rangliste (Stimmen-Verfall) speichern wir je
+          Bewertung Benutzername und Abgabe-Zeitpunkt — ausschließlich zur
+          Ranglisten-Berechnung (Art. 6 Abs. 1 lit. f DSGVO).
+        </li>
+        <li>
+          <strong>Interaktionen</strong> („Mithacken"/„Folgen", jeweils
+          Benutzername + Zeitpunkt) zur Anzeige Interessierter an einer Idee.
+        </li>
+      </ul>
+      <p>
+        Diese App-Daten sind in den Backups der Anwendung enthalten und werden
+        gelöscht, wenn die zugehörige Idee entfernt wird oder Sie die Löschung
+        verlangen.
       </p>
 
       <h2 id="dsv-account">Konto, Anmeldung und Einreichungen</h2>

@@ -72,7 +72,7 @@ import { Idea, SortBy, VotingMode } from '../models';
               }
             </div>
 
-            @if (enableVoting) {
+            @if (enableVoting && votingOpen()) {
               <!-- Inline-Voting: stoppt die Klick-Weiterleitung zur Detailseite,
                    damit man direkt an der Kachel bewerten kann. -->
               <div class="vote-row" (click)="$event.stopPropagation()">
@@ -100,42 +100,69 @@ import { Idea, SortBy, VotingMode } from '../models';
                   <span class="vote-msg">{{ voteMsg[i.id] }}</span>
                 }
               </div>
+            } @else if (enableVoting) {
+              <div class="vote-row">
+                <span class="vote-label">⏳ Bewertung noch nicht gestartet.</span>
+              </div>
             }
           </div>
         </article>
       } @empty {
-        <div class="empty">
-          @if (loading) {
-            <p>Lädt…</p>
-          } @else if (suggestions && q) {
-            <h3>Keine Treffer für „{{ q }}"</h3>
-            @if (suggestions.alt_terms.length) {
-              <p>Vielleicht meintest du:</p>
-              <div class="suggest-chips">
-                @for (term of suggestions.alt_terms; track term) {
-                  <button class="suggest-chip" (click)="searchAlt.emit(term)">
-                    {{ term }}
-                  </button>
+        @if (ctaShow && !loading && !q) {
+          <!-- Leere Sammlung → farbige Mitmach-Kachel als eigene Grid-Zelle
+               (statt Leertext). Bei leerer Herausforderung mit Vorauswahl,
+               bei leerem Themenbereich ohne. -->
+          <article class="tile cta-tile" role="button" tabindex="0"
+                   (click)="ctaSubmit.emit(ctaTopicId)"
+                   (keyup.enter)="ctaSubmit.emit(ctaTopicId)">
+            <div class="cta-inner">
+              <span class="cta-plus" aria-hidden="true">+</span>
+              <h3 class="cta-title">Erste Idee einreichen</h3>
+              <p class="cta-text">
+                @if (ctaTopicTitle) {
+                  Diese Herausforderung ist noch leer — mach den Anfang und reiche
+                  deine Idee zu „{{ ctaTopicTitle }}" ein.
+                } @else {
+                  Hier ist noch keine Idee — mach den Anfang und reiche die erste ein.
                 }
-              </div>
+              </p>
+              <span class="cta-btn">＋ Idee einreichen</span>
+            </div>
+          </article>
+        } @else {
+          <div class="empty">
+            @if (loading) {
+              <p>Lädt…</p>
+            } @else if (suggestions && q) {
+              <h3>Keine Treffer für „{{ q }}"</h3>
+              @if (suggestions.alt_terms.length) {
+                <p>Vielleicht meintest du:</p>
+                <div class="suggest-chips">
+                  @for (term of suggestions.alt_terms; track term) {
+                    <button class="suggest-chip" (click)="searchAlt.emit(term)">
+                      {{ term }}
+                    </button>
+                  }
+                </div>
+              }
+              @if (suggestions.recent.length) {
+                <p class="recent-hint">Oder schau dir die zuletzt aktualisierten Ideen an:</p>
+                <div class="recent-list">
+                  @for (rec of suggestions.recent; track rec.id) {
+                    <button class="recent-row" (click)="openIdea(rec)">
+                      <strong>{{ rec.title }}</strong>
+                      @if (rec.modified_at) {
+                        <small>{{ formatDate(rec.modified_at) }}</small>
+                      }
+                    </button>
+                  }
+                </div>
+              }
+            } @else {
+              <p>Keine Ideen gefunden.</p>
             }
-            @if (suggestions.recent.length) {
-              <p class="recent-hint">Oder schau dir die zuletzt aktualisierten Ideen an:</p>
-              <div class="recent-list">
-                @for (rec of suggestions.recent; track rec.id) {
-                  <button class="recent-row" (click)="openIdea(rec)">
-                    <strong>{{ rec.title }}</strong>
-                    @if (rec.modified_at) {
-                      <small>{{ formatDate(rec.modified_at) }}</small>
-                    }
-                  </button>
-                }
-              </div>
-            }
-          } @else {
-            <p>Keine Ideen gefunden.</p>
-          }
-        </div>
+          </div>
+        }
       }
     </div>
 
@@ -156,6 +183,10 @@ export class TileGridComponent implements OnInit, OnChanges {
   /** Effektiver Bewertungs-Modus für den Kontext dieser Liste (Event-Slug). */
   mode(): VotingMode {
     return this.voting.effective(this.event);
+  }
+  /** Ist die Bewertung für die aktuelle Veranstaltung offen? (global + Phase) */
+  votingOpen(): boolean {
+    return this.voting.isEventRatingOpen(this.event);
   }
 
   /** Initiales Theme als Web-Component-Attribut, identisch zum AppShell. */
@@ -184,10 +215,23 @@ export class TileGridComponent implements OnInit, OnChanges {
    * normale Listen bleiben unverändert read-only. */
   @Input() enableVoting = false;
 
+  /** Mitmach-CTA bei LEERER Sammlung: ist `ctaShow` gesetzt und liefert die
+   *  Liste keine Treffer, erscheint statt „keine Ideen" eine farbige Kachel,
+   *  die direkt ins Einreich-Formular führt. `ctaTopicId`/`ctaTopicTitle` sind
+   *  optional — nur bei einer leeren (L2-)Herausforderung gesetzt (Vorauswahl);
+   *  bei einem leeren Themenbereich (L1) bleiben sie null (keine Vorauswahl).
+   *  Die Eltern-Shell entscheidet anhand der echten Zählung, ob `ctaShow` gilt. */
+  @Input() ctaShow = false;
+  @Input() ctaTopicId: string | null = null;
+  @Input() ctaTopicTitle: string | null = null;
+
   @Output() ideaSelected = new EventEmitter<Idea>();
   @Output() searchAlt = new EventEmitter<string>();
   /** Wird ausgelöst, wenn ein nicht eingeloggter User voten will. */
   @Output() requireLogin = new EventEmitter<void>();
+  /** Klick auf die Mitmach-Kachel → Submit-Formular. Übergibt die Topic-ID
+   *  der Herausforderung als Vorauswahl, oder null (leerer Themenbereich). */
+  @Output() ctaSubmit = new EventEmitter<string | null>();
 
   ideas: Idea[] = [];
   total = 0;

@@ -35,11 +35,12 @@ Drei Einträge:
 
 ## Mein Bereich
 
-Vier Tabs:
+Fünf Tabs (ein sechster — **Mithack-Anfragen** — erscheint nur, wenn du selbst
+Ideen eingereicht hast):
 
 ### Was ist neu
 Aktivitäts-Feed mit Notification-Counter. Zeigt:
-- Neue Kommentare an deinen / gefolgten / mitmach-Ideen
+- Neue Kommentare an deinen / gefolgten / Mithack-Ideen
 - Phasen-Wechsel
 - Anhänge die hochgeladen wurden
 - Mod-Aktionen (verschoben, versteckt, freigegeben)
@@ -48,14 +49,24 @@ Sobald du den Tab öffnest, wird der Counter (oben rechts am Username) zurückge
 
 ### Meine Ideen
 Liste deiner Einreichungen. Pro Idee:
-- Titel, Phase, Veranstaltung, Bewertung, Kommentarzahl
+- Titel, Phase, Bewertung, Kommentarzahl
 - Klick öffnet die Detail-Ansicht zum Bearbeiten
 
 ### Gefolgt
 Alle Ideen, denen du folgst. Praktisch zum schnellen Zurückkehren ohne Suche.
 
-### Mitmachen
-Alle Ideen, bei denen du „Ich will mitmachen" markiert hast.
+### Mithacken
+Alle Ideen, bei denen du „Ich will mithacken" markiert hast — inkl. Status
+(wartet auf Bestätigung / angenommen) und ob du Bearbeitungsrecht hast.
+
+### Mithack-Anfragen
+Nur sichtbar, wenn dir Ideen gehören: Wer sich bei deinen Ideen zum Mithacken
+eingetragen hat. Hier nimmst du Anfragen an, vergibst Bearbeitungsrechte oder
+entfernst Mithackende wieder.
+
+### Profil & Teilen
+Deine öffentlichen Profil-Felder bearbeiten (Anzeigename, Kurzbeschreibung,
+Website, Rolle) und einen Direktlink + QR-Code zu deinem Profil holen.
 
 ## Öffentliches Profil
 
@@ -65,7 +76,9 @@ eingereichten Ideen. Erreichbar:
 - über URL `?view=user&u=<dein-username>`
 
 Was dort steht:
-- **Initialen-Avatar** mit Username
+- **Initialen-Avatar** mit Anzeigename bzw. Username
+- **Profil-Felder**, sofern gepflegt: Kurzbeschreibung (Bio), Website-Link und
+  Rolle/Kontext (als Pille) — gesetzt im Tab „Profil & Teilen"
 - **Stats**: Anzahl Ideen, Anzahl Kommentare gesamt, Anzahl Bewertungen, Schnittbewertung
 - **Letzte Aktivität** (Datum)
 - **Alle eigenen Ideen** als Kachelgitter

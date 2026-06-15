@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS idea (
     keywords TEXT,                    -- JSON array of all other keywords
     rating_avg REAL DEFAULT 0,
     rating_count INTEGER DEFAULT 0,
+    -- Summe aller Sternwerte (edu-sharing overall.sum) — exakte Absolutsumme.
+    rating_sum REAL DEFAULT 0,
     comment_count INTEGER DEFAULT 0,
     attachment_mimetype TEXT,         -- mimetype of the main/single content file (for kind='io')
     attachment_size INTEGER,          -- bytes
@@ -98,6 +100,12 @@ CREATE TABLE IF NOT EXISTS taxonomy_event (
     -- Wenn gesetzt + Zeitstempel in der Zukunft: Event taucht im
     -- "Featured"-Slot auf der Startseite auf.
     featured_until TEXT,
+    -- Optionale Zusatzinfos fürs Promotion-Banner (alle nullable):
+    -- Veranstaltungsort, Zeitraum von/bis (ISO-Datum) und Detail-URL.
+    location      TEXT,
+    date_start    TEXT,
+    date_end      TEXT,
+    detail_url    TEXT,
     created_at    TEXT NOT NULL,
     created_by    TEXT
 );
@@ -139,6 +147,46 @@ CREATE INDEX IF NOT EXISTS idx_ranking_lookup
   ON ranking_snapshot (event, sort, snapshot_at);
 CREATE INDEX IF NOT EXISTS idx_ranking_idea
   ON ranking_snapshot (idea_id, event, sort, snapshot_at);
+
+-- Vote-Ledger: pro (Idee, User) die zuletzt abgegebene Bewertung MIT
+-- Zeitstempel. Quelle der Wahrheit für die Rating-WERTE bleibt edu-sharing;
+-- dieses Ledger dient ausschließlich dem zeitlichen Punkteverfall (das
+-- Alter jeder Stimme), das edu-sharing nicht einfach ausliefert. Wird von
+-- rate_idea/unrate_idea gepflegt (App mediiert jede Bewertung).
+--   value = abgegebener Rating-Wert (Sterne 1..5; Daumen = 5).
+CREATE TABLE IF NOT EXISTS vote_event (
+    idea_id    TEXT NOT NULL,
+    user_key   TEXT NOT NULL,
+    value      REAL NOT NULL,
+    -- created_at = Erstabgabe der Stimme (NIE überschrieben → maßgeblich fürs
+    -- Stimmenalter/Verfall). updated_at = letzte Wertänderung (Audit).
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    PRIMARY KEY (idea_id, user_key)
+);
+CREATE INDEX IF NOT EXISTS idx_vote_event_idea ON vote_event (idea_id);
+
+-- Legacy-Seed: Bestands-Stimmen, die VOR Einführung des Verfalls schon in
+-- edu-sharing lagen (ohne App-Zeitstempel). Werden einmalig als ein
+-- gebündelter, auf das Einführungsdatum datierter „Altbestand" erfasst, der
+-- wie eine Stimme mit verfällt. seed_sum = Summe der Sternwerte (avg*count),
+-- seed_count = Anzahl Bewertungen — je nach Modus (Sterne/Daumen) genutzt.
+CREATE TABLE IF NOT EXISTS idea_score_seed (
+    idea_id    TEXT PRIMARY KEY,
+    seed_sum   REAL NOT NULL,
+    seed_count INTEGER NOT NULL,
+    seeded_at  TEXT NOT NULL
+);
+
+-- Kontaktdaten der Einreichenden (App-seitig, NICHT in edu-sharing — bewusst
+-- aus Datenschutz-Gründen). Nur mit ausdrücklicher Einwilligung gespeichert;
+-- Anzeige nur für eingeloggte Nutzer:innen (serverseitig gegated). Zweck:
+-- Rückfragen + Mithackende. Löschbar (DSGVO) über den Idee-Knoten.
+CREATE TABLE IF NOT EXISTS idea_contact (
+    idea_id    TEXT PRIMARY KEY,
+    contact    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 
 -- Meldungen / Reports: User können Ideen via "⚠ Melden"-Button melden,
 -- Moderatoren erledigen sie im Mod-UI. Tabelle hier zentral angelegt
@@ -257,6 +305,42 @@ def init_db() -> None:
         # erben, sonst 'stars' | 'thumbs'.
         try:
             con.execute("ALTER TABLE taxonomy_event ADD COLUMN voting_mode TEXT")
+        except sqlite3.OperationalError:
+            pass
+        # Bewertungsphase pro Event: 1 = offen (bewertbar), 0 = gestoppt
+        # (z.B. Einreichungsphase). Default offen → Bestand bleibt bewertbar.
+        try:
+            con.execute("ALTER TABLE taxonomy_event ADD COLUMN rating_open INTEGER NOT NULL DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
+        # Event-Zusatzinfos für das Promotion-Banner auf der Startseite
+        # (Juni 2026): Ort, Zeitraum (von–bis) + Detail-URL. Alle optional.
+        for _col in ("location", "date_start", "date_end", "detail_url"):
+            try:
+                con.execute(f"ALTER TABLE taxonomy_event ADD COLUMN {_col} TEXT")
+            except sqlite3.OperationalError:
+                pass
+        # Exakte Sterne-Summe (edu-sharing overall.sum) statt Durchschnitt×Anzahl.
+        try:
+            con.execute("ALTER TABLE idea ADD COLUMN rating_sum REAL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        # Vote-Ledger: updated_at (letzte Wertänderung) ergänzen; created_at
+        # bleibt die unveränderliche Erstabgabe.
+        try:
+            con.execute("ALTER TABLE vote_event ADD COLUMN updated_at TEXT")
+        except sqlite3.OperationalError:
+            pass
+        # Team-/Mithacken-Workflow (Juni 2026): Mithackende schreiben sich als
+        # 'interest' ein (status='pending'). Owner/Mod kann sie annehmen
+        # (status='approved' → grünes Häkchen) und optional Bearbeitungsrecht
+        # erteilen (can_edit=1 → „Mitwirkende:r"). 'follow' bleibt unberührt.
+        try:
+            con.execute("ALTER TABLE idea_interaction ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.execute("ALTER TABLE idea_interaction ADD COLUMN can_edit INTEGER NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
             pass
         # User-Notification-Cursor: wann hat der User seinen Feed zuletzt

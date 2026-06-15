@@ -18,7 +18,7 @@ nur eine optimierte Sicht darauf.
 | Rolle | Was du damit machen kannst |
 |---|---|
 | **Anonymer Besucher** | Stöbern, Filter setzen, Volltext-Suche, Vorschau aller Ideen, Rangliste sehen |
-| **Eingeloggter Nutzer** | Zusätzlich: Ideen einreichen, kommentieren, bewerten, „Mitmachen", „Folgen", Notifications, eigenes Profil |
+| **Eingeloggter Nutzer** | Zusätzlich: Ideen einreichen, kommentieren, bewerten, „Mithacken", „Folgen", Notifications, eigenes Profil |
 | **Moderator/Admin** | Zusätzlich: Inbox-Pflege, Sammlungen verwalten, Inhalte verstecken, Meldungen bearbeiten, Statistik einsehen |
 
 ## Welche Vorteile hat ein WLO-Konto?
@@ -29,7 +29,7 @@ ist die Eintrittskarte für aktive Mitwirkung:
 - 💡 **Ideen einreichen** und nach der Freischaltung als Autor:in genannt werden
 - 💬 **Kommentieren und diskutieren** — andere Community-Mitglieder profitieren von deinem Wissen
 - ⭐ **Bewerten** — hilft, gute Ideen sichtbar zu machen
-- 🤝 **Mitmachen markieren** — Signalisiert Interesse, zu einer Umsetzung beizutragen
+- 🤝 **Mithacken** — Signalisiert Interesse, zu einer Umsetzung beizutragen (die Ideengeber:in nimmt dich ins Team auf)
 - 🔔 **Folgen + Notifications** — Du wirst informiert, wenn sich an „deinen" Ideen etwas tut
 - 👤 **Öffentliches Profil** — deine Ideen werden gebündelt unter deinem Namen sichtbar
 - 🛠 **Eigene Ideen bearbeiten** — Beschreibung, Anhänge, Vorschaubild jederzeit aktualisieren
@@ -38,16 +38,18 @@ Eine Registrierung dauert eine Minute → [hier registrieren](https://ideenbank.
 
 ## Erstkontakt: was siehst du als Gast?
 
-Auf der Startseite findest du drei Einstiegspunkte:
+Auf der Startseite findest du mehrere Einstiegspunkte:
 
-1. **Neueste Ideen** (8 frisch eingereichte oder geänderte Ideen, mit „Mehr laden"-Button)
-2. **Herausforderungen durchstöbern** — die thematischen Ober-Sammlungen
-3. **Rangliste** — Top-Ideen nach Bewertung, Kommentaren oder Mitmach-Interesse
+1. **Aktuelle Veranstaltung** — sofern ein Event hervorgehoben ist, erscheint ganz
+   oben ein Slot mit den Buttons „Idee einreichen" und „Jetzt voten"
+2. **Neueste Ideen** (8 frisch eingereichte oder geänderte Ideen, mit „Mehr laden"-Button)
+3. **Themenbereiche durchstöbern** — die thematischen Ober-Sammlungen
+4. **Veranstaltungen durchstöbern** — die kuratierten Events als Kacheln
 
 Über die Navigation oben sind alle Bereiche jederzeit erreichbar:
 
 ```
-Start  ·  Ideen  ·  Herausforderungen  ·  Veranstaltungen  ·  🏆 Rangliste  ·  Idee einreichen
+Start  ·  Ideen  ·  Themenbereiche  ·  Veranstaltungen  ·  🏆 Rangliste  ·  Idee einreichen
 ```
 
 Rechts oben kannst du jederzeit zwischen drei Farbschemata (default, hellem

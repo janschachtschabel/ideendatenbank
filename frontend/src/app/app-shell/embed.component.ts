@@ -117,7 +117,7 @@ import { ApiService } from '../api.service';
       <a href="#tiles">Tile-Grid</a>
       <a href="#single-tile">Einzelne Kachel(n)</a>
       <a href="#ranking">Rangliste</a>
-      <a href="#topics">Herausforderungen</a>
+      <a href="#topics">Themenbereiche</a>
       <a href="#events">Veranstaltungen</a>
       <a href="#browser">Ideen-Übersicht</a>
       <a href="#submit">Idee-Einreichen</a>
@@ -262,7 +262,7 @@ import { ApiService } from '../api.service';
               <td>Farbschema. Auto-Adapt an Eltern-Hintergrund klappt nicht — bewusst setzen.</td></tr>
           <tr><td><code class="inline">topic-id</code></td>
               <td>UUID</td>
-              <td>Filtert auf eine bestimmte Herausforderung / einen Bereich.</td></tr>
+              <td>Filtert auf einen bestimmten Themenbereich / eine Herausforderung.</td></tr>
           <tr><td><code class="inline">phase</code></td>
               <td>Slug, z.B. <code class="inline">anregung</code></td>
               <td>Filtert nach Phase.</td></tr>
@@ -352,11 +352,11 @@ import { ApiService } from '../api.service';
       </div>
     </section>
 
-    <!-- ===== Herausforderungen ===== -->
+    <!-- ===== Themenbereiche ===== -->
     <section id="topics">
-      <h2>8. Herausforderungen-Übersicht</h2>
+      <h2>8. Themenbereiche-Übersicht</h2>
       <p>
-        Themen-Hub mit Drilldown von Themengebiet (Ebene 1) auf einzelne
+        Themen-Hub mit Drilldown vom Themenbereich (Ebene 1) auf einzelne
         Herausforderungen (Ebene 2). Klick auf eine Herausforderung öffnet
         die zugehörigen Ideen.
       </p>
@@ -390,7 +390,7 @@ import { ApiService } from '../api.service';
       <h2>10. Ideen-Übersicht (mit Such- und Filter-Leiste)</h2>
       <p>
         Die vollständige Such-/Filterseite („Ideen") als Standalone-Embed.
-        Hat oben das Suchfeld + Phase-/Event-/Bereich-Filter + Sortierung.
+        Hat oben das Suchfeld + Phase-/Event-/Themenbereich-/Herausforderung-Filter + Sortierung.
         Für Portale, in denen die Ideenliste der primäre Einstieg sein soll.
       </p>
       <div class="snippet-wrap">
@@ -623,7 +623,7 @@ export class EmbedComponent {
   }
 
   get topicsSnippet(): string {
-    return `<!-- Herausforderungen-Hub -->
+    return `<!-- Themenbereiche-Hub -->
 <ideendb-app
   api-base="${this.apiBaseAbs}"
   view="topics"></ideendb-app>`;

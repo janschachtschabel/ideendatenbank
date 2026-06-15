@@ -25,18 +25,23 @@ from starlette.requests import Request
 
 
 def _client_ip(request: Request) -> str:
-    """Echte Client-IP — bevorzugt X-Forwarded-For (Reverse-Proxy),
-    fällt auf direkte Peer-Adresse zurück. Nimmt die ERSTE IP aus der
-    XFF-Liste, das ist der Original-Client (nginx hängt nur an).
+    """Echte Client-IP hinter dem Reverse-Proxy.
+
+    WICHTIG: X-Forwarded-For ist clientseitig fälschbar. nginx hängt mit
+    `$proxy_add_x_forwarded_for` die real gesehene IP HINTEN an — deshalb
+    NICHT die erste (vom Client kontrollierbare), sondern die LETZTE XFF-IP
+    nehmen. X-Real-IP (nginx = $remote_addr) hat Vorrang; sonst Peer-Adresse.
+    Sonst könnte ein anonymer Client per rotierendem XFF die IP-Rate-Limits
+    auf /ideas, /report, /captcha aushebeln.
     """
+    real = request.headers.get("x-real-ip")
+    if real and real.strip():
+        return real.strip()
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
 
 

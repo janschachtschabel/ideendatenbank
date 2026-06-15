@@ -56,6 +56,16 @@ async def lifespan(app: FastAPI):
         log.exception("auto-restore: unerwarteter Fehler — starte mit leerer DB")
 
     init_db()
+    # Legacy-Stimmen einmalig für den Punkteverfall erfassen (idempotent über
+    # Marker), damit die verfallsgewichtete Rangliste schon vor dem ersten
+    # Sync nicht leer/0 ist.
+    try:
+        from .db import connect as _connect
+
+        with _connect() as _con:
+            sync_mod.ensure_vote_seed(_con)
+    except Exception:
+        log.exception("ensure_vote_seed beim Start fehlgeschlagen")
     sync_task = asyncio.create_task(_sync_loop())
     backup_task = asyncio.create_task(backup_mod.auto_backup_loop())
     try:

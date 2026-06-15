@@ -26,6 +26,7 @@ class Settings(BaseSettings):
         if not (self.edu_repo_api or "").strip():
             self.edu_repo_api = f"{self.edu_repo_base_url.rstrip('/')}/edu-sharing/rest"
         return self
+
     # Gast-Account ohne Default — Pflicht über .env / ENV-Variable.
     # Lieber harter Fehler beim Start als unbeabsichtigt mit
     # hard-coded Test-Credentials gegen Prod laufen.
@@ -44,6 +45,26 @@ class Settings(BaseSettings):
     # SQLite
     sqlite_path: Path = Path("./data/ideendb.sqlite")
     sync_interval_seconds: int = 300
+
+    # Rating-Verfall (exponentiell mit Mindestgewicht). Ältere Stimmen verlieren
+    # mit der Zeit an Gewicht (w(t) = max(floor, 0.5^(t/halflife))), damit die
+    # Rangliste „aktuell" bleibt und neue Ideen aufholen können. Die kumulative
+    # Gesamtsumme OHNE Verfall bleibt erhalten und wird in der Balkengrafik
+    # gezeigt. Halbwertszeit in Tagen: nach `halflife` Tagen zählt eine Stimme
+    # noch halb. 90 Tage ≈ 7d→0.95, 30d→0.79, 90d→0.50, 180d→0.25.
+    # `floor` = Verfallsstopp: eine Stimme zählt nie weniger als dieser Anteil
+    # (Default 0.20), damit Bestand nicht vollständig entwertet wird.
+    rating_decay_enabled: bool = True
+    rating_decay_halflife_days: float = 90.0
+    rating_decay_floor: float = 0.20
+
+    @property
+    def rating_decay_lambda(self) -> float:
+        """Verfallsrate λ pro Tag, abgeleitet aus der Halbwertszeit."""
+        import math
+
+        hl = self.rating_decay_halflife_days or 0.0
+        return (math.log(2) / hl) if hl > 0 else 0.0
 
     # Backup
     backup_enabled: bool = True
@@ -75,17 +96,10 @@ class Settings(BaseSettings):
     # bearbeiten. Default ist GROUP_ALFRESCO_ADMINISTRATORS (Repo-Admins);
     # weitere Gruppen können kommasepariert angehängt werden.
     moderation_fallback_groups: str = "GROUP_ALFRESCO_ADMINISTRATORS"
-    # Komma-Liste von Usernamen, die unabhängig von der Gruppe immer
-    # Moderator-Status haben (Bootstrap, bevor die Gruppe existiert).
-    moderation_bootstrap_users: str = ""
 
     @property
     def fallback_mod_groups(self) -> list[str]:
         return [g.strip() for g in self.moderation_fallback_groups.split(",") if g.strip()]
-
-    @property
-    def bootstrap_mod_users(self) -> list[str]:
-        return [u.strip() for u in self.moderation_bootstrap_users.split(",") if u.strip()]
 
     @property
     def cors_origins(self) -> list[str]:

@@ -6,16 +6,17 @@ leben im edu-sharing-Repo, das eigene Sicherungs-Strategien hat.
 
 ## Was wird gesichert?
 
-Die SQLite-Datei `data/ideendb.sqlite` mit:
+Die SQLite-Datei `data/ideendb.sqlite` (im ZIP konsistent via `VACUUM INTO`
+abgelegt als `database.sqlite`) mit:
 
 | Tabelle | Inhalt |
 |---|---|
 | `idea` | App-Cache aller Ideen mit topic_id, hidden-Flag, Tags, Sync-Stand |
 | `idea_fts` | Volltext-Index |
 | `topic` | Sammlungs-Hierarchie mit Sortierung + Beschreibungen |
-| `taxonomy_event` | Kuratierte Veranstaltungs-Liste mit Labels |
+| `taxonomy_event` | Kuratierte Veranstaltungs-Liste mit Labels (inkl. Status, Featured-Slot, Voting-Modus, Ort/Termine, Detail-Link) |
 | `taxonomy_phase` | Kuratierte Phasen-Liste |
-| `idea_interaction` | Mitmachen + Folgen pro User |
+| `idea_interaction` | Mithacken + Folgen pro User |
 | `idea_report` | Meldungen offen/erledigt |
 | `activity_log` | Audit-Log aller Mod-Aktionen |
 | `ranking_snapshot` | Trend-Snapshots für die Rangliste |
@@ -162,7 +163,7 @@ Nach einem Restore prüfen:
 2. **Login**: kannst du dich mit deinem Mod-Account einloggen?
 3. **Postfach**: zeigt es Items?
 4. **Veranstaltungen-Tab**: ist die Liste aus dem Backup wiederhergestellt?
-5. **Versteckt-Tab**: sind die versteckten Ideen wieder als versteckt markiert?
+5. **Moderation › Inhalte verwalten**: sind die versteckten Ideen wieder als versteckt markiert?
 6. **Activity-Log**: aktuelle Einträge sichtbar?
 7. **Sync triggern** (`POST /admin/sync`) → bringt edu-sharing-Stand wieder mit Cache in Sync
 

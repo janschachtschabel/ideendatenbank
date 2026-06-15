@@ -28,19 +28,20 @@ FastAPI Backend
 
 **Wichtigste Regel**: edu-sharing ist die einzige verbindliche Datenquelle. Die
 App-DB ist nur ein Performance-Cache + Speicher für app-spezifische Zusätze
-(Mitmachen, Folgen, Reports, Versteckt-Flag, Aktivitäts-Log).
+(Mithacken, Folgen, Reports, Versteckt-Flag, Aktivitäts-Log).
 
 ## Wie wird Mod-Status erkannt?
 
-Im Backend prüft `_is_moderator()` pro Request:
+Im Backend prüft `_is_moderator()` pro Request **ausschließlich** die
+**Gruppen-Mitgliedschaft**: ist der eingeloggte User in edu-sharing Mitglied
+einer der `MODERATION_FALLBACK_GROUPS` (Default `GROUP_ALFRESCO_ADMINISTRATORS`)?
+Der dafür nötige `my_memberships`-Call verifiziert die Credentials gegen
+edu-sharing (falsches Passwort → 401 → kein Mod).
 
-1. **Bootstrap-Whitelist** — Usernames aus der `MODERATION_BOOTSTRAP_USERS`-
-   Env-Variable. Default leer. Sinnvoll als Notfall-Liste, damit du dich nie
-   aussperrst.
-2. **Group-Mitgliedschaft** — User wird in edu-sharing als Mitglied einer der
-   `MODERATION_FALLBACK_GROUPS` geführt. Default `GROUP_ALFRESCO_ADMINISTRATORS`.
-
-Wenn eine der beiden Bedingungen zutrifft → Mod.
+> Hinweis: Einen Username-Bootstrap (`MODERATION_BOOTSTRAP_USERS`) gibt es
+> bewusst **nicht** mehr. Er hätte dem aus dem Basic-Header dekodierten,
+> **ungeprüften** Usernamen vertraut — und wäre damit ein Auth-Bypass gewesen,
+> sobald gesetzt. Mod-Rechte laufen jetzt einzig über die edu-sharing-Gruppe.
 
 ### Gruppen-Mitgliedschaft prüfen
 
@@ -57,11 +58,8 @@ Antwort zeigt deine ES-Gruppen + welche davon als Mod-Gruppe konfiguriert sind.
 Im `.env`:
 
 ```ini
-# Beide Beispiele zusammen — User darf in jeder der Gruppen sein
+# Mehrere Gruppen kommasepariert — User darf in einer beliebigen davon sein
 MODERATION_FALLBACK_GROUPS=GROUP_xxx_ORG_ADMINISTRATORS,GROUP_ALFRESCO_ADMINISTRATORS
-
-# Bootstrap-User: Komma-Liste von Login-Usernames
-MODERATION_BOOTSTRAP_USERS=
 ```
 
 Nach Änderung Container/Backend-Prozess neu starten (Env wird nur beim Start
@@ -208,7 +206,7 @@ Idee verstecken                 App-DB (hidden=1)       App-DB
 Idee löschen                    ES (delete)             Sync entfernt aus Cache
 Kommentar                       ES (/comment/v1)        get_idea-Antwort
 Rating                          ES (/rating/v1)         get_idea-Antwort
-Mitmachen/Folgen                App-DB                  App-DB
+Mithacken/Folgen                App-DB                  App-DB
 Meldung                         App-DB                  App-DB
 Activity-Log                    App-DB                  App-DB
 Backup                          ZIP in /data/backups    App-UI

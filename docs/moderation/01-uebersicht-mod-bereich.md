@@ -3,33 +3,41 @@
 ## Wer sieht den Mod-Bereich?
 
 User, die in einer der konfigurierten Mod-Gruppen Mitglied sind. Default ist
-`GROUP_ALFRESCO_ADMINISTRATORS` (globale ES-Admins) + org-spezifische
-Admin-Gruppen (z.B. `GROUP_xxx_ORG_ADMINISTRATORS` der HackathOERn-Org).
+**ausschließlich** `GROUP_ALFRESCO_ADMINISTRATORS` (globale ES-Admins). Weitere
+Gruppen — z.B. org-spezifische Admin-Gruppen wie `GROUP_xxx_ORG_ADMINISTRATORS`
+der HackathOERn-Org — lassen sich optional kommasepariert ergänzen, sind aber
+**nicht** standardmäßig enthalten.
 
 Nach erfolgreichem Login erscheint im User-Menü oben rechts der zusätzliche
 Eintrag **🔧 Moderation** — Klick öffnet den Mod-Bereich.
 
 > Details zum Permission-Setup: [Kapitel 7 — Permissions & Architektur](07-permissions-architektur.md)
 
-## Die zehn Tabs im Überblick
+## Die Navigation im Überblick
+
+Oben sitzt eine klebende Pillen-Leiste mit **fünf Gruppen**. Drei davon klappen
+per ▾ ein Dropdown mit Unterpunkten auf:
 
 ```
-📊 Statistik  📥 Postfach (13)  ⚠ Meldungen  📝 Aktivität  🗂 Herausforderungen
-📅 Veranstaltungen  🎯 Phasen  👥 Moderatoren  🚫 Versteckt  💾 Backup
+📊 Statistik   📥 Postfach (13)   📁 Inhalte ▾   🛡 Moderation ▾   ⚙ System ▾
 ```
 
-| Tab | Hauptzweck | Wichtigste Aktionen |
-|---|---|---|
-| **📊 Statistik** | Übersicht aktiver Stand | Ideen-, Kommentar-, Bewertungs-Counts; Wochen-Aktivität; Pflicht-Metadaten-Backfill |
-| **📥 Postfach** | Inbox-Pflege | Idee in Sammlung referenzieren, Bulk-Move, löschen |
-| **⚠ Meldungen** | User-Reports | Idee öffnen, als erledigt markieren, Bulk-Resolve |
-| **📝 Aktivität** | Audit-Log | Filter nach Aktion/Akteur/Zeitraum, CSV-Export |
-| **🗂 Herausforderungen** | Sammlungs-Verwaltung | Anlegen, umbenennen, Vorschaubild, sortieren, löschen |
-| **📅 Veranstaltungen** | Event-Taxonomie | Anlegen, Slug + Label, Sortierung, QR-Code-Share |
-| **🎯 Phasen** | Phasen-Taxonomie | Phasen anlegen + Workflow-Reihenfolge bestimmen |
-| **👥 Moderatoren** | Liste der Mods | nur lesend — Verwaltung läuft in edu-sharing direkt |
-| **🚫 Versteckt** | Soft-Hide | versteckte Ideen einsehen + wieder anzeigen |
-| **💾 Backup** | DB-Sicherung | Backup erstellen, herunterladen, wiederherstellen |
+| Gruppe | Unterpunkt | Hauptzweck | Wichtigste Aktionen |
+|---|---|---|---|
+| **📊 Statistik** | — | Übersicht aktiver Stand | Ideen-, Kommentar-, Bewertungs-Counts; Wochen-Aktivität; Pflicht-Metadaten-Backfill |
+| **📥 Postfach** | — | Inbox-Pflege | Idee in Herausforderung referenzieren, Bulk-Move, löschen |
+| **📁 Inhalte** ▾ | Themenbereiche | Sammlungs-Verwaltung | Anlegen, umbenennen, Vorschaubild, sortieren, löschen |
+| | Veranstaltungen | Event-Taxonomie | Anlegen, Slug + Label, Sortierung, QR-Code-Share |
+| | Phasen | Phasen-Taxonomie | Phasen anlegen + Workflow-Reihenfolge bestimmen |
+| **🛡 Moderation** ▾ | Meldungen | User-Reports | Idee öffnen, einzeln als erledigt markieren |
+| | Aktivität | Audit-Log | Filter nach Aktion/Akteur/Zeitraum, CSV-Export |
+| | Inhalte verwalten | Alle Ideen + Soft-Hide | suchen, bearbeiten, verstecken/einblenden, löschen |
+| **⚙ System** ▾ | Moderatoren | Liste der Mods | nur lesend — Verwaltung läuft in edu-sharing direkt |
+| | Backup | DB-Sicherung | Backup erstellen, herunterladen, wiederherstellen |
+
+> Es gibt **keinen** eigenständigen „🚫 Versteckt"-Tab mehr (in „Inhalte
+> verwalten" aufgegangen) und **keinen** „🗂 Herausforderungen"-Tab — die
+> Sammlungs-Verwaltung heißt jetzt „Themenbereiche" unter **Inhalte**.
 
 ## Was tust du als Mod typischerweise?
 
@@ -42,9 +50,9 @@ Eintrag **🔧 Moderation** — Klick öffnet den Mod-Bereich.
 4. **Statistik** mit dem Team teilen — wachsende Themen, neue Beiträge
 
 ### Bei Bedarf
-5. **Herausforderungen** anpassen — neue Themen anlegen, alte umbenennen
-6. **Veranstaltungen** ergänzen — neue HackathOERn-Editionen, andere Events
-7. **Backup** vor größeren Operationen — und gelegentlich Off-Site sichern
+5. **Inhalte → Themenbereiche** anpassen — neue Themen anlegen, alte umbenennen
+6. **Inhalte → Veranstaltungen** ergänzen — neue HackathOERn-Editionen, andere Events
+7. **System → Backup** vor größeren Operationen — und gelegentlich Off-Site sichern
    ([siehe Kapitel 5](05-backup-restore.md))
 
 ## Wichtige Sicherheits-Hinweise

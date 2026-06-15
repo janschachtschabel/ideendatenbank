@@ -11,7 +11,8 @@ import {
   signal,
 } from '@angular/core';
 import { ApiService } from '../api.service';
-import { Idea } from '../models';
+import { Idea, PROFILE_ROLE_LABELS } from '../models';
+import { VotingService } from '../voting.service';
 import { ShareDialogComponent } from './share-dialog.component';
 
 /**
@@ -159,64 +160,6 @@ import { ShareDialogComponent } from './share-dialog.component';
       small { opacity: .7; }
     }
 
-    /* Share-Dialog — gleiche Optik wie der Event-Share im Mod-Tab */
-    .share-overlay {
-      position: fixed; inset: 0; z-index: 50;
-      background: rgba(0,0,0,.45);
-      display: flex; align-items: center; justify-content: center;
-      padding: 20px;
-    }
-    .share-box {
-      background: var(--wlo-surface, #fff);
-      border-radius: 12px; padding: 24px 28px 22px;
-      max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto;
-      box-shadow: 0 20px 60px rgba(0,0,0,.3);
-    }
-    .share-head { display: flex; justify-content: space-between;
-                   align-items: flex-start; margin-bottom: 14px; }
-    .share-head h2 { margin: 0; font-size: 1.1rem; color: var(--wlo-text); }
-    .share-head .x {
-      background: none; border: none; font-size: 1.4rem; cursor: pointer;
-      line-height: 1; color: var(--wlo-muted);
-      &:hover { color: var(--wlo-text); }
-    }
-    .share-box label { display: block; font-size: .82rem; font-weight: 600;
-                        color: var(--wlo-text); margin: 6px 0 4px; }
-    .share-link { display: flex; gap: 8px; }
-    .share-link input {
-      flex: 1; padding: 8px 12px; border: 1px solid var(--wlo-border);
-      border-radius: 6px; font-size: .85rem; background: var(--wlo-surface-2, #fff);
-      color: var(--wlo-text);
-    }
-    .share-link button {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: var(--wlo-cta-bg, var(--wlo-primary));
-      color: var(--wlo-cta-text, #fff);
-      border: none; padding: 0 14px; border-radius: 6px;
-      cursor: pointer; font-weight: 600; font-size: .85rem;
-      &:hover { background: var(--wlo-cta-bg-hover, var(--wlo-primary-600)); }
-      &.ok { background: #137333; color: #fff; }
-      svg { width: 14px; height: 14px; stroke: currentColor;
-            stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-            fill: none; }
-    }
-    .embed-snippet {
-      background: var(--wlo-bg); padding: 10px 12px; border-radius: 6px;
-      font-size: .78rem; overflow-x: auto; margin: 4px 0 6px;
-      white-space: pre-wrap; word-break: break-all; color: var(--wlo-text);
-      border: 1px solid var(--wlo-border);
-    }
-    .embed-actions { display: flex; gap: 8px; }
-    .embed-actions button {
-      background: var(--wlo-surface-2, var(--wlo-bg));
-      border: 1px solid var(--wlo-border);
-      color: var(--wlo-text); padding: 6px 12px; border-radius: 6px;
-      cursor: pointer; font-size: .82rem; font-weight: 600;
-      &:hover { border-color: var(--wlo-primary); color: var(--wlo-primary); }
-      &.ok { background: #e6f6ec; color: #137333; border-color: #b6e3c5; }
-    }
-    .share-note { font-size: .8rem; color: var(--wlo-muted);
-                   margin-top: 16px; line-height: 1.55; }
   `],
   template: `
     <div class="wrap">
@@ -291,9 +234,13 @@ import { ShareDialogComponent } from './share-dialog.component';
                   <p class="tile-desc">{{ clip(i.description, 180) }}</p>
                 }
                 <div class="tile-meta">
-                  <span class="kpi" title="Bewertung">
-                    ★ {{ i.rating_avg | number: '1.1-1' }}
-                    <small>({{ i.rating_count }})</small>
+                  <span class="kpi" [title]="voting.globalMode() === 'thumbs' ? 'Daumen hoch' : 'Bewertung'">
+                    @if (voting.globalMode() === 'thumbs') {
+                      👍 {{ i.rating_count }}
+                    } @else {
+                      ★ {{ i.rating_avg | number: '1.1-1' }}
+                      <small>({{ i.rating_count }})</small>
+                    }
                   </span>
                   <span class="kpi" title="Kommentare">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -335,6 +282,7 @@ import { ShareDialogComponent } from './share-dialog.component';
 })
 export class PublicProfileComponent implements OnChanges {
   api = inject(ApiService);
+  voting = inject(VotingService);
 
   @Input() username = '';
   @Input() apiBase = '';
@@ -343,8 +291,6 @@ export class PublicProfileComponent implements OnChanges {
   profile = signal<any | null>(null);
   error = signal<string>('');
   shareOpen = false;
-  copied = false;
-  embedCopied = false;
 
   ngOnChanges(ch: SimpleChanges) {
     // Nur setzen, wenn explizit ein Wert übergeben wurde — sonst zerlegen
@@ -355,6 +301,7 @@ export class PublicProfileComponent implements OnChanges {
   }
 
   load() {
+    this.voting.load();  // globaler Bewertungs-Modus (Sterne/Daumen)
     if (!this.username) return;
     this.profile.set(null);
     this.error.set('');
@@ -394,16 +341,7 @@ export class PublicProfileComponent implements OnChanges {
 
   roleLabel(role: string | null | undefined): string {
     if (!role) return '';
-    const map: Record<string, string> = {
-      'schule': 'Schule',
-      'hochschule': 'Hochschule',
-      'bibliothek': 'Bibliothek',
-      'ngo': 'NGO / Verein',
-      'verlag': 'Verlag / Anbieter',
-      'freie-bildung': 'Freie Bildung',
-      'sonstiges': 'Sonstiges',
-    };
-    return map[role] ?? role;
+    return PROFILE_ROLE_LABELS[role] ?? role;
   }
 
   shareUrl(): string {
@@ -411,24 +349,9 @@ export class PublicProfileComponent implements OnChanges {
     return `${base}?view=user&u=${encodeURIComponent(this.username)}`;
   }
 
-  copyShareLink() {
-    navigator.clipboard?.writeText(this.shareUrl());
-    this.copied = true;
-    setTimeout(() => (this.copied = false), 2000);
-  }
-
   embedSnippet(): string {
     const apiBase = this.api.base || '/api/v1';
     return `<ideendb-app api-base="${apiBase}" view="user" u="${this.username}"></ideendb-app>`;
   }
 
-  copyEmbed() {
-    navigator.clipboard?.writeText(this.embedSnippet());
-    this.embedCopied = true;
-    setTimeout(() => (this.embedCopied = false), 2000);
-  }
-
-  closeShare(e: MouseEvent) {
-    if (e.target === e.currentTarget) this.shareOpen = false;
-  }
 }

@@ -11,13 +11,13 @@ Acht Kacheln mit Live-Zahlen:
 | KPI | Was wird gezählt |
 |---|---|
 | **Ideen** | Anzahl Ideen im Public-Cache (ohne versteckte) |
-| **Herausforderungen** | Top-Level-Themen-Sammlungen |
-| **Herausforderungen** (Sub) | Sub-Sammlungen (Challenges) |
+| **Themenbereiche** | Top-Level-Themen-Sammlungen (Ebene 1) |
+| **Herausforderungen** | Sub-Sammlungen (Ebene 2) |
 | **Kommentare** | Total über alle Ideen |
-| **Schnitt-Bewertung** (mit Zähler) | ø-Sterne über alle bewerteten Ideen |
-| **🤝 Mitmachen** | Total „Mitmachen"-Marker |
-| **🔔 Folgen** | Total „Folgen"-Marker |
-| **⚠ Offene Meldungen** (rot wenn > 0) | Reports, die noch nicht erledigt sind |
+| **Schnitt** (mit Bewertungs-Zähler) | ø-Sterne über alle bewerteten Ideen |
+| **Mithacken** | Total „Mithacken"-Marker |
+| **Folgen** | Total „Folgen"-Marker |
+| **Offene Meldungen** (rot wenn > 0) | Reports, die noch nicht erledigt sind |
 
 ### Neue Ideen pro Woche (Chart)
 
@@ -42,13 +42,13 @@ erkennen.
 
 ### Top-Engagement-Ideen
 
-Liste der zehn aktivsten Ideen nach Rating + Kommentare + Mitmachen-Counts.
+Liste der zehn aktivsten Ideen nach Rating + Kommentare + Mithacken-Counts.
 Nützlich für Highlights in Newslettern oder Präsentationen.
 
 ### Aktivität nach Typ (30 Tage)
 
 Welche App-Aktionen wurden am häufigsten ausgeführt? Z.B. `idea_submitted`,
-`idea_moved`, `comment_posted`, `auth_failed`. Auffällige Spitzen lohnen einen
+`idea_moved`, `comment_deleted`, `auth_failed`. Auffällige Spitzen lohnen einen
 Blick ins Activity-Log.
 
 ### Pflicht-Metadaten nachpflegen
@@ -72,7 +72,7 @@ Vollständiges Audit-Log aller App-Schreibvorgänge. Liest aus der
 
 | Filter | Werte |
 |---|---|
-| **Aktion** | Dropdown mit allen vorkommenden Actions (z.B. `idea_submitted`, `idea_moved`, `idea_hidden`, `comment_posted`, `auth_failed`, `backup_created`) |
+| **Aktion** | Dropdown mit allen vorkommenden Actions (z.B. `idea_submitted`, `idea_moved`, `idea_hidden`, `comment_deleted`, `auth_failed`, `backup_created`) |
 | **Akteur (Username)** | Freitext-Filter |
 | **Zeitraum** | „Letzte 24h", „Letzte 7 Tage", „Letzte 30 Tage" |
 
@@ -98,18 +98,19 @@ Vollständiges Audit-Log aller App-Schreibvorgänge. Liest aus der
 | `idea_deleted` | Idee komplett gelöscht (vorsicht!) |
 | `idea_hidden` | Soft-Delete |
 | `idea_unhidden` | Soft-Delete zurückgenommen |
-| `comment_posted` | Neuer Kommentar |
-| `comment_deleted` | Kommentar entfernt |
+| `idea_contact_changed` | Kontakt-/Team-Angaben der Idee geändert |
+| `comment_deleted` | Kommentar entfernt (Posten läuft direkt in edu-sharing, wird nicht protokolliert) |
 | `report_submitted` | User hat eine Idee gemeldet |
 | `report_resolved` | Mod hat Meldung als erledigt markiert |
 | `phase_changed` | Idee-Phase geändert |
-| `attachment_uploaded` | Datei an Idee angehängt |
-| `attachment_deleted` | Anhang entfernt |
-| `topic_*` | Sammlungs-Aktionen (anlegen, ändern, löschen) |
-| `mod_added`/`mod_removed` | Mod-Gruppen-Verwaltung |
-| `backup_created`/`backup_restored` | Backup-Operationen |
+| `attachment_uploaded` / `attachment_deleted` / `attachment_renamed` / `attachment_replaced` | Anhang-Aktionen |
+| `team_*` | Mithacken/Team-Verwaltung (Anfrage, Annahme, Edit-Recht, Mitglied entfernt) |
+| `topic_*` / `topics_sorted` | Sammlungs-Aktionen (anlegen, ändern, löschen, Vorschau, Sortierung) |
+| `taxonomy_event_changed` / `taxonomy_phase_changed` (+ `…_deleted`) | Veranstaltungs-/Phasen-Liste gepflegt |
+| `setting_changed` | App-Einstellung geändert (z.B. Voting-Modus) |
+| `backup_created` / `backup_deleted` / `backup_restored` | Backup-Operationen |
 | `auth_failed` | Fehlgeschlagener Mod-Login-Versuch |
-| `publication_meta_backfilled` | Pflicht-Metadaten-Lauf |
+| `publication_meta_bulk_backfilled` | Pflicht-Metadaten-Lauf |
 
 ### CSV-Export
 

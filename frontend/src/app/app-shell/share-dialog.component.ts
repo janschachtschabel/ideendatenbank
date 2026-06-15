@@ -7,6 +7,15 @@ import {
   signal,
 } from '@angular/core';
 
+/** Optionales Mehrfach-Ziel: mehrere Links (je mit eigenem QR-Code) in EINEM
+ *  Dialog — z.B. „Eventseite" + „Idee einreichen". */
+export interface ShareTarget {
+  label: string;
+  url: string;
+  intro?: string;
+  qrFilename?: string;
+}
+
 /**
  * Wiederverwendbares Share-Modal: zeigt einen kopierbaren Link, einen
  * QR-Code (extern via qrserver.com — keine PII enthalten) und optional
@@ -57,6 +66,10 @@ import {
     }
     .body { padding: 18px 20px; }
     .intro { margin: 0 0 14px; font-size: .88rem; color: var(--wlo-muted); }
+    /* Mehrfach-Ziele: optisch getrennte Blöcke. */
+    .target { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--wlo-border); }
+    .target.first { padding-top: 0; margin-top: 0; border-top: none; }
+    .target-intro { margin: 2px 0 6px; font-size: .82rem; color: var(--wlo-muted); }
     label {
       display: block; margin: 12px 0 4px;
       font-size: .82rem; font-weight: 600; color: var(--wlo-text);
@@ -137,27 +150,49 @@ import {
               <p class="intro">{{ intro }}</p>
             }
 
-            <label>Direkt-Link</label>
-            <div class="link-row">
-              <input #linkInput type="text" [value]="url" readonly
-                     (click)="linkInput.select()" />
-              <button class="copy" [class.ok]="copied()" (click)="copy()">
-                {{ copied() ? '✓ Kopiert' : '📋 Kopieren' }}
-              </button>
-            </div>
-
-            <label>QR-Code</label>
-            <div class="qr-row">
-              <img [src]="qrUrl(240)" alt="QR-Code" width="180" height="180" />
-              <div class="qr-actions">
-                <a [href]="qrUrl(600)" target="_blank" rel="noopener">
-                  ↗ Hochauflösend (600×600)
-                </a>
-                <a [href]="qrUrl(600)" [attr.download]="qrFilename">
-                  ⬇ Als PNG herunterladen
-                </a>
+            @if (targets?.length) {
+              @for (t of targets; track t.label; let i = $index) {
+                <div class="target" [class.first]="i === 0">
+                  <label>{{ t.label }}</label>
+                  @if (t.intro) { <p class="target-intro">{{ t.intro }}</p> }
+                  <div class="link-row">
+                    <input #ti type="text" [value]="t.url" readonly (click)="ti.select()" />
+                    <button class="copy" [class.ok]="copiedIdx() === i" (click)="copyTarget(t.url, i)">
+                      {{ copiedIdx() === i ? '✓ Kopiert' : '📋 Kopieren' }}
+                    </button>
+                  </div>
+                  <div class="qr-row">
+                    <img [src]="qrFor(t.url, 240)" alt="QR-Code" width="150" height="150" />
+                    <div class="qr-actions">
+                      <a [href]="qrFor(t.url, 600)" target="_blank" rel="noopener">↗ Hochauflösend (600×600)</a>
+                      <a [href]="qrFor(t.url, 600)" [attr.download]="t.qrFilename || 'qr.png'">⬇ Als PNG herunterladen</a>
+                    </div>
+                  </div>
+                </div>
+              }
+            } @else {
+              <label>Direkt-Link</label>
+              <div class="link-row">
+                <input #linkInput type="text" [value]="url" readonly
+                       (click)="linkInput.select()" />
+                <button class="copy" [class.ok]="copied()" (click)="copy()">
+                  {{ copied() ? '✓ Kopiert' : '📋 Kopieren' }}
+                </button>
               </div>
-            </div>
+
+              <label>QR-Code</label>
+              <div class="qr-row">
+                <img [src]="qrUrl(240)" alt="QR-Code" width="180" height="180" />
+                <div class="qr-actions">
+                  <a [href]="qrUrl(600)" target="_blank" rel="noopener">
+                    ↗ Hochauflösend (600×600)
+                  </a>
+                  <a [href]="qrUrl(600)" [attr.download]="qrFilename">
+                    ⬇ Als PNG herunterladen
+                  </a>
+                </div>
+              </div>
+            }
 
             @if (embedSnippet) {
               <div class="embed">
@@ -179,18 +214,31 @@ export class ShareDialogComponent {
   @Input() title = 'Teilen';
   @Input() intro: string | null = null;
   @Input() url = '';
+  /** Optional: mehrere Links (je mit QR) statt eines einzelnen. */
+  @Input() targets: ShareTarget[] | null = null;
   @Input() embedSnippet: string | null = null;
   @Input() qrFilename = 'qr.png';
   @Output() closed = new EventEmitter<void>();
 
   copied = signal(false);
+  copiedIdx = signal<number | null>(null);
   embedCopied = signal(false);
   private copyTimer?: number;
   private embedTimer?: number;
 
+  qrFor(url: string, size: number): string {
+    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(url)}`;
+  }
+
   qrUrl(size: number): string {
-    const data = encodeURIComponent(this.url);
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}`;
+    return this.qrFor(this.url, size);
+  }
+
+  copyTarget(url: string, idx: number) {
+    navigator.clipboard?.writeText(url);
+    this.copiedIdx.set(idx);
+    if (this.copyTimer) window.clearTimeout(this.copyTimer);
+    this.copyTimer = window.setTimeout(() => this.copiedIdx.set(null), 2000);
   }
 
   copy() {

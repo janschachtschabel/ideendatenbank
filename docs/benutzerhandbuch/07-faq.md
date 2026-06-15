@@ -4,7 +4,8 @@
 
 ### Brauche ich ein Konto, um zu lesen?
 Nein. Stöbern, Suchen, Filtern, Detail-Ansichten — alles offen für anonyme
-Besucher. Auch Bewerten ist möglich (pro Browser/Cookie gezählt).
+Besucher. Zum **Bewerten, Kommentieren, Folgen und Mithacken** ist allerdings
+eine Anmeldung nötig.
 
 ### Was kostet die Nutzung?
 Nichts. Die Ideendatenbank, das WLO-Konto und das edu-sharing-Repo sind alle
@@ -38,34 +39,40 @@ Lizenz braucht, kann die nachträglich im edu-sharing-Repo direkt setzen — ode
 das Mod-Team bitten.
 
 ### Was ist „Phase"?
-Stadium der Idee:
+Stadium der Idee. Die **Standard-Phasen** sind z.B.:
 1. **Anregung** — erste Skizze
 2. **Pitch-bereit** — ausformuliert genug für eine Hackathon-Präsentation
 3. **In Umsetzung** — wird gerade gebaut
 4. **Abgeschlossen** — fertig (Prototyp, Konzept, Dokument)
 5. **Archiviert** — nicht weiterverfolgt
 
-Owner können nur **eine Stufe weiter** schalten — Sprünge oder Rückwärts sind
-dem Mod-Team vorbehalten.
+Das ist nur die Voreinstellung: Welche Phasen es gibt und in welcher Reihenfolge,
+legt das Mod-Team frei fest (Phasen lassen sich umbenennen, ergänzen oder
+entfernen). Owner können ihre Idee nur **eine Stufe weiter** schalten — Sprünge,
+Rückwärts oder Archivieren sind dem Mod-Team vorbehalten.
 
 ### Was ist „Veranstaltung"?
 Kuratierte HackathOERn-Editionen (HackathOERn 1, 2, 3 …) oder andere Events,
 denen die Idee thematisch zugeordnet wurde. Eine Idee kann mehreren
 Veranstaltungen angehören. Erscheint auf der Veranstaltungs-Hub-Seite.
 
-## Mitmachen, Folgen, Bewerten
+## Mithacken, Folgen, Bewerten
 
 ### Sehen andere, was ich bewertet habe?
-Nein. Sterne werden anonym aggregiert — sichtbar ist nur der Durchschnitt + die
-Stimmenzahl.
+Nein. Bewertungen werden anonym aggregiert — sichtbar ist nur das Ergebnis
+(Sterne-Durchschnitt bzw. Anzahl Daumen) plus die Stimmenzahl. Welcher
+Bewertungs-Modus gilt (Sterne oder Daumen), stellt das Mod-Team ein; die
+Bewertung kann auch pausiert/geschlossen sein.
 
 ### Sehen andere, welchen Ideen ich folge?
 Nein, „Folgen" ist privat. Nur du siehst die Liste in deinem Profil.
 
-### Was passiert, wenn ich „Mitmachen" klicke?
-Du erscheinst in der Avatar-Reihe der Idee als interessierte Person. Andere
-können dich anschreiben (über dein WLO-Profil), wenn sie ein Team
-zusammenstellen.
+### Was passiert, wenn ich „Ich will mithacken" klicke?
+Du stellst eine Mithack-Anfrage an die Ideengeber:in. Sie muss dich erst
+**bestätigen** — bis dahin steht deine Teilnahme auf „wartet auf Bestätigung".
+Nach der Annahme erscheinst du in der Mithack-Liste der Idee; die Ideengeber:in
+kann dir außerdem das Recht geben, die Idee mitzubearbeiten. Anmeldung
+erforderlich.
 
 ### Werde ich per E-Mail benachrichtigt?
 Nein, derzeit nur über das Notification-Center in der App („Mein Bereich → Was
@@ -76,14 +83,15 @@ implementiert.
 
 ### Was ist öffentlich?
 - Idee-Titel + Beschreibung + Anhänge
-- Mein Login-Username (als Autor / bei Kommentaren)
-- Bewertungs-Durchschnitt + Stimmzahl
-- „Mitmachen"-Avatars
+- Mein Anzeigename bzw. Login-Username (als Autor / bei Kommentaren)
+- Meine öffentlichen Profil-Felder (Bio, Website, Rolle), falls gepflegt
+- Bewertungs-Ergebnis + Stimmzahl
+- Namen der bestätigten Mithackenden
 
 ### Was ist privat?
-- Mein konkret abgegebener Stern
+- Meine konkret abgegebene Bewertung (Stern bzw. Daumen)
 - Meine „Folgen"-Liste
-- Mein Passwort / E-Mail / Profil-Details aus WLO
+- Mein Passwort / E-Mail aus WLO
 - Notification-Read-Status
 
 Komplette Datenschutzerklärung über Footer → **„Datenschutz"** in der App.

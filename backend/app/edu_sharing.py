@@ -61,13 +61,6 @@ class EduSharingClient:
         return r.text
 
     # ---- Collections ----
-    async def get_collection(self, node_id: str, *, auth_header: str | None = None) -> dict:
-        return await self._req(
-            "GET",
-            f"/collection/v1/collections/-home-/{node_id}",
-            auth_header=auth_header,
-        )
-
     async def collection_subcollections(
         self,
         node_id: str,
@@ -137,6 +130,16 @@ class EduSharingClient:
         )
 
     # ---- IAM / Memberships / Group-Mitglieder ----
+    async def my_profile(self, *, auth_header: str) -> dict:
+        """Eigenes Personen-Profil (firstName/lastName/email) des
+        eingeloggten Users. Wird genutzt, um statt des reinen Login-
+        Usernamens den echten Namen anzuzeigen."""
+        return await self._req(
+            "GET",
+            "/iam/v1/people/-home-/-me-",
+            auth_header=auth_header,
+        )
+
     async def my_memberships(self, *, auth_header: str) -> dict:
         # `maxItems` ohne Wert paginiert auf 10 — User in vielen Gruppen
         # liefen durch das Cap, dann fehlte die Admin-Gruppe in der Antwort.
@@ -144,16 +147,6 @@ class EduSharingClient:
             "GET",
             "/iam/v1/people/-home-/-me-/memberships",
             params={"maxItems": 200, "skipCount": 0},
-            auth_header=auth_header,
-        )
-
-    async def search_people(
-        self, pattern: str, max_items: int = 25, *, auth_header: str | None = None
-    ) -> dict:
-        return await self._req(
-            "GET",
-            "/iam/v1/people/-home-",
-            params={"pattern": pattern, "maxItems": max_items},
             auth_header=auth_header,
         )
 
@@ -171,20 +164,6 @@ class EduSharingClient:
             "GET",
             f"/iam/v1/groups/-home-/{group}/members",
             params={"maxItems": max_items},
-            auth_header=auth_header,
-        )
-
-    async def add_group_member(self, group: str, member: str, *, auth_header: str) -> Any:
-        return await self._req(
-            "PUT",
-            f"/iam/v1/groups/-home-/{group}/members/{member}",
-            auth_header=auth_header,
-        )
-
-    async def remove_group_member(self, group: str, member: str, *, auth_header: str) -> Any:
-        return await self._req(
-            "DELETE",
-            f"/iam/v1/groups/-home-/{group}/members/{member}",
             auth_header=auth_header,
         )
 
@@ -267,38 +246,6 @@ class EduSharingClient:
         return await self._req(
             "DELETE",
             f"/node/v1/nodes/-home-/{node_id}",
-            auth_header=auth_header,
-        )
-
-    async def set_node_permission(
-        self,
-        node_id: str,
-        *,
-        username: str,
-        permission: str = "Coordinator",
-        auth_header: str | None = None,
-    ) -> Any:
-        """Grants `permission` (default: Coordinator = full rights) to a USER
-        on a node. Used after a guest-created idea so the actual submitter can
-        edit / delete it later. Caller must have ChangePermissions on the node
-        (Owner = guest hat das automatisch)."""
-        body = {
-            "inherited": True,
-            "permissions": [
-                {
-                    "authority": {
-                        "authorityName": username,
-                        "authorityType": "USER",
-                    },
-                    "permissions": [permission],
-                }
-            ],
-        }
-        return await self._req(
-            "POST",
-            f"/node/v1/nodes/-home-/{node_id}/permissions",
-            json=body,
-            params={"sendMail": "false", "sendCopy": "false"},
             auth_header=auth_header,
         )
 
@@ -476,23 +423,6 @@ class EduSharingClient:
             "PUT",
             f"/node/v1/nodes/-home-/{node_id}/metadata",
             json=properties,
-            auth_header=auth_header,
-        )
-
-    async def move_node(
-        self, source_id: str, target_parent_id: str, *, auth_header: str | None = None
-    ) -> dict:
-        """RELOCATE: Move a node to become a child of target_parent_id.
-        edu-sharing signature: POST /children/_move?source={sourceId} on the
-        TARGET parent. Returns NodeEntry.
-
-        Achtung: zerstört die Original-Container-Beziehung. Für das
-        HackathOERn-Pattern (Original bleibt in Inbox, Sammlung verlinkt
-        per Reference) → siehe `add_collection_reference()`."""
-        return await self._req(
-            "POST",
-            f"/node/v1/nodes/-home-/{target_parent_id}/children/_move",
-            params={"source": source_id},
             auth_header=auth_header,
         )
 

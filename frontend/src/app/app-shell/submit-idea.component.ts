@@ -18,6 +18,14 @@ import { TaxonomyEntry, Topic } from '../models';
     input, textarea, select { width: 100%; border: 1px solid var(--wlo-border); border-radius: 8px;
                               padding: 10px 12px; box-sizing: border-box; font: inherit; margin-bottom: 18px; background: var(--wlo-surface, #fff); }
     textarea { min-height: 150px; resize: vertical; }
+    /* Hinweiszeile direkt unter einem Feld (zieht den Textarea-Abstand hoch). */
+    .field-hint { display: block; margin: -12px 0 18px; font-size: .82rem;
+                  color: var(--wlo-muted); line-height: 1.45;
+                  strong { color: var(--wlo-text); } }
+    /* Einwilligungs-Checkbox (Kontaktdaten) — Checkbox + Fließtext nebeneinander. */
+    .consent { display: flex; gap: 9px; align-items: flex-start; margin: 0 0 18px;
+               font-weight: 400; font-size: .85rem; color: var(--wlo-text); line-height: 1.45;
+               input { width: auto; margin: 2px 0 0; flex: 0 0 auto; } }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     @media (max-width: 600px) { .row { grid-template-columns: 1fr; } }
     .btn { background: var(--wlo-accent, #f5b600); color: #1a2235; border: none; padding: 12px 28px;
@@ -26,6 +34,13 @@ import { TaxonomyEntry, Topic } from '../models';
            &:disabled { opacity: .6; cursor: not-allowed; } }
     .notice { background: var(--wlo-primary-soft, #e6edf7); border-left: 3px solid var(--wlo-primary); padding: 12px 16px;
               border-radius: 4px; margin-bottom: 20px; font-size: .9rem; color: var(--wlo-text); }
+    /* Einklappbarer Prozess-Hinweis (Ablauf nach der Einreichung). */
+    .process-notice { background: var(--wlo-bg, #f4f6f9); border: 1px solid var(--wlo-border);
+                      border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; font-size: .88rem;
+                      summary { cursor: pointer; font-weight: 600; color: var(--wlo-text); }
+                      ul { margin: 10px 0 2px; padding-left: 20px; color: var(--wlo-text); line-height: 1.5; }
+                      li { margin-bottom: 6px; }
+                      strong { color: var(--wlo-text); } }
     .warning { background: var(--wlo-accent-soft, #fff8db); border-left: 3px solid var(--wlo-accent); padding: 12px 16px;
                border-radius: 4px; margin-bottom: 20px; font-size: .9rem; color: #5c4a00; }
     .success { background: #e6f4ea; border-left: 3px solid #1a7f37; padding: 14px 18px;
@@ -143,10 +158,29 @@ import { TaxonomyEntry, Topic } from '../models';
           </div>
         }
 
+        <details class="process-notice">
+          <summary>So geht's mit deiner Idee weiter</summary>
+          <ul>
+            <li>Das HackathOERn-Team <strong>prüft</strong> deine Idee redaktionell
+              und <strong>veröffentlicht</strong> sie dann sichtbar in der Datenbank —
+              zugeordnet zu Themenbereich &amp; Herausforderung.</li>
+            <li>Interessierte können sich als <strong>Mithackende</strong> eintragen
+              („Mithacken").</li>
+            <li>Community &amp; HackathOERn-Gremium bewerten die <strong>Relevanz
+              per Voting</strong>.</li>
+            <li>Relevante Ideen können bei Veranstaltungen <strong>gepitcht &amp;
+              gehackt</strong> werden (Ausschreibung auf Start- &amp; Eventseite;
+              bei großer Nachfrage entscheiden Relevanz &amp; inhaltliche Passung
+              zum Hackathon-Thema).</li>
+            <li>Ein <strong>Austausch mit dem Team</strong> ist jederzeit möglich —
+              gib dafür idealerweise unten einen Kontakt an.</li>
+          </ul>
+        </details>
+
         <label>Titel *</label>
         <input [(ngModel)]="title" placeholder="Kurzer, einprägsamer Name der Idee" required maxlength="150" />
 
-        <label>Bereich / Herausforderung</label>
+        <label>Themenbereich / Herausforderung</label>
         <select [(ngModel)]="topicId">
           <option value="">— bitte wählen —</option>
           @for (t of challenges; track t.id) {
@@ -156,6 +190,48 @@ import { TaxonomyEntry, Topic } from '../models';
 
         <label>Beschreibung</label>
         <textarea [(ngModel)]="description" [placeholder]="placeholderText"></textarea>
+        <small class="field-hint">
+          Tipp: Du kannst hier auch weiterführende <strong>Links/URLs</strong>
+          einfügen (z.B. zu Demos, Dokumenten oder Quellen) — zusätzlich zum
+          Link-Feld unten.
+        </small>
+
+        <div class="row">
+          <div>
+            <label>Vorschaubild <small style="font-weight:400; opacity:.6">(optional)</small></label>
+            <input type="file" accept="image/*" (change)="onPreviewPick($event)" />
+            @if (previewFile) {
+              <small style="color: var(--wlo-muted); display:block; margin-top:-6px">
+                {{ previewFile.name }} · {{ formatSize(previewFile.size) }}
+                <button type="button" class="link-btn" (click)="previewFile=null">entfernen</button>
+              </small>
+            }
+          </div>
+          <div>
+            <label>Datei-Anhänge
+              <small style="font-weight:400; opacity:.6">(optional, bis zu {{ maxAttachments }})</small>
+            </label>
+            <input type="file" multiple (change)="onFilePick($event)"
+                   [disabled]="contentFiles.length >= maxAttachments" />
+            @for (f of contentFiles; track f.name + f.size; let i = $index) {
+              <small style="color: var(--wlo-muted); display:block; margin-top:-2px">
+                {{ f.name }} · {{ formatSize(f.size) }}
+                <button type="button" class="link-btn" (click)="removeAttachment(i)">entfernen</button>
+              </small>
+            }
+            @if (contentFiles.length >= maxAttachments) {
+              <small style="color: var(--wlo-muted); display:block; margin-top:2px">
+                Maximal {{ maxAttachments }} Anhänge beim Einreichen — weitere später über „Bearbeiten" hinzufügen.
+              </small>
+            }
+          </div>
+        </div>
+        <small style="color: var(--wlo-muted); margin-top:-4px; display:block">
+          Anhänge und Vorschaubild werden an die Idee gehängt. Jeder Anhang ist ein
+          eigenes Dokument und lässt sich später einzeln austauschen oder entfernen,
+          ohne die Idee selbst zu verändern. Weitere kannst Du nach dem Anlegen über
+          „Bearbeiten" ergänzen.
+        </small>
 
         <div class="row">
           <div>
@@ -216,32 +292,26 @@ import { TaxonomyEntry, Topic } from '../models';
         <label>Schlagwörter (Komma-getrennt)</label>
         <input [(ngModel)]="keywords" placeholder="z.B. Metadaten, KI, Barrierefreiheit" />
 
-        <div class="row">
-          <div>
-            <label>Vorschaubild <small style="font-weight:400; opacity:.6">(optional)</small></label>
-            <input type="file" accept="image/*" (change)="onPreviewPick($event)" />
-            @if (previewFile) {
-              <small style="color: var(--wlo-muted); display:block; margin-top:-6px">
-                {{ previewFile.name }} · {{ formatSize(previewFile.size) }}
-                <button type="button" class="link-btn" (click)="previewFile=null">entfernen</button>
-              </small>
-            }
-          </div>
-          <div>
-            <label>Datei-Anhang <small style="font-weight:400; opacity:.6">(optional)</small></label>
-            <input type="file" (change)="onFilePick($event)" />
-            @if (contentFile) {
-              <small style="color: var(--wlo-muted); display:block; margin-top:-6px">
-                {{ contentFile.name }} · {{ formatSize(contentFile.size) }}
-                <button type="button" class="link-btn" (click)="contentFile=null">entfernen</button>
-              </small>
-            }
-          </div>
-        </div>
-        <small style="color: var(--wlo-muted); margin-top:-4px; display:block">
-          Datei und Vorschaubild werden direkt an die Idee angehängt. Weitere
-          Materialien kannst Du nach dem Anlegen über die Anhänge-Sammlung ergänzen.
+        <label>Kontakt für Rückfragen <small style="font-weight:400; opacity:.6">(optional)</small></label>
+        <input [(ngModel)]="contact" type="text" maxlength="200"
+               placeholder="E-Mail oder Link — z.B. name@uni.de" />
+        <small class="field-hint">
+          Gedacht für <strong>Rückfragen &amp; Mithackende</strong>. Wird nur
+          gespeichert und neben deiner Idee angezeigt, wenn du unten zustimmst —
+          und ist <strong>nur für eingeloggte Nutzer:innen</strong> sichtbar.
+          Ohne Kontakt sind keine Rückfragen möglich; bei Unklarheiten kann eine
+          Idee dann ggf. nicht berücksichtigt werden.
         </small>
+        @if (contact.trim()) {
+          <label class="consent">
+            <input type="checkbox" [(ngModel)]="contactConsent" />
+            <span>Ich willige ein, dass mein Kontakt zu diesem Zweck gespeichert
+              und eingeloggten Nutzer:innen neben meiner Idee angezeigt wird.
+              Die Einwilligung ist jederzeit widerrufbar (siehe
+              <a [href]="privacyHref()" target="_blank" rel="noopener">Datenschutzerklärung</a>).</span>
+          </label>
+        }
+
 
         @if (uploadStatus) {
           <div class="status-line">{{ uploadStatus }}</div>
@@ -288,6 +358,9 @@ export class SubmitIdeaComponent implements OnInit {
 
   @Input() apiBase = API_BASE_DEFAULT;
   @Input() presetEvent: string | null = null;
+  /** Vorausgewählte Herausforderung (z.B. aus der Mitmach-Kachel einer leeren
+   *  Herausforderung). Wird gesetzt, sobald die Auswahlliste geladen ist. */
+  @Input() presetTopic: string | null = null;
   @Output() submitted = new EventEmitter<void>();
 
   challenges: Topic[] = [];
@@ -300,6 +373,8 @@ export class SubmitIdeaComponent implements OnInit {
   author = '';
   projectUrl = '';
   keywords = '';
+  contact = '';
+  contactConsent = false;
   topicId = '';
   phase = '';
   event = '';  // wird automatisch gesynced auf erstes selectedEvents
@@ -332,15 +407,24 @@ export class SubmitIdeaComponent implements OnInit {
   error = '';
   uploadStatus = '';
   previewFile: File | null = null;
-  contentFile: File | null = null;
+  /** Mehrere Datei-Anhänge beim Einreichen (jeweils ein eigenes Seriendokument).
+   *  Begrenzt auf maxAttachments — weitere später über „Bearbeiten". */
+  contentFiles: File[] = [];
+  readonly maxAttachments = 4;
 
   // Mathe-Captcha — nur für anonyme Submits. Eingeloggte User sehen das
   // Feld nicht und schicken die Felder leer (Backend prüft dann nichts).
   captchaToken = '';
   captchaQuestion = '';
-  captchaAnswer: string = '';
+  captchaAnswer = '';
 
   isLoggedIn(): boolean { return this.api.hasCredentials(); }
+
+  /** Link zur Datenschutzerklärung (neuer Tab) — gleiche App, View 'privacy'. */
+  privacyHref(): string {
+    const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+    return `${base}?view=privacy`;
+  }
 
   loadCaptcha() {
     if (this.isLoggedIn()) return;
@@ -363,13 +447,19 @@ export class SubmitIdeaComponent implements OnInit {
     '• Welches Problem adressiert die Idee?\n' +
     '• Wie sieht der Lösungsansatz aus?\n' +
     '• Wer profitiert davon?\n' +
-    '• Was wird zur Umsetzung gebraucht?';
+    '• Was wird zur Umsetzung gebraucht?\n' +
+    '• Weiterführende Links/Quellen? (URLs kannst du direkt hier einfügen)';
 
   ngOnInit() {
     this.api.setBase(this.apiBase);
     this.api.topics().subscribe((ts) => {
       this.topicsById = Object.fromEntries(ts.map((t) => [t.id, t]));
       this.challenges = ts.filter((t) => t.parent_id); // only challenge-level
+      // Vorauswahl einer Herausforderung (Mitmach-Kachel). Nur übernehmen,
+      // wenn es eine wählbare (L2-)Herausforderung ist.
+      if (this.presetTopic && this.challenges.some((t) => t.id === this.presetTopic)) {
+        this.topicId = this.presetTopic;
+      }
     });
     this.api.listPhases().subscribe((ps) => (this.phases = ps));
     // Nur live-Events fürs Submit-Dropdown; archivierte werden im
@@ -411,7 +501,18 @@ export class SubmitIdeaComponent implements OnInit {
 
   onFilePick(ev: Event) {
     const input = ev.target as HTMLInputElement;
-    this.contentFile = input.files?.[0] || null;
+    const picked = Array.from(input.files || []);
+    for (const f of picked) {
+      if (this.contentFiles.length >= this.maxAttachments) break;
+      // Duplikate (gleicher Name + Größe) überspringen
+      if (this.contentFiles.some((x) => x.name === f.name && x.size === f.size)) continue;
+      this.contentFiles.push(f);
+    }
+    input.value = '';  // erlaubt erneutes Auswählen weiterer Dateien
+  }
+
+  removeAttachment(i: number) {
+    this.contentFiles.splice(i, 1);
   }
 
   formatSize(bytes: number): string {
@@ -458,15 +559,21 @@ export class SubmitIdeaComponent implements OnInit {
         events: Array.from(this.selectedEvents),
         captcha_token: this.isLoggedIn() ? null : this.captchaToken,
         captcha_answer: this.isLoggedIn() ? null : String(this.captchaAnswer).trim(),
+        contact: this.contact.trim() || null,
+        contact_consent: this.contactConsent,
       })
       .subscribe({
         next: async (r) => {
           const nodeId = r.node_id;
           // Optional: file + preview hochladen, sequenziell (Status anzeigen)
           try {
-            if (this.contentFile && nodeId) {
-              this.uploadStatus = 'Datei wird hochgeladen…';
-              await this.api.uploadIdeaContent(nodeId, this.contentFile).toPromise();
+            if (this.contentFiles.length && nodeId) {
+              // Jede Datei als eigenes Seriendokument (Child-IO) anhängen —
+              // nie als Primär-Content der Idee.
+              for (let idx = 0; idx < this.contentFiles.length; idx++) {
+                this.uploadStatus = `Anhang ${idx + 1}/${this.contentFiles.length} wird hochgeladen…`;
+                await this.api.uploadAttachment(nodeId, this.contentFiles[idx]).toPromise();
+              }
             }
             if (this.previewFile && nodeId) {
               this.uploadStatus = 'Vorschaubild wird hochgeladen…';
@@ -506,8 +613,10 @@ export class SubmitIdeaComponent implements OnInit {
     this.description = '';
     this.keywords = '';
     this.projectUrl = '';
+    this.contact = '';
+    this.contactConsent = false;
     this.previewFile = null;
-    this.contentFile = null;
+    this.contentFiles = [];
     // File-Inputs visuell zurücksetzen (clear ist bei <input type="file"> tricky)
     document.querySelectorAll<HTMLInputElement>('input[type="file"]').forEach((el) => (el.value = ''));
     // Frisches Captcha für eventuelle Folge-Einreichung

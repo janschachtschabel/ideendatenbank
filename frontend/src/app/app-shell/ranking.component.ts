@@ -22,6 +22,9 @@ interface RankItem {
   prev_rank: number | null;
   delta: number | null;
   score: number;
+  /** Verfallsgewichteter Score (aktuell) bzw. kumulative Gesamtsumme. */
+  score_decay?: number;
+  score_absolute?: number;
   idea: Idea | null;
   history: { at: string; score: number; rank: number }[];
 }
@@ -93,6 +96,100 @@ interface RankItem {
       .dot { display: inline-block; width: 10px; height: 10px;
              border-radius: 50%; margin-right: 6px;
              vertical-align: middle; }
+    }
+
+    /* Top-3 horizontale Balkengrafik — Balkenfarbe = Marken-Blau des Themes,
+       Zahl weiß im Balken (immer gut lesbar). */
+    .bars { display: flex; flex-direction: column; gap: 14px; }
+    .bar-row { cursor: pointer; }
+    .bar-label {
+      display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;
+      font-size: .9rem;
+      .b-rank { font-weight: 800; color: var(--wlo-primary); font-variant-numeric: tabular-nums; }
+      .b-title { font-weight: 600; color: var(--wlo-text);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    }
+    .bar-track {
+      position: relative; border-radius: 8px; height: 32px; overflow: hidden;
+      /* Hilfslinien bei 25/50/75 % hinter dem Balken (im unbefüllten Bereich
+         sichtbar) — erleichtert das Ablesen der Anteile. */
+      background:
+        repeating-linear-gradient(to right,
+          transparent 0, transparent calc(25% - 1px),
+          var(--wlo-border, #d8dde6) calc(25% - 1px), var(--wlo-border, #d8dde6) 25%),
+        var(--wlo-bg, #f4f6f9);
+    }
+    .bar-fill {
+      position: relative; height: 100%; border-radius: 8px; min-width: 46px;
+      background: var(--wlo-cta-bg, #27ABE2);
+      display: flex; align-items: center; justify-content: flex-end;
+      padding-right: 12px; transition: width .35s ease;
+    }
+    .bar-val {
+      font-size: .9rem; font-weight: 700; color: var(--wlo-cta-text, #fff);
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    /* Skala unter den Balken: 0/25/50/75/100 %, gleichmäßig verteilt. */
+    .bar-scale {
+      display: flex; justify-content: space-between; margin-top: 8px;
+      font-size: .72rem; color: var(--wlo-muted); font-variant-numeric: tabular-nums;
+    }
+    .bar-scale-note {
+      margin-top: 3px; font-size: .72rem; color: var(--wlo-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* MD3-Filterpillen mit Dropdown */
+    .fpill-wrap { position: relative; }
+    .fpill {
+      display: inline-flex; align-items: center; gap: 7px; height: 36px;
+      padding: 0 14px; border-radius: 8px; font: inherit; font-size: .9rem;
+      border: 1px solid var(--wlo-border, #d8dde6); background: var(--wlo-surface, #fff);
+      color: var(--wlo-text, #1a2334); cursor: pointer;
+      transition: background .12s, border-color .12s;
+      .ico { width: 15px; height: 15px; opacity: .7; }
+      .fval { font-weight: 700; color: var(--wlo-primary); }
+      .caret { opacity: .55; font-size: .8em; }
+      &:hover { background: var(--wlo-bg, #f4f6f9); }
+      &.active { background: var(--wlo-primary-soft, #e6edf7); border-color: var(--wlo-primary); }
+    }
+    .fmenu {
+      position: absolute; top: calc(100% + 5px); left: 0; z-index: 30; min-width: 210px;
+      background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border);
+      border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.16);
+      padding: 6px; display: flex; flex-direction: column; gap: 2px;
+      &.fmenu-wide { min-width: 280px; }
+      button {
+        text-align: left; background: none; border: none; padding: 9px 12px;
+        border-radius: 8px; cursor: pointer; font: inherit; font-size: .9rem;
+        color: var(--wlo-text, #1a2334);
+        &:hover { background: var(--wlo-bg, #f4f6f9); }
+        &.sel { background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary); font-weight: 600; }
+        small { display: block; font-weight: 400; font-size: .78rem;
+                color: var(--wlo-muted); margin-top: 1px; }
+      }
+    }
+    .fmenu-backdrop { position: fixed; inset: 0; z-index: 25; }
+
+    /* Transparenz-Box zum Verfall (Seitenende) */
+    .decay-doc {
+      margin-top: 26px; padding: 16px 20px;
+      background: var(--wlo-bg, #f4f6f9);
+      border: 1px solid var(--wlo-border); border-radius: 12px;
+      color: var(--wlo-text); font-size: .88rem; line-height: 1.5;
+      h4 { margin: 0 0 8px; display: flex; align-items: center; gap: 7px;
+           font-size: 1rem; color: var(--wlo-text);
+           svg { color: var(--wlo-primary); } }
+      p { margin: 0 0 10px; color: var(--wlo-muted); }
+      code { background: var(--wlo-surface, #fff); padding: 1px 5px;
+             border-radius: 4px; font-size: .85em; }
+      .decay-note { font-size: .82rem; }
+    }
+    .decay-table {
+      border-collapse: collapse; margin: 4px 0 12px; font-size: .85rem;
+      th, td { text-align: left; padding: 4px 18px 4px 0; color: var(--wlo-text); }
+      th { color: var(--wlo-muted); font-weight: 600; border-bottom: 1px solid var(--wlo-border); }
+      td { font-variant-numeric: tabular-nums; }
     }
 
     .rank-list {
@@ -214,49 +311,87 @@ interface RankItem {
     }
   `],
   template: `
+    @if (ratingBanner(); as msg) {
+      <div style="background: var(--wlo-accent-soft, #fff8db); color:#5c4a00;
+                  border:1px solid var(--wlo-border); border-radius:8px;
+                  padding:10px 14px; margin-bottom:14px; font-size:.9rem;">{{ msg }}</div>
+    }
     <div class="snapshot-line">
+      Liste live · Trend-Snapshots
       @if (data()?.snapshot_at) {
-        Letzter Snapshot: {{ formatDate(data()!.snapshot_at!) }}
-      } @else { Noch kein Snapshot vorhanden. }
+        (letzter: {{ formatDate(data()!.snapshot_at!) }}, {{ snapshotCount() }} gespeichert)
+      } @else { noch keine gespeichert. }
     </div>
+    @if (menuOpen()) { <div class="fmenu-backdrop" (click)="menuOpen.set(null)"></div> }
     <div class="controls">
-      <div class="seg">
-        <button [class.on]="sortKey()==='rating'"   (click)="setSort('rating')">
-          <svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2" stroke-linecap="round"
-               stroke-linejoin="round" aria-hidden="true">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
+      <!-- MD3-Filterpille: Sortierung -->
+      <div class="fpill-wrap">
+        <button class="fpill" [class.active]="sortKey() !== 'rating'"
+                (click)="menuOpen.set(menuOpen()==='sort' ? null : 'sort')">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/>
+            <line x1="10" y1="18" x2="14" y2="18"/>
           </svg>
-          Bewertung
+          Sortierung: <span class="fval">{{ sortLabel() }}</span>
+          <span class="caret">▾</span>
         </button>
-        <button [class.on]="sortKey()==='comments'" (click)="setSort('comments')">
-          <svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2" stroke-linecap="round"
-               stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-          Kommentare
-        </button>
-        <button [class.on]="sortKey()==='interest'" (click)="setSort('interest')">
-          <svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2" stroke-linecap="round"
-               stroke-linejoin="round" aria-hidden="true">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-          Mitmachen
-        </button>
+        @if (menuOpen()==='sort') {
+          <div class="fmenu" role="menu">
+            <button [class.sel]="sortKey()==='rating'" (click)="setSort('rating')">{{ mode()==='thumbs' ? '👍' : '★' }} Bewertung</button>
+            <button [class.sel]="sortKey()==='comments'" (click)="setSort('comments')">💬 Kommentare</button>
+            <button [class.sel]="sortKey()==='interest'" (click)="setSort('interest')">👥 Mithacken</button>
+          </div>
+        }
       </div>
 
+      <!-- MD3-Filterpille: Veranstaltung -->
       @if (events?.length) {
-        <div class="seg">
-          <button [class.on]="!eventFilter()" (click)="setEvent(null)">Alle Events</button>
-          @for (e of events; track e.value) {
-            <button [class.on]="eventFilter() === e.value" (click)="setEvent(e.value)">
-              {{ eventLabel(e.value) }}
-            </button>
+        <div class="fpill-wrap">
+          <button class="fpill" [class.active]="!!eventFilter()"
+                  (click)="menuOpen.set(menuOpen()==='event' ? null : 'event')">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            Veranstaltung: <span class="fval">{{ eventFilter() ? eventLabel(eventFilter()!) : 'Alle' }}</span>
+            <span class="caret">▾</span>
+          </button>
+          @if (menuOpen()==='event') {
+            <div class="fmenu" role="menu">
+              <button [class.sel]="!eventFilter()" (click)="setEvent(null)">Alle Events</button>
+              @for (e of events; track e.value) {
+                <button [class.sel]="eventFilter()===e.value" (click)="setEvent(e.value)">
+                  {{ eventLabel(e.value) }}
+                </button>
+              }
+            </div>
+          }
+        </div>
+      }
+
+      <!-- MD3-Filterpille: Wertung (mit/ohne Verfall) -->
+      @if (decayAvailable()) {
+        <div class="fpill-wrap">
+          <button class="fpill" [class.active]="basis()==='absolute'"
+                  (click)="menuOpen.set(menuOpen()==='basis' ? null : 'basis')">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2v20"/><path d="M2 7l10-5 10 5"/><path d="M2 17l10 5 10-5"/>
+            </svg>
+            Wertung: <span class="fval">{{ basisLabel() }}</span>
+            <span class="caret">▾</span>
+          </button>
+          @if (menuOpen()==='basis') {
+            <div class="fmenu fmenu-wide" role="menu">
+              <button [class.sel]="basis()==='decay'" (click)="setBasis('decay')">
+                ⚡ Aktuell <small>mit Verfall — frische Stimmen zählen mehr</small>
+              </button>
+              <button [class.sel]="basis()==='absolute'" (click)="setBasis('absolute')">
+                Σ Gesamt <small>ohne Verfall — alle Stimmen gleich</small>
+              </button>
+            </div>
           }
         </div>
       }
@@ -283,40 +418,44 @@ interface RankItem {
       (closed)="shareOpen = false">
     </ideendb-share-dialog>
 
-    @if (chartSeries().length > 0) {
+    @if (topBars().length > 0) {
       <div class="top-chart-card">
         <h3>
           <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="2" stroke-linecap="round"
                stroke-linejoin="round" aria-hidden="true">
-            <polyline points="3 17 9 11 13 15 21 7"/>
-            <polyline points="14 7 21 7 21 14"/>
+            <line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="6" x2="20" y2="6"/>
+            <line x1="3" y1="18" x2="9" y2="18"/>
           </svg>
-          Verlauf der Top-{{ chartSeries().length }}
+          @if (barsUseDecay()) { Top-3 nach aktuellem Punktestand }
+          @else { Top-3 nach Gesamtstimmen ({{ scoreNoun() }}) }
         </h3>
-        <p>Rangentwicklung über die letzten {{ snapshotCount() }} Snapshots — kleinerer Rang = besser.</p>
-        <svg class="spark" [attr.viewBox]="chartViewBox()"
-             [attr.width]="'100%'" [attr.height]="'180'" preserveAspectRatio="none">
-          <!-- Y-Achsen-Hilfslinien -->
-          @for (g of chartGuides(); track g) {
-            <line [attr.x1]="0" [attr.x2]="chartW"
-                  [attr.y1]="g.y" [attr.y2]="g.y"
-                  stroke="#e7eaf0" stroke-width="1" />
+        <p>
+          @if (barsUseDecay()) {
+            Punktestand mit Stimmen-Verfall (Wertung „Aktuell") — drei führende Ideen.
+          } @else {
+            Gesamtstimmen ohne Verfall — drei führende Ideen.
           }
-          @for (s of chartSeries(); track s.id) {
-            <polyline fill="none" [attr.stroke]="s.color"
-                      stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                      [attr.points]="s.points" />
-            @for (pt of s.dots; track pt.x) {
-              <circle [attr.cx]="pt.x" [attr.cy]="pt.y" r="3" [attr.fill]="s.color" />
-            }
-          }
-        </svg>
-        <div class="legend">
-          @for (s of chartSeries(); track s.id) {
-            <span><span class="dot" [style.background]="s.color"></span>{{ s.label }}</span>
+        </p>
+        <div class="bars">
+          @for (b of topBars(); track b.id) {
+            <div class="bar-row" (click)="selectBar(b)">
+              <div class="bar-label">
+                <span class="b-rank">#{{ b.rank }}</span>
+                <span class="b-title" [title]="b.title">{{ b.title }}</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill" [style.width.%]="b.pct">
+                  <span class="bar-val">{{ b.label }}{{ scoreUnit() }}</span>
+                </div>
+              </div>
+            </div>
           }
         </div>
+        <div class="bar-scale" aria-hidden="true">
+          <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+        </div>
+        <div class="bar-scale-note">Skala = Anteil am Spitzenwert · 100% = {{ barMax() }}{{ scoreUnit() }}</div>
       </div>
     }
 
@@ -354,8 +493,15 @@ interface RankItem {
       <div class="empty">Noch keine Ideen in dieser Auswahl.</div>
     } @else {
       <p class="list-hint">
-        Vergib direkt Sterne in der Liste — jede Stimme verändert die
-        Reihenfolge sofort. Mit WLO-Login zählt deine Bewertung.
+        @if (decayAvailable() && basis()==='decay') {
+          Punktestand = {{ mode()==='thumbs' ? 'Daumen' : 'Sternpunkte' }} mit
+          Stimmen-Verfall (Wertung „Aktuell") · Pfeil = Rangbewegung der letzten Tage.
+        } @else if (decayAvailable()) {
+          Punktestand = Gesamtstimmen ohne Verfall (Wertung „Gesamt") · Pfeil =
+          Rangbewegung der letzten Tage.
+        } @else {
+          Anzahl {{ scoreNoun() }} · Pfeil = Rangbewegung der letzten Tage.
+        }
       </p>
       <div class="rank-list">
         @for (item of data()!.items; track item.idea?.id) {
@@ -404,8 +550,9 @@ interface RankItem {
               }
             </div>
 
-            <div class="rank-score" (click)="select(item)">
-              {{ formatScore(item.score) }}<span class="unit">{{ scoreUnit() }}</span>
+            <div class="rank-score" (click)="select(item)"
+                 [title]="(decayAvailable() && basis()==='decay') ? 'Aktueller Score mit Stimmen-Verfall' : (decayAvailable() ? 'Gesamtstimmen ohne Verfall' : '')">
+              {{ rowScore(item) }}<span class="unit">{{ scoreUnit() }}</span>
             </div>
             <div (click)="select(item)">
               <span class="delta"
@@ -430,6 +577,43 @@ interface RankItem {
         }
       </div>
     }
+
+    @if (decayAvailable()) {
+      <div class="decay-doc">
+        <h4>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          Wie der Score berechnet wird
+        </h4>
+        <p>
+          Die Rangliste sortiert nach einem <strong>aktuellen Score mit
+          Stimmen-Verfall</strong>: Jede Stimme verliert mit der Zeit an Gewicht
+          nach <code>w(t) = max({{ decayFloorAsComma() }}; 0,5<sup>t / {{ decayHalflife() }}</sup>)</code>
+          (t = Alter der Stimme in Tagen, Halbwertszeit = {{ decayHalflife() }} Tage).
+          Eine Stimme zählt also nach {{ decayHalflife() }} Tagen noch halb —
+          fällt aber <strong>nie unter {{ decayFloorPct() }}&nbsp;%</strong>
+          (Verfallsstopp). So können neue Ideen mit frischen Stimmen aufholen,
+          ohne dass langjährig starke Ideen komplett entwertet werden. Die
+          <strong>Gesamtstimmen ohne Verfall</strong> zeigt die Balkengrafik oben.
+        </p>
+        <table class="decay-table">
+          <thead><tr><th>Alter der Stimme</th><th>Gewicht</th></tr></thead>
+          <tbody>
+            @for (e of decayExamples(); track e.age) {
+              <tr><td>{{ e.age }}</td><td>{{ e.weight }}</td></tr>
+            }
+          </tbody>
+        </table>
+        <p class="decay-note">
+          Hinweis: Der Verfall berücksichtigt Stimmen ab Einführung des Systems;
+          Bestands-Stimmen davor fließen als zum Einführungszeitpunkt datierter
+          Altbestand ein. Die Gesamtstimmen in der Balkengrafik bleiben unberührt.
+        </p>
+      </div>
+    }
   `,
 })
 export class RankingComponent implements OnChanges {
@@ -439,6 +623,17 @@ export class RankingComponent implements OnChanges {
   /** Effektiver Modus für den aktuellen Filter-Kontext (Event oder global). */
   mode(): VotingMode {
     return this.voting.effective(this.eventFilter());
+  }
+
+  /** Banner, wenn Bewertung global aus oder fürs gefilterte Event nicht offen
+   *  ist; sonst null. Die Rangliste bleibt sichtbar (read-only Stand). */
+  ratingBanner(): string | null {
+    if (!this.voting.ratingActive()) return 'Bewertungen sind derzeit deaktiviert.';
+    const ev = this.eventFilter();
+    if (ev && !this.voting.isEventRatingOpen(ev)) {
+      return 'Für diese Veranstaltung ist die Bewertung noch nicht gestartet — die Rangliste zeigt den aktuellen Stand.';
+    }
+    return null;
   }
 
   @Input() apiBase = '';
@@ -457,6 +652,13 @@ export class RankingComponent implements OnChanges {
   eventFilter = signal<string | null>(null);
   loading = signal(false);
   risers = signal<any[]>([]);
+  /** Offenes Filter-Dropdown (MD3-Pille) — 'sort' | 'event' | 'basis' | null. */
+  menuOpen = signal<'sort' | 'event' | 'basis' | null>(null);
+  /** Score-Basis: 'decay' = Aktuell (mit Verfall, Default), 'absolute' =
+   *  Gesamt (ohne Verfall). Über die „Wertung"-Pille umschaltbar. */
+  basis = signal<'decay' | 'absolute'>('decay');
+  /** Verfalls-Parameter aus /settings — für die Transparenz-Box. */
+  decayInfo = signal<{ enabled: boolean; halflife: number; floor: number } | null>(null);
   data = signal<{
     sort: string;
     snapshot_at?: string;
@@ -510,11 +712,25 @@ export class RankingComponent implements OnChanges {
   ngOnChanges(ch: SimpleChanges) {
     if (ch['apiBase']) this.api.setBase(this.apiBase);
     this.voting.load();  // Modus + Event-Overrides (idempotent)
+    // Verfalls-Parameter laden (für Umschalter + Transparenz-Box).
+    this.api.getSettings().subscribe({
+      next: (s) => this.decayInfo.set({
+        enabled: s.rating_decay_enabled !== false,
+        halflife: s.rating_decay_halflife_days ?? 90,
+        floor: s.rating_decay_floor ?? 0.2,
+      }),
+      error: () => this.decayInfo.set(null),
+    });
     // Start-Event-Filter aus URL übernehmen (einmalig, wenn gesetzt).
     if (ch['initialEvent'] && this.initialEvent) {
       this.eventFilter.set(this.initialEvent);
     }
     this.load();
+  }
+
+  /** Verfall ist nur bei der Bewertungs-Rangliste relevant (Sterne/Daumen). */
+  decayAvailable(): boolean {
+    return this.sortKey() === 'rating' && this.decayInfo()?.enabled === true;
   }
 
   /** Daumen-Modus: Like setzen / zurücknehmen + Liste neu laden. */
@@ -544,8 +760,20 @@ export class RankingComponent implements OnChanges {
     return this.sortKey();
   }
 
-  setSort(s: SortKey) { this.sortKey.set(s); this.load(); }
-  setEvent(e: string | null) { this.eventFilter.set(e); this.load(); }
+  setSort(s: SortKey) { this.sortKey.set(s); this.menuOpen.set(null); this.load(); }
+  setEvent(e: string | null) { this.eventFilter.set(e); this.menuOpen.set(null); this.load(); }
+  setBasis(b: 'decay' | 'absolute') { this.basis.set(b); this.menuOpen.set(null); this.load(); }
+  /** Kurzlabel der aktiven Wertung für die Filterpille. */
+  basisLabel(): string { return this.basis() === 'absolute' ? 'Gesamt' : 'Aktuell'; }
+
+  /** Kurzlabel der aktiven Sortierung für die Filterpille. */
+  sortLabel(): string {
+    switch (this.sortKey()) {
+      case 'comments': return 'Kommentare';
+      case 'interest': return 'Mithacken';
+      default: return 'Bewertung';
+    }
+  }
 
   eventLabel(slug: string): string {
     return this.eventLabels.get(slug) || slug;
@@ -572,6 +800,7 @@ export class RankingComponent implements OnChanges {
       sort,
       event: this.eventFilter(),
       limit: 50,
+      basis: this.basis(),
     }).subscribe({
       next: (r) => { this.data.set(r as any); this.loading.set(false); },
       error: () => { if (!silent) this.data.set(null); this.loading.set(false); },
@@ -599,16 +828,83 @@ export class RankingComponent implements OnChanges {
     if (this.sortKey() === 'rating') {
       return this.mode() === 'thumbs' ? ' 👍' : ' ★';
     }
-    return '';
+    if (this.sortKey() === 'comments') return ' 💬';
+    return ' 👥'; // Mithacken
   }
 
-  formatScore(n: number): string {
-    // Sterne-Durchschnitt mit Nachkommastelle, alles andere (Anzahl/Likes/
-    // Kommentare/Mitmachen) als ganze Zahl.
-    if (this.sortKey() === 'rating' && this.mode() !== 'thumbs') {
-      return n.toFixed(2);
-    }
-    return Math.round(n).toString();
+  /** Bezeichnung der Score-Größe für Überschriften/Legende. */
+  scoreNoun(): string {
+    if (this.sortKey() === 'comments') return 'Kommentare';
+    if (this.sortKey() === 'interest') return 'Mithackende';
+    return this.mode() === 'thumbs' ? 'Daumen (gesamt)' : 'Sterne (Summe)';
+  }
+
+  // ---- Score-Werte: absolut (kumulativ) vs. verfallsgewichtet ----
+  absoluteVal(item: RankItem): number { return item.score_absolute ?? item.score; }
+  decayVal(item: RankItem): number { return item.score_decay ?? item.score; }
+
+  /** Nutzen Liste UND Balken den Verfalls-Score? (Wertung „Aktuell" + Bewertung). */
+  barsUseDecay(): boolean {
+    return this.decayAvailable() && this.basis() === 'decay';
+  }
+
+  /** Score formatieren wie überall: Verfall → bis 2 Nachkommastellen (Abstufung
+   *  sichtbar), Gesamt/Zähler → ganze Zahl. */
+  private fmtScore(v: number, useDecay: boolean): string {
+    if (!useDecay) return String(Math.round(v));
+    return Number.isInteger(v) ? String(v) : parseFloat(v.toFixed(2)).toString();
+  }
+
+  /** Primäre Zahl in der Tabellenzeile — folgt der aktiven Wertung. */
+  rowScore(item: RankItem): string {
+    const useDecay = this.barsUseDecay();
+    return this.fmtScore(useDecay ? this.decayVal(item) : this.absoluteVal(item), useDecay);
+  }
+
+  // ---- Top-3 horizontale Balkengrafik — folgt derselben Wertung wie die Liste,
+  //      damit Balken und Tabelle IMMER konsistent sind. ----
+  topBars() {
+    const items = (this.data()?.items || []).slice(0, this.TOP_FOR_CHART);
+    const useDecay = this.barsUseDecay();
+    const valOf = (t: RankItem) => (useDecay ? this.decayVal(t) : this.absoluteVal(t));
+    const max = Math.max(1, ...items.map(valOf));
+    return items.map((t, i) => ({
+      id: t.idea?.id || String(i),
+      rank: t.rank,
+      title: t.idea?.title || '(unbekannt)',
+      idea: t.idea,
+      label: this.fmtScore(valOf(t), useDecay),
+      pct: Math.max(4, Math.round((valOf(t) / max) * 100)),
+    }));
+  }
+  /** Max-Wert der Skala (nur Anzeige) — als String, da formatabhängig. */
+  barMax(): string {
+    const useDecay = this.barsUseDecay();
+    const items = (this.data()?.items || []).slice(0, this.TOP_FOR_CHART);
+    const max = Math.max(1, ...items.map((t) => (useDecay ? this.decayVal(t) : this.absoluteVal(t))));
+    return this.fmtScore(max, useDecay);
+  }
+  selectBar(b: { idea?: Idea | null }) { if (b.idea) this.ideaSelected.emit(b.idea); }
+
+  // ---- Transparenz: Beispiel-Stimmgewichte aus Halbwertszeit + Floor ----
+  decayHalflife(): number { return this.decayInfo()?.halflife || 90; }
+  decayFloor(): number { return this.decayInfo()?.floor ?? 0.2; }
+  decayFloorPct(): number { return Math.round(this.decayFloor() * 100); }
+  decayFloorAsComma(): string { return this.decayFloor().toFixed(2).replace('.', ','); }
+  decayExamples(): { age: string; weight: string }[] {
+    const hl = this.decayHalflife();
+    const floor = this.decayFloor();
+    const rows: { age: string; days: number }[] = [
+      { age: 'heute', days: 0 },
+      { age: '7 Tage', days: 7 },
+      { age: '1 Monat', days: 30 },
+      { age: '3 Monate', days: 90 },
+      { age: '6 Monate', days: 180 },
+    ];
+    return rows.map((r) => ({
+      age: r.age,
+      weight: Math.max(floor, Math.pow(0.5, r.days / hl)).toFixed(2),
+    }));
   }
 
   formatDate(iso: string): string {

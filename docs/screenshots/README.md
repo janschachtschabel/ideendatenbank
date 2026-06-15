@@ -13,13 +13,13 @@ hier ablegen und in der jeweiligen `.md` referenzieren als
 
 | Datei | Was zeigen |
 |---|---|
-| `01-startseite.png` | Vollansicht der Startseite mit „Neueste Ideen" + „Herausforderungen durchstöbern" |
-| `02-ideen-uebersicht-filter.png` | Filter-Reihen Phase/Veranstaltung/Herausforderung/Bereich mit aktivem Filter |
+| `01-startseite.png` | Vollansicht der Startseite mit „Neueste Ideen" + „Themenbereiche durchstöbern" |
+| `02-ideen-uebersicht-filter.png` | Filter-Pillen Phase/Veranstaltung/Themenbereich/Herausforderung mit aktivem Filter |
 | `02-detail-ansicht.png` | Detail einer Idee mit Beschreibung + Sidebar + Anhängen |
 | `02-rangliste.png` | Rangliste mit ▲▼-Pfeilen + „Top-Steiger"-Block |
 | `03-submit-formular.png` | Idee-Einreichen-Formular |
-| `04-mitmachen-folgen.png` | Sidebar einer Detail-Seite mit Mitmachen/Folgen-Knöpfen + Avatar-Reihe |
-| `05-mein-bereich.png` | „Mein Bereich" mit den 4 Tabs |
+| `04-mitmachen-folgen.png` | Sidebar einer Detail-Seite mit Mithacken/Folgen-Knöpfen + Avatar-Reihe |
+| `05-mein-bereich.png` | „Mein Bereich" mit Tab-Navigation (Was ist neu, Meine Ideen, Gefolgt, Mithacken, …) |
 | `05-public-profil.png` | Öffentliches Profil einer Person |
 | `06-embed-doku.png` | Embed-Seite mit Code-Snippets |
 
@@ -27,11 +27,11 @@ hier ablegen und in der jeweiligen `.md` referenzieren als
 
 | Datei | Was zeigen |
 |---|---|
-| `mod-01-tabs.png` | Die 10 Tabs in der Mod-Topbar |
+| `mod-01-tabs.png` | Die gruppierte Pill-/Dropdown-Navigation (Statistik · Postfach · Inhalte · Moderation · System) |
 | `mod-02-postfach-filter.png` | Postfach mit den 4 Anzeige-Filtern + Item-Karten |
 | `mod-02-bulk-bar.png` | Bulk-Move-Bar mit Auswahl + Ziel-Dropdown |
 | `mod-03-herausforderungen.png` | Sammlungs-Editor mit Top-Level + Sub-Topics |
-| `mod-04-versteckt.png` | Versteckt-Tab + Wiederherstellen-Knopf |
+| `mod-04-versteckt.png` | „Inhalte verwalten": alle Ideen, Verstecken/Einblenden, Löschen |
 | `mod-04-meldungen.png` | Reports-Liste mit „Erledigt"-Workflow |
 | `mod-05-backup-tab.png` | Backup-Tab mit Liste + Erstellen/Hochladen-Buttons |
 | `mod-06-statistik.png` | Statistik-Dashboard komplett |

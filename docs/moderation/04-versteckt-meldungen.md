@@ -1,6 +1,6 @@
 # 4. Versteckte Ideen + Meldungen
 
-## 🚫 Versteckt-Tab
+## Inhalte verwalten (Verstecken/Einblenden)
 
 Manchmal soll eine Idee nicht öffentlich angezeigt werden, aber **nicht**
 unwiderruflich gelöscht werden. Das ist der Use-Case für „Verstecken" (Soft-
@@ -11,10 +11,23 @@ Delete):
 - **Duplikate**, wo das Original behalten werden soll
 - **Frischer Spam**, der noch dokumentiert werden soll
 
+Einen eigenen „Versteckt"-Tab gibt es nicht mehr — die Funktion liegt jetzt
+unter **Moderation ▾ → Inhalte verwalten**. Dort findest du alle Ideen zentral:
+ein Titel-Filter oben, darunter die Liste (versteckte zuerst, markiert mit
+🚫 versteckt). Pro Zeile gibt es **Bearbeiten** (öffnet die Ideenseite),
+**Verstecken** bzw. **Einblenden** und **Löschen**.
+
+> Max. 400 Treffer (versteckte zuerst). Bei vielen Ideen den Titel-Filter nutzen.
+
 ### Eine Idee verstecken
 
-In der Detail-Sidebar der Idee, **🚫 Verstecken** klicken (nur sichtbar für Mods).
-Prompt fragt optional nach einem Grund (z.B. „lizenz-prüfung").
+Zwei Wege:
+- In der Detail-Sidebar der Idee **🚫 Verstecken** klicken (nur sichtbar für Mods),
+  oder
+- in **Inhalte verwalten** in der jeweiligen Zeile auf **Verstecken** klicken.
+
+Bei der Detail-Variante fragt ein Prompt optional nach einem Grund
+(z.B. „lizenz-prüfung").
 
 Verhalten:
 - Die Idee verschwindet aus der öffentlichen Liste, der Suche, dem Ranking
@@ -23,11 +36,10 @@ Verhalten:
 
 ### Versteckte Ideen wieder sichtbar machen
 
-Im **Versteckt**-Tab erscheint die Liste aller versteckten Ideen mit Titel,
-Grund und Zeit. Klick auf eine → öffnet die Detail-Seite.
-
-In der Aktionen-Sidebar steht für Mods jetzt **👁 Wieder anzeigen** statt
-„Verstecken". Klick macht sie sofort wieder öffentlich.
+In **Inhalte verwalten** stehen versteckte Ideen oben (Badge 🚫 versteckt). Klick
+auf **Einblenden** in der Zeile macht die Idee sofort wieder öffentlich.
+Alternativ steht in der Detail-Sidebar einer versteckten Idee für Mods
+**👁 Wieder anzeigen** statt „Verstecken".
 
 ### Wie ist das technisch umgesetzt?
 
@@ -40,8 +52,10 @@ das Flag. Edu-sharing weiß nichts davon — die Idee ist im Repo unverändert.
 
 ## ⚠ Meldungen-Tab
 
-User können Ideen über den „⚠ Melden"-Button reportieren (sichtbar in der
-Aktionen-Sidebar jeder Detail-Seite, für eingeloggte User).
+Der Meldungen-Tab liegt unter **Moderation ▾ → Meldungen**. User können Ideen
+über den „⚠ Melden"-Button reportieren (in der Aktionen-Sidebar jeder
+Detail-Seite). Der Dialog lässt sich auch **ohne Login** öffnen — anonyme
+Meldungen sind erlaubt (Reporter wird dann nicht erfasst).
 
 ### Was sehen Mods?
 
@@ -69,26 +83,12 @@ Zeile rechts klicken (✓ Erledigt) → Meldung wird als bearbeitet markiert
 4. **Meldung als erledigt markieren**
 
 Der Reporter sieht beim erneuten Öffnen der Idee, dass seine Meldung bearbeitet
-wurde. Auch Doppel-Meldungen derselben Idee durch denselben User werden im UI
-verhindert („Bereits gemeldet").
+wurde. Auch Doppel-Meldungen derselben Idee durch denselben (eingeloggten) User
+werden im UI verhindert („Bereits gemeldet").
 
-### Bulk-Resolve (per API)
-
-Für mehrere Meldungen auf einmal gibt's einen API-Endpoint:
-
-```
-POST /api/v1/admin/reports/bulk-resolve
-Body: {"ids": [1, 2, 3]}
-```
-
-Im UI noch nicht integriert — kann manuell via curl oder Postman aufgerufen werden:
-
-```bash
-curl -X POST -u janschachtschabel:DEIN_PW \
-  -H "Content-Type: application/json" \
-  -d '{"ids":[1,2,3]}' \
-  http://localhost:8000/api/v1/admin/reports/bulk-resolve
-```
+> Meldungen werden **einzeln** erledigt (ein „✓ Erledigt" pro Meldung). Eine
+> Sammel-Erledigung gibt es nicht. Es bleibt nur der Einzel-Endpoint
+> `POST /admin/reports/{report_id}/resolve`.
 
 ## Activity-Log-Verknüpfung
 
@@ -100,7 +100,6 @@ Aktivitäts-Log dokumentiert:
 | `idea_hidden` | Mod-Username | Idee mit Grund versteckt |
 | `idea_unhidden` | Mod-Username | Idee wieder freigegeben |
 | `report_resolved` | Mod-Username | Meldung als erledigt markiert |
-| `reports_bulk_resolved` | Mod-Username | Bulk-Erledigung mit `count` + `ids` |
 
 Im Aktivitäts-Tab nach `action` filtern, um die Geschichte einer Idee
 nachvollziehen zu können.

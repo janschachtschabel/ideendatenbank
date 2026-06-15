@@ -8,19 +8,22 @@ import {
   signal,
 } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
-import { Idea } from '../models';
+import { Idea, VotingMode } from '../models';
+import { VotingService } from '../voting.service';
 
 interface RankItem {
   rank: number;
   idea: Idea | null;
+  score: number;
+  score_decay?: number;
+  score_absolute?: number;
   history: { at: string; score: number; rank: number }[];
 }
 
 /**
- * Kompakter Top-N-Rangverlauf — extrahiert aus der Ranking-Komponente,
- * damit der Chart auch über den Event-Kacheln eingebettet werden kann.
- * Filtert fix auf eine Veranstaltung + eine Sortierung (Default: Bewertung).
- * Rendert nichts, wenn keine Snapshot-Daten vorhanden sind.
+ * Kompakte Top-3-Voting-Grafik für die Event-Seiten: horizontale Balken nach
+ * Stimmen (Gesamt) plus darunter optional der Rang-Verlauf (Bewegung). Filtert
+ * fix auf eine Veranstaltung. Rendert nichts ohne Daten.
  */
 @Component({
   standalone: true,
@@ -38,55 +41,84 @@ interface RankItem {
     h3 {
       margin: 0 0 4px; display: flex; align-items: center; gap: 8px;
       color: var(--wlo-text); font-size: 1.05rem;
-      .ico { color: var(--wlo-accent, #f5b600); }
+      .ico { color: var(--wlo-primary, #1d3a6e); }
     }
     p { margin: 0 0 12px; color: var(--wlo-muted); font-size: .85rem; }
-    .spark { display: block; width: 100%; height: 150px; }
-    .legend {
-      display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px;
-      font-size: .82rem; color: var(--wlo-text);
-      span { display: inline-flex; align-items: center; gap: 5px; }
-      .dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
+
+    /* Horizontale Top-3-Balken — Marken-Blau des Themes, Zahl weiß im Balken */
+    .bars { display: flex; flex-direction: column; gap: 14px; }
+    .bar-label {
+      display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; font-size: .9rem;
+      .b-rank { font-weight: 800; color: var(--wlo-primary); font-variant-numeric: tabular-nums; }
+      .b-title { font-weight: 600; color: var(--wlo-text);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    }
+    .bar-track {
+      position: relative; border-radius: 8px; height: 32px; overflow: hidden;
+      background:
+        repeating-linear-gradient(to right,
+          transparent 0, transparent calc(25% - 1px),
+          var(--wlo-border, #d8dde6) calc(25% - 1px), var(--wlo-border, #d8dde6) 25%),
+        var(--wlo-bg, #f4f6f9);
+    }
+    .bar-fill {
+      position: relative; height: 100%; border-radius: 8px; min-width: 46px;
+      background: var(--wlo-cta-bg, #27ABE2);
+      display: flex; align-items: center; justify-content: flex-end;
+      padding-right: 12px; transition: width .35s ease;
+    }
+    .bar-val {
+      font-size: .9rem; font-weight: 700; color: var(--wlo-cta-text, #fff);
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .bar-scale {
+      display: flex; justify-content: space-between; margin-top: 8px;
+      font-size: .72rem; color: var(--wlo-muted); font-variant-numeric: tabular-nums;
+    }
+    .bar-scale-note {
+      margin-top: 3px; font-size: .72rem; color: var(--wlo-muted);
+      font-variant-numeric: tabular-nums;
     }
   `],
   template: `
-    @if (series().length > 0) {
+    @if (bars().length > 0) {
       <div class="card">
         <h3>
           <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="2" stroke-linecap="round"
                stroke-linejoin="round" aria-hidden="true">
-            <polyline points="3 17 9 11 13 15 21 7"/>
-            <polyline points="14 7 21 7 21 14"/>
+            <line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="6" x2="20" y2="6"/>
+            <line x1="3" y1="18" x2="9" y2="18"/>
           </svg>
-          Voting-Verlauf der Top-{{ series().length }}
+          Top-3 nach aktuellem Punktestand
         </h3>
-        <p>Rangentwicklung nach Bewertung über die letzten {{ snapshotCount() }} Snapshots — kleinerer Rang = besser.</p>
-        <svg class="spark" [attr.viewBox]="viewBox()" preserveAspectRatio="none">
-          @for (g of guides(); track g.y) {
-            <line [attr.x1]="0" [attr.x2]="chartW" [attr.y1]="g.y" [attr.y2]="g.y"
-                  stroke="#e7eaf0" stroke-width="1" />
-          }
-          @for (s of series(); track s.id) {
-            <polyline fill="none" [attr.stroke]="s.color"
-                      stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                      [attr.points]="s.points" />
-            @for (pt of s.dots; track pt.x) {
-              <circle [attr.cx]="pt.x" [attr.cy]="pt.y" r="3" [attr.fill]="s.color" />
-            }
-          }
-        </svg>
-        <div class="legend">
-          @for (s of series(); track s.id) {
-            <span><span class="dot" [style.background]="s.color"></span>{{ s.label }}</span>
+        <p>Balkenlänge und Zahl = aktueller Punktestand ({{ unit() === '👍' ? 'Daumen' : 'Sterne' }} mit Stimmen-Verfall) — wie auf der Rangliste.</p>
+        <div class="bars">
+          @for (b of bars(); track b.id) {
+            <div class="bar-row">
+              <div class="bar-label">
+                <span class="b-rank">#{{ b.rank }}</span>
+                <span class="b-title" [title]="b.title">{{ b.title }}</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill" [style.width.%]="b.pct">
+                  <span class="bar-val">{{ b.label }} {{ unit() }}</span>
+                </div>
+              </div>
+            </div>
           }
         </div>
+        <div class="bar-scale" aria-hidden="true">
+          <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+        </div>
+        <div class="bar-scale-note">Skala = Anteil am Spitzenwert · 100% = {{ barMax() }} {{ unit() }}</div>
       </div>
     }
   `,
 })
 export class RankTrendComponent implements OnChanges {
   private api = inject(ApiService);
+  private voting = inject(VotingService);
 
   @Input() apiBase = API_BASE_DEFAULT;
   @Input() event: string | null = null;
@@ -94,79 +126,51 @@ export class RankTrendComponent implements OnChanges {
 
   private data = signal<{ snapshots: string[]; items: RankItem[] } | null>(null);
 
-  readonly chartW = 600;
-  readonly chartH = 160;
-  private readonly PALETTE = ['#1d3a6e', '#d97706', '#0b7a4f', '#9333ea', '#dc2626'];
-
   ngOnChanges(ch: SimpleChanges) {
     if (ch['apiBase'] && this.apiBase) this.api.setBase(this.apiBase);
+    this.voting.load();  // Modus + Event-Overrides (idempotent)
     this.load();
   }
 
+  /** Effektiver Voting-Modus dieses Events (Sterne/Daumen). */
+  private modeFor(): VotingMode { return this.voting.effective(this.event); }
+
   private load() {
-    this.api.ranking({ sort: 'rating', event: this.event, limit: 20 }).subscribe({
+    const sort = this.modeFor() === 'thumbs' ? 'likes' : 'rating';
+    this.api.ranking({ sort, event: this.event, limit: 20 }).subscribe({
       next: (r) => this.data.set(r as any),
       error: () => this.data.set(null),
     });
   }
 
-  snapshotCount(): number {
-    // Live-Marker nicht als „Snapshot" zählen.
-    return (this.data()?.snapshots || []).filter((s) => s !== 'live').length;
+  unit(): string { return this.modeFor() === 'thumbs' ? '👍' : '★'; }
+
+  /** Verfalls-Score formatieren wie auf der Rangliste: ganze Zahl ohne,
+   *  sonst bis zu 2 Nachkommastellen (Abstufung sichtbar). */
+  private fmtDecay(v: number): string {
+    return Number.isInteger(v) ? String(v) : parseFloat(v.toFixed(2)).toString();
   }
 
-  viewBox(): string {
-    return `0 0 ${this.chartW} ${this.chartH}`;
-  }
-
-  guides() {
-    const out: { y: number }[] = [];
-    for (let i = 0; i < 5; i++) out.push({ y: (i * this.chartH) / 4 });
-    return out;
-  }
-
-  series() {
-    const d = this.data();
-    if (!d || !d.snapshots.length) return [];
-    const snaps = d.snapshots;
-    const top = (d.items || []).slice(0, this.topN);
-
-    const w = this.chartW;
-    const h = this.chartH;
-    const pad = 8;
-
-    const allRanks: number[] = [];
-    top.forEach((t) => (t.history || []).forEach((p) => allRanks.push(p.rank)));
-    if (!allRanks.length) return [];
-    const minR = Math.min(...allRanks);
-    const maxR = Math.max(...allRanks);
-    const rangeR = maxR - minR || 1;
-
-    const xFor = (idx: number, total: number) =>
-      total === 1 ? w / 2 : pad + (idx * (w - 2 * pad)) / (total - 1);
-    const yFor = (rank: number) =>
-      pad + ((rank - minR) / rangeR) * (h - 2 * pad);
-
-    return top.map((t, i) => {
-      const map = new Map<string, number>();
-      (t.history || []).forEach((p) => map.set(p.at, p.rank));
-      const points: string[] = [];
-      const dots: { x: number; y: number }[] = [];
-      snaps.forEach((s, j) => {
-        const r = map.get(s);
-        if (r === undefined) return;
-        const x = xFor(j, snaps.length);
-        const y = yFor(r);
-        points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
-        dots.push({ x, y });
-      });
-      return {
+  // ---- Top-3 Balken: aktueller Punktestand MIT Verfall (konsistent zur
+  //      Ranglisten-Seite, die im Default ebenfalls den Verfalls-Score zeigt). ----
+  bars() {
+    const items = (this.data()?.items || []).slice(0, this.topN);
+    const dec = (t: RankItem) => t.score_decay ?? t.score;
+    const max = Math.max(0.0001, ...items.map(dec));
+    return items
+      .map((t, i) => ({
         id: t.idea?.id || String(i),
-        label: `#${t.rank} ${t.idea?.title?.slice(0, 32) || '(unbekannt)'}`,
-        color: this.PALETTE[i % this.PALETTE.length],
-        points: points.join(' '),
-        dots,
-      };
-    }).filter((s) => s.points.length > 0);
+        rank: t.rank,
+        title: t.idea?.title?.slice(0, 48) || '(unbekannt)',
+        value: dec(t),
+        label: this.fmtDecay(dec(t)),
+        pct: Math.max(4, Math.round((dec(t) / max) * 100)),
+      }))
+      .filter((b) => b.value > 0);
+  }
+  barMax(): string {
+    const items = (this.data()?.items || []).slice(0, this.topN);
+    const max = Math.max(0, ...items.map((t) => t.score_decay ?? t.score));
+    return this.fmtDecay(max);
   }
 }

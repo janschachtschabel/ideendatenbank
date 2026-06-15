@@ -1276,8 +1276,10 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
                 crow = con.execute(
                     "SELECT contact FROM idea_contact WHERE idea_id=?", (idea_id,)
                 ).fetchone()
-            if crow and crow["contact"] and (
-                is_mod_caller or (await _verify_login(authorization)) is not None
+            if (
+                crow
+                and crow["contact"]
+                and (is_mod_caller or (await _verify_login(authorization)) is not None)
             ):
                 base["contact"] = crow["contact"]
         except Exception:
@@ -1311,7 +1313,9 @@ async def rate_idea(
     if not authorization:
         raise HTTPException(401, "Authorization header required for rating")
     with connect() as con:
-        row = con.execute("SELECT main_content_id,id,events FROM idea WHERE id = ?", (idea_id,)).fetchone()
+        row = con.execute(
+            "SELECT main_content_id,id,events FROM idea WHERE id = ?", (idea_id,)
+        ).fetchone()
     if not row:
         raise HTTPException(404, "Idea not found")
     # Bewertungsphase serverseitig durchsetzen (nicht nur UI ausblenden):
@@ -1952,9 +1956,9 @@ async def get_interactions(
                 for r in interest
             ],
             "mine": any(r["user_key"] == current for r in interest) if current else False,
-            "mine_status": next(
-                (status_of(r) for r in interest if r["user_key"] == current), None
-            ) if current else None,
+            "mine_status": next((status_of(r) for r in interest if r["user_key"] == current), None)
+            if current
+            else None,
             "can_manage": can_manage,
         },
         "follow": {
@@ -2082,6 +2086,7 @@ async def toggle_follow(
 class TeamMemberPatch(BaseModel):
     """Owner/Mod nimmt eine:n Mithackende:n an (status) und/oder erteilt
     Bearbeitungsrecht (can_edit)."""
+
     status: Literal["pending", "approved"] | None = None
     can_edit: bool | None = None
 
@@ -2342,7 +2347,9 @@ async def sync_diff(authorization: str | None = Header(None)):
                 if not chid:
                     continue
                 ch_props = ch.get("properties") or {}
-                ch_title = ch.get("title") or (ch_props.get("cm:title") or [None])[0] or ch.get("name")
+                ch_title = (
+                    ch.get("title") or (ch_props.get("cm:title") or [None])[0] or ch.get("name")
+                )
                 refs = await edu_sharing.client.collection_references(chid, max_items=200)
                 for rn in refs.get("references") or []:
                     rid = (rn.get("ref") or {}).get("id")
@@ -2355,9 +2362,7 @@ async def sync_diff(authorization: str | None = Header(None)):
         raise HTTPException(502, f"edu-sharing Fehler: {e.response.status_code}")
 
     with connect() as con:
-        rows = con.execute(
-            "SELECT id, title, COALESCE(hidden, 0) AS hidden FROM idea"
-        ).fetchall()
+        rows = con.execute("SELECT id, title, COALESCE(hidden, 0) AS hidden FROM idea").fetchall()
     cache = {r["id"]: r["title"] for r in rows}
     hidden_ids = {r["id"] for r in rows if r["hidden"]}
     missing = [
@@ -2418,7 +2423,9 @@ async def upload_idea_content(
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
     if not (await _can_edit_idea(idea_id, authorization))[0]:
-        raise HTTPException(403, "Keine Berechtigung, diese Idee zu bearbeiten (nur Team/Moderation).")
+        raise HTTPException(
+            403, "Keine Berechtigung, diese Idee zu bearbeiten (nur Team/Moderation)."
+        )
     data = await _read_upload_capped(file, settings.upload_content_max_bytes)
     if not data:
         raise HTTPException(400, "Leere Datei")
@@ -2447,7 +2454,9 @@ async def upload_idea_preview(
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
     if not (await _can_edit_idea(idea_id, authorization))[0]:
-        raise HTTPException(403, "Keine Berechtigung, diese Idee zu bearbeiten (nur Team/Moderation).")
+        raise HTTPException(
+            403, "Keine Berechtigung, diese Idee zu bearbeiten (nur Team/Moderation)."
+        )
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(400, "Vorschaubild muss ein Bild sein (image/*).")
     data = await _read_upload_capped(file, settings.upload_image_max_bytes)
@@ -3129,9 +3138,7 @@ async def _purge_tag_from_ideas(kind: str, slug: str, auth: str | None) -> dict:
                 if kind == "phase":
                     con.execute("UPDATE idea SET phase = NULL WHERE id = ?", (nid,))
                 else:
-                    row = con.execute(
-                        "SELECT events FROM idea WHERE id = ?", (nid,)
-                    ).fetchone()
+                    row = con.execute("SELECT events FROM idea WHERE id = ?", (nid,)).fetchone()
                     try:
                         evs = [e for e in json.loads(row["events"] or "[]") if e != slug]
                     except Exception:
@@ -3274,7 +3281,9 @@ async def edit_idea(
         if body.keywords is not None:
             try:
                 _m = await edu_sharing.client.node_metadata(idea_id, auth_header=authorization)
-                _kw = ((_m.get("node") or {}).get("properties") or {}).get("cclom:general_keyword") or []
+                _kw = ((_m.get("node") or {}).get("properties") or {}).get(
+                    "cclom:general_keyword"
+                ) or []
                 if isinstance(_kw, str):
                     _kw = [_kw]
                 body.keywords = list(body.keywords) + [
@@ -3593,7 +3602,9 @@ async def rename_attachment(
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
     if not (await _can_edit_idea(idea_id, authorization))[0]:
-        raise HTTPException(403, "Keine Berechtigung, Anhänge dieser Idee zu bearbeiten (nur Team/Moderation).")
+        raise HTTPException(
+            403, "Keine Berechtigung, Anhänge dieser Idee zu bearbeiten (nur Team/Moderation)."
+        )
     await _verify_child_of(
         child_id=attachment_id,
         parent_id=idea_id,
@@ -3673,7 +3684,9 @@ async def replace_attachment_content(
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
     if not (await _can_edit_idea(idea_id, authorization))[0]:
-        raise HTTPException(403, "Keine Berechtigung, Anhänge dieser Idee zu bearbeiten (nur Team/Moderation).")
+        raise HTTPException(
+            403, "Keine Berechtigung, Anhänge dieser Idee zu bearbeiten (nur Team/Moderation)."
+        )
     await _verify_child_of(
         child_id=attachment_id,
         parent_id=idea_id,
@@ -4117,9 +4130,7 @@ async def _is_owner_or_mod(
     return False, user, False
 
 
-async def _can_edit_idea(
-    idea_id: str, authorization: str | None
-) -> tuple[bool, str | None, bool]:
+async def _can_edit_idea(idea_id: str, authorization: str | None) -> tuple[bool, str | None, bool]:
     """Erweitert `_is_owner_or_mod` um angenommene Mithackende mit
     Bearbeitungsrecht: idea_interaction (kind='interest', status='approved',
     can_edit=1). Diese „Mitwirkenden" dürfen Beschreibung/Anhänge bearbeiten —
@@ -4404,7 +4415,9 @@ async def upload_attachment(
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
     if not (await _can_edit_idea(idea_id, authorization))[0]:
-        raise HTTPException(403, "Keine Berechtigung, an diese Idee Anhänge zu hängen (nur Team/Moderation).")
+        raise HTTPException(
+            403, "Keine Berechtigung, an diese Idee Anhänge zu hängen (nur Team/Moderation)."
+        )
 
     data = await _read_upload_capped(file, settings.upload_attachment_max_bytes)
     if not data:
@@ -4582,7 +4595,6 @@ async def list_moderators(authorization: str | None = Header(None)):
                 "count": added,
             }
         )
-
 
     return {
         "groups": settings.fallback_mod_groups,
@@ -5108,12 +5120,7 @@ async def list_all_ideas_admin(
     )
     params: list = []
     if q and q.strip():
-        like = (
-            q.strip()
-            .replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-        )
+        like = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         sql += " WHERE title LIKE ? ESCAPE '\\'"
         params.append(f"%{like}%")
     sql += " ORDER BY COALESCE(hidden, 0) DESC, modified_at DESC LIMIT 400"

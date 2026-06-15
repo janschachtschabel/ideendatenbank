@@ -310,7 +310,9 @@ def init_db() -> None:
         # Bewertungsphase pro Event: 1 = offen (bewertbar), 0 = gestoppt
         # (z.B. Einreichungsphase). Default offen → Bestand bleibt bewertbar.
         try:
-            con.execute("ALTER TABLE taxonomy_event ADD COLUMN rating_open INTEGER NOT NULL DEFAULT 1")
+            con.execute(
+                "ALTER TABLE taxonomy_event ADD COLUMN rating_open INTEGER NOT NULL DEFAULT 1"
+            )
         except sqlite3.OperationalError:
             pass
         # Event-Zusatzinfos für das Promotion-Banner auf der Startseite
@@ -336,11 +338,15 @@ def init_db() -> None:
         # (status='approved' → grünes Häkchen) und optional Bearbeitungsrecht
         # erteilen (can_edit=1 → „Mitwirkende:r"). 'follow' bleibt unberührt.
         try:
-            con.execute("ALTER TABLE idea_interaction ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
+            con.execute(
+                "ALTER TABLE idea_interaction ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"
+            )
         except sqlite3.OperationalError:
             pass
         try:
-            con.execute("ALTER TABLE idea_interaction ADD COLUMN can_edit INTEGER NOT NULL DEFAULT 0")
+            con.execute(
+                "ALTER TABLE idea_interaction ADD COLUMN can_edit INTEGER NOT NULL DEFAULT 0"
+            )
         except sqlite3.OperationalError:
             pass
         # User-Notification-Cursor: wann hat der User seinen Feed zuletzt

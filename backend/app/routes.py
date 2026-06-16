@@ -656,48 +656,92 @@ async def sort_topics(
 
 
 @router.get("/meta")
-def meta_facets(topic_id: str | None = Query(None)):
-    """Distinct phase/event/category values currently in the cache, with counts.
+def meta_facets(
+    topic_id: str | None = Query(None),
+    phase: str | None = Query(None),
+    event: str | None = Query(None),
+    q: str | None = Query(None),
+):
+    """Facetten-Counts (Phase/Veranstaltung/Kategorie + Per-Topic) im Cache.
 
-    Optionaler `topic_id` filtert die Facetten-Counts auf den Subtree
-    dieser Sammlung — wichtig damit die Pillen unter z.B. „Kooperation"
-    nicht globale Counts zeigen, die zur Auswahl 0 Treffer ergeben."""
-    where_sql, params = "", []
+    Drill-down: Die Counts berücksichtigen die ÜBRIGEN aktiven Filter, damit sie
+    zur Auswahl passen — z.B. zeigt die Veranstaltungs-Liste bei aktivem
+    Phase=Anregung nur Counts INNERHALB Anregung. Pro Dimension wird der EIGENE
+    Filter ausgelassen, damit man Werte innerhalb einer Dimension noch wechseln
+    kann. Versteckte Ideen sind (wie in der Liste) ausgeschlossen.
+    """
+    topic_ids: list[str] = []
     if topic_id:
         with connect() as con:
-            ids = _collect_topic_subtree(con, topic_id)
-        placeholders = ",".join("?" * len(ids))
-        where_sql = f"WHERE topic_id IN ({placeholders})"
-        params = list(ids)
+            topic_ids = list(_collect_topic_subtree(con, topic_id))
+    qn = (q or "").strip()
 
-    with connect() as con:
-        phase_sql = (
-            f"SELECT phase AS value, COUNT(*) AS count FROM idea "
-            f"{where_sql} {'AND' if where_sql else 'WHERE'} "
-            f"phase IS NOT NULL AND phase <> '' "
-            f"GROUP BY phase ORDER BY count DESC"
-        )
-        phases = con.execute(phase_sql, params).fetchall()
-        rows = con.execute(
-            f"SELECT events, categories FROM idea {where_sql}",
-            params,
-        ).fetchall()
+    def _clauses(*, skip: str, use_q: bool) -> tuple[list[str], list]:
+        cl: list[str] = ["COALESCE(hidden, 0) = 0"]
+        pr: list = []
+        if topic_ids and skip != "topic":
+            cl.append(f"topic_id IN ({','.join('?' * len(topic_ids))})")
+            pr.extend(topic_ids)
+        if phase and skip != "phase":
+            cl.append("phase = ?")
+            pr.append(phase)
+        if event and skip != "event":
+            cl.append("events LIKE ? ESCAPE '\\'")
+            pr.append(f'%"{_escape_like(event)}"%')
+        if qn and use_q:
+            cl.append("id IN (SELECT id FROM idea_fts WHERE idea_fts MATCH ?)")
+            pr.append(qn)
+        return cl, pr
+
+    def _compute(use_q: bool):
+        with connect() as con:
+            cl, pr = _clauses(skip="phase", use_q=use_q)
+            phase_rows = con.execute(
+                "SELECT phase AS value, COUNT(*) AS count FROM idea "
+                f"WHERE {' AND '.join(cl)} AND phase IS NOT NULL AND phase <> '' "
+                "GROUP BY phase ORDER BY count DESC",
+                pr,
+            ).fetchall()
+            cl_e, pr_e = _clauses(skip="event", use_q=use_q)
+            ev_rows = con.execute(
+                f"SELECT events FROM idea WHERE {' AND '.join(cl_e)}", pr_e
+            ).fetchall()
+            cl_c, pr_c = _clauses(skip="category", use_q=use_q)
+            cat_rows = con.execute(
+                f"SELECT categories FROM idea WHERE {' AND '.join(cl_c)}", pr_c
+            ).fetchall()
+            cl_t, pr_t = _clauses(skip="topic", use_q=use_q)
+            topic_rows = con.execute(
+                "SELECT topic_id AS value, COUNT(*) AS count FROM idea "
+                f"WHERE {' AND '.join(cl_t)} AND topic_id IS NOT NULL "
+                "GROUP BY topic_id",
+                pr_t,
+            ).fetchall()
+        return phase_rows, ev_rows, cat_rows, topic_rows
+
+    try:
+        phase_rows, ev_rows, cat_rows, topic_rows = _compute(use_q=bool(qn))
+    except sqlite3.OperationalError:
+        # Malformierte FTS-Query → Facetten ohne Volltext-Filter berechnen.
+        phase_rows, ev_rows, cat_rows, topic_rows = _compute(use_q=False)
 
     events: dict[str, int] = {}
-    categories: dict[str, int] = {}
-    for r in rows:
+    for r in ev_rows:
         for e in json.loads(r["events"] or "[]"):
             events[e] = events.get(e, 0) + 1
+    categories: dict[str, int] = {}
+    for r in cat_rows:
         for c in json.loads(r["categories"] or "[]"):
             categories[c] = categories.get(c, 0) + 1
     return {
-        "phases": [dict(p) for p in phases],
+        "phases": [dict(p) for p in phase_rows],
         "events": [
             {"value": k, "count": v} for k, v in sorted(events.items(), key=lambda x: -x[1])
         ],
         "categories": [
             {"value": k, "count": v} for k, v in sorted(categories.items(), key=lambda x: -x[1])
         ],
+        "topics": {r["value"]: r["count"] for r in topic_rows},
     }
 
 
@@ -2248,13 +2292,20 @@ async def list_inbox(
     # Sonst tauchen alte Ideen-Originale (mit phase:/event:-Marker, weil
     # sie über den Reference-Knoten gepflegt wurden) im Postfach auf.
     with connect() as con:
-        cataloged = {
-            r["original_id"]
-            for r in con.execute(
-                "SELECT original_id FROM idea WHERE original_id IS NOT NULL"
-            ).fetchall()
-            if r["original_id"]
-        }
+        # original_id -> Liste der Herausforderungen (topic_id), in denen das
+        # Original referenziert ist. Dient (a) dem in_collection-Flag und (b)
+        # der Anzeige der konkreten Einsortierung im Postfach (ein Original kann
+        # in mehreren Herausforderungen liegen).
+        cataloged: dict[str, list[str]] = {}
+        for r in con.execute(
+            "SELECT original_id, topic_id FROM idea WHERE original_id IS NOT NULL"
+        ).fetchall():
+            oid = r["original_id"]
+            if not oid:
+                continue
+            lst = cataloged.setdefault(oid, [])
+            if r["topic_id"] and r["topic_id"] not in lst:
+                lst.append(r["topic_id"])
 
     items = []
     for n in raw_nodes:
@@ -2305,6 +2356,9 @@ async def list_inbox(
                 "created_at": n.get("createdAt"),
                 "in_collection": is_cataloged,
                 "has_app_marker": has_marker,
+                # Konkrete Herausforderung(en), in denen das Item schon liegt
+                # (topic_id-Liste; vom Frontend zu „Thema › Herausforderung" aufgelöst).
+                "placements": cataloged.get(node_id, []),
             }
         )
     # Newest first
@@ -2318,6 +2372,131 @@ async def list_inbox(
         "total": len(items),
         "items": sliced,
         "filter": filter,
+    }
+
+
+@router.get("/inbox/{node_id}/preview", tags=["moderation"])
+async def inbox_item_preview(
+    node_id: str,
+    authorization: str | None = Header(None),
+):
+    """Vollständige Review-Vorschau einer Inbox-Einreichung — direkt aus
+    edu-sharing, Cache-unabhängig.
+
+    `GET /ideas/{id}` quittiert noch nicht einsortierte Inbox-Knoten mit 404
+    (es gibt keine Cache-Row, und `refresh_idea` überspringt Inbox-Knoten
+    bewusst, damit sie nicht im Public-Cache landen). Für die Moderation ist
+    die Detailsicht aber gerade bei den UNeinsortierten Einreichungen nötig —
+    das ist die operative Arbeitsliste. Dieser Endpoint liefert daher alles
+    zum Prüfen + Freigeben:
+      - Beschreibung, Schlagwörter (ohne interne `*:`-Marker),
+      - Phase + Veranstaltung(en),
+      - den vom Einreicher gewünschten Themenbereich/Herausforderung
+        (`target-topic:`) und den App-Einreicher (`submitter:`),
+      - Anhänge (Knoten selbst, falls er Datei-Inhalt trägt, + Child-Objekte)
+        inkl. Download-/Vorschau-Links,
+      - Owner + Zeitstempel + ggf. Bewertung.
+    Nur Moderation."""
+    await _require_moderator(authorization)
+    try:
+        meta = await edu_sharing.client.node_metadata(node_id, auth_header=authorization)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:180]}")
+    node = (meta or {}).get("node") or {}
+    if not node:
+        raise HTTPException(404, "Einreichung nicht gefunden")
+    props = node.get("properties") or {}
+
+    def _first(key: str) -> str | None:
+        v = props.get(key)
+        if isinstance(v, list):
+            return v[0] if v else None
+        return v
+
+    kws_raw = props.get("cclom:general_keyword") or []
+    if isinstance(kws_raw, str):
+        kws_raw = [kws_raw]
+    kws = [str(k) for k in kws_raw if k]
+    internal = ("phase:", "event:", "target-topic:", "submitter:", "topic:")
+    phase = next((k[len("phase:") :] for k in kws if k.lower().startswith("phase:")), None)
+    events = [k[len("event:") :] for k in kws if k.lower().startswith("event:")]
+    target_topic = next(
+        (k[len("target-topic:") :] for k in kws if k.lower().startswith("target-topic:")),
+        None,
+    )
+    submitter = next(
+        (k[len("submitter:") :] for k in kws if k.lower().startswith("submitter:")),
+        None,
+    )
+    keywords = [k for k in kws if not k.lower().startswith(internal)]
+
+    preview = node.get("preview") or {}
+    created_by = node.get("createdBy") or {}
+    owner_display = (
+        " ".join(
+            x
+            for x in (
+                (created_by.get("firstName") or "").strip(),
+                (created_by.get("lastName") or "").strip(),
+            )
+            if x
+        ).strip()
+        or None
+    )
+
+    # Anhänge: der Knoten selbst (nur wenn er echten Datei-Inhalt trägt — reine
+    # Brainstorm-Karten ohne Bytes/Link nicht listen) + Child-Objekte (Serie).
+    attachments: list[dict] = []
+    self_att = _attachment_from_node(node)
+    if self_att.get("download_url") or (self_att.get("size") or 0):
+        attachments.append(self_att)
+    try:
+        for child in await edu_sharing.client.list_child_objects(
+            node_id, auth_header=authorization
+        ):
+            a = _attachment_from_node(child)
+            a["is_child_object"] = True
+            attachments.append(a)
+    except Exception:
+        pass
+
+    rating_overall = (node.get("rating") or {}).get("overall") or {}
+
+    # Kontaktdaten (App-DB, opt-in vom Einreicher) — der Caller ist bereits als
+    # Moderator verifiziert (_require_moderator macht einen echten
+    # my_memberships-Roundtrip), daher hier direkt ausliefern. Moderation
+    # braucht den Kontakt für Rückfragen vor der Freigabe. Liegt NICHT in
+    # edu-sharing, daher separater App-DB-Lookup über die Knoten-ID.
+    contact = None
+    try:
+        with connect() as con:
+            crow = con.execute(
+                "SELECT contact FROM idea_contact WHERE idea_id=?", (node_id,)
+            ).fetchone()
+        if crow and crow["contact"]:
+            contact = crow["contact"]
+    except Exception:
+        pass
+
+    return {
+        "id": node_id,
+        "title": node.get("title") or _first("cm:title") or node.get("name"),
+        "description": _first("cclom:general_description") or _first("cm:description"),
+        "author": _first("ccm:author_freetext"),
+        "project_url": _first("ccm:wwwurl"),
+        "owner_username": owner_display or _first("cm:creator"),
+        "contact": contact,
+        "phase": phase,
+        "events": events,
+        "target_topic": target_topic,
+        "submitter": submitter,
+        "keywords": keywords,
+        "preview_url": preview.get("url") if not preview.get("isIcon") else None,
+        "attachments": attachments,
+        "created_at": node.get("createdAt"),
+        "modified_at": node.get("modifiedAt"),
+        "rating_avg": float(rating_overall.get("rating") or 0.0) or None,
+        "rating_count": int(rating_overall.get("count") or 0) or None,
     }
 
 

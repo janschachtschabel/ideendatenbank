@@ -4,11 +4,12 @@ import { Component, EventEmitter, Input, OnInit, Output, inject, signal } from '
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { InboxItem, TaxonomyEntry, Topic } from '../models';
 import { ShareDialogComponent } from './share-dialog.component';
+import { IdeaDetailComponent } from './idea-detail.component';
 
 @Component({
   selector: 'ideendb-moderation',
   standalone: true,
-  imports: [CommonModule, FormsModule, ShareDialogComponent],
+  imports: [CommonModule, FormsModule, ShareDialogComponent, IdeaDetailComponent],
   styles: [`
     :host { display: block; }
     .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
@@ -144,6 +145,26 @@ import { ShareDialogComponent } from './share-dialog.component';
     }
     .preview-attachments .att a:hover { background: var(--wlo-primary); color: #fff; }
     .preview-loading { color: var(--wlo-muted); font-size: .9rem; padding: 8px 0; }
+    /* Einreicher-Wunsch (target-topic) — Hinweis direkt über der Move-Aktion,
+       damit klar ist, dass das Ziel-Dropdown nach Wunsch vorausgewählt wurde. */
+    .wish-hint {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin-top: 10px; padding: 8px 12px;
+      background: #e6f4ea; border: 1px solid #b6dfc4; border-left: 3px solid #2e9e5b;
+      border-radius: 6px; font-size: .86rem; color: var(--wlo-text);
+    }
+    .wish-hint .wish-ico { font-size: 1rem; line-height: 1; }
+    .wish-ok { color: #0f5b24; font-weight: 600; margin-left: auto; }
+    .wish-apply {
+      margin-left: auto; cursor: pointer; font: inherit; font-size: .82rem;
+      border: 1px solid var(--wlo-primary); color: var(--wlo-primary);
+      background: transparent; padding: 3px 10px; border-radius: 5px;
+    }
+    .wish-apply:hover { background: var(--wlo-primary); color: #fff; }
+    .meta-grid .wish-dt { color: #0f5b24; font-weight: 600; }
+    .meta-grid .wish-dd { font-weight: 600; }
+    .meta-grid .place-dt { color: var(--wlo-primary); font-weight: 600; }
+    .meta-grid .place-dd { font-weight: 600; }
     .actions {
       display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
       padding-top: 10px; border-top: 1px dashed var(--wlo-border);
@@ -809,7 +830,7 @@ import { ShareDialogComponent } from './share-dialog.component';
       <div class="mod-content">
       @if (tab === 'hidden') {
         <div class="intro">
-          Alle Inhalte zentral verwalten — suchen, auf der Ideenseite bearbeiten,
+          Alle Inhalte zentral verwalten — suchen, direkt im Popup bearbeiten,
           verstecken/einblenden oder löschen. Versteckte Ideen stehen oben und
           sind markiert. <strong>Löschen entfernt die Idee endgültig aus
           edu-sharing</strong> und lässt sich nicht rückgängig machen.
@@ -853,7 +874,7 @@ import { ShareDialogComponent } from './share-dialog.component';
                       <button class="btn" (click)="confirmDeleteId=null">Abbrechen</button>
                     </span>
                   } @else {
-                    <button class="btn" (click)="openIdeaById(it.id, it.title)">Bearbeiten</button>
+                    <button class="btn" (click)="startEditIdea(it.id)">Bearbeiten</button>
                     @if (it.hidden) {
                       <button class="btn primary-move" (click)="setVisibility(it, false)"
                               [disabled]="visBusy() === it.id">
@@ -874,6 +895,16 @@ import { ShareDialogComponent } from './share-dialog.component';
           <p style="font-size:.8rem; color:var(--wlo-muted); margin-top:6px">
             Max. 400 Treffer (versteckte zuerst). Bei vielen Ideen den Titel-Filter nutzen.
           </p>
+        }
+
+        @if (editId(); as eid) {
+          <ideendb-idea-detail
+            [ideaId]="eid"
+            [apiBase]="apiBase"
+            [repoBaseUrl]="repoBaseUrl"
+            [editOnly]="true"
+            (editClosed)="onEditDone()">
+          </ideendb-idea-detail>
         }
       }
 
@@ -966,14 +997,25 @@ import { ShareDialogComponent } from './share-dialog.component';
             <div class="stat-card"><span class="num">{{ s.totals.challenges }}</span>Herausforderungen</div>
             <div class="stat-card"><span class="num">{{ s.totals.comments }}</span>Kommentare</div>
             <div class="stat-card">
-              <span class="num">{{ s.totals.avg_rating | number: '1.1-2' }}</span>
-              <span>
-                <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
-                </svg>
-                Schnitt
-              </span>
-              <small>({{ s.totals.ratings }} Bewertungen)</small>
+              @if (votingGlobal() === 'thumbs') {
+                <span class="num">{{ s.totals.ratings }}</span>
+                <span>
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                  </svg>
+                  Daumen
+                </span>
+                <small>gesamt vergeben</small>
+              } @else {
+                <span class="num">{{ s.totals.avg_rating | number: '1.1-2' }}</span>
+                <span>
+                  <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
+                  </svg>
+                  Schnitt
+                </span>
+                <small>({{ s.totals.ratings }} Bewertungen)</small>
+              }
             </div>
             <div class="stat-card">
               <span class="num">{{ s.totals.interest }}</span>
@@ -1116,10 +1158,17 @@ import { ShareDialogComponent } from './share-dialog.component';
                 <div class="top-idea-row">
                   <strong>{{ i.title }}</strong>
                   <span class="meta">
-                    <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
-                    </svg>
-                    {{ i.rating_avg | number: '1.1-1' }} ({{ i.rating_count }})
+                    @if (votingGlobal() === 'thumbs') {
+                      <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                      </svg>
+                      {{ i.rating_count }}
+                    } @else {
+                      <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
+                      </svg>
+                      {{ i.rating_avg | number: '1.1-1' }} ({{ i.rating_count }})
+                    }
                     ·
                     <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -1602,9 +1651,13 @@ import { ShareDialogComponent } from './share-dialog.component';
           <div class="bulk-bar">
             <strong>{{ selectedInbox.size }} ausgewählt</strong>
             <select [(ngModel)]="bulkTarget">
-              <option [ngValue]="undefined">— Ziel-Herausforderung —</option>
-              @for (t of challenges(); track t.id) {
-                <option [ngValue]="t.id">{{ topicTitleFor(t.id) }}</option>
+              <option [ngValue]="undefined">— Themenbereich › Herausforderung —</option>
+              @for (grp of challengeGroups(); track grp.themeId) {
+                <optgroup [label]="grp.themeTitle">
+                  @for (c of grp.challenges; track c.id) {
+                    <option [ngValue]="c.id">{{ c.title }}</option>
+                  }
+                </optgroup>
               }
             </select>
             <button class="btn primary-move"
@@ -1641,9 +1694,13 @@ import { ShareDialogComponent } from './share-dialog.component';
                     <span class="tag target">➜ {{ topicTitleFor(it.target_topic) }}</span>
                   }
                   @if (it.in_collection) {
-                    <span class="tag" style="background:#e6f6ec;color:#137333">
-                      ✓ In Herausforderung
-                    </span>
+                    @if (it.placements?.length) {
+                      @for (pid of it.placements; track pid) {
+                        <span class="tag" style="background:#e6f6ec;color:#137333">✓ {{ topicTitleFor(pid) }}</span>
+                      }
+                    } @else {
+                      <span class="tag" style="background:#e6f6ec;color:#137333">✓ In Herausforderung</span>
+                    }
                   }
                 </div>
               </div>
@@ -1689,6 +1746,21 @@ import { ShareDialogComponent } from './share-dialog.component';
                     <div class="body">
                       <h4>Metadaten</h4>
                       <dl class="meta-grid">
+                        @if (it.placements?.length) {
+                          @for (pid of it.placements; track pid) {
+                            <dt class="place-dt">✅ Einsortiert in</dt>
+                            <dd class="place-dd">{{ topicTitleFor(pid) }}</dd>
+                          }
+                        }
+                        @if (wishedChallenge(it); as wc) {
+                          <dt class="wish-dt">📂 Gewünschter Themenbereich</dt>
+                          <dd class="wish-dd">{{ wishThemeTitle(wc.id) }}</dd>
+                          <dt class="wish-dt">🎯 Gewünschte Herausforderung</dt>
+                          <dd class="wish-dd">{{ wc.title }}</dd>
+                        }
+                        @if (p.submitter) {
+                          <dt>📨 Eingereicht von (Login)</dt><dd>{{ p.submitter }}</dd>
+                        }
                         @if (p.owner_username) {
                           <dt>👤 Owner (ES)</dt><dd>{{ p.owner_username }}</dd>
                         }
@@ -1704,6 +1776,10 @@ import { ShareDialogComponent } from './share-dialog.component';
                         @if (p.project_url) {
                           <dt>🔗 Projekt-Link</dt>
                           <dd><a [href]="p.project_url" target="_blank" rel="noopener">{{ p.project_url }}</a></dd>
+                        }
+                        @if (p.contact) {
+                          <dt class="wish-dt">✉️ Kontakt (nur Mod)</dt>
+                          <dd class="wish-dd">{{ p.contact }}</dd>
                         }
                         @if (p.phase) {
                           <dt>
@@ -1733,13 +1809,23 @@ import { ShareDialogComponent } from './share-dialog.component';
                           <dt>✎ Geändert</dt><dd>{{ formatDate(p.modified_at) }}</dd>
                         }
                         @if (p.rating_count) {
-                          <dt>
-                            <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
-                            </svg>
-                            Bewertung
-                          </dt>
-                          <dd>{{ p.rating_avg?.toFixed(1) }} / 5 ({{ p.rating_count }})</dd>
+                          @if (votingGlobal() === 'thumbs') {
+                            <dt>
+                              <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                              </svg>
+                              Zustimmung
+                            </dt>
+                            <dd>👍 {{ p.rating_count }}</dd>
+                          } @else {
+                            <dt>
+                              <svg class="stat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>
+                              </svg>
+                              Bewertung
+                            </dt>
+                            <dd>{{ p.rating_avg?.toFixed(1) }} / 5 ({{ p.rating_count }})</dd>
+                          }
                         }
                         @if (p.comment_count) {
                           <dt>
@@ -1819,12 +1905,29 @@ import { ShareDialogComponent } from './share-dialog.component';
               }
             }
 
+            @if (wishedChallenge(it); as wc) {
+              <div class="wish-hint">
+                <span class="wish-ico">💡</span>
+                <span>Vom Einreicher gewünscht:
+                  <strong>{{ wishThemeTitle(wc.id) }} › {{ wc.title }}</strong></span>
+                @if (moveTargets[it.id] === wc.id) {
+                  <span class="wish-ok">✓ als Ziel vorausgewählt</span>
+                } @else {
+                  <button type="button" class="wish-apply"
+                          (click)="moveTargets[it.id] = wc.id">übernehmen</button>
+                }
+              </div>
+            }
             <div class="actions">
               <select [(ngModel)]="moveTargets[it.id]"
                       (focus)="suggestMoveTarget(it)">
-                <option [ngValue]="undefined">— Ziel-Herausforderung wählen —</option>
-                @for (t of challenges(); track t.id) {
-                  <option [ngValue]="t.id">{{ topicTitleFor(t.id) }}</option>
+                <option [ngValue]="undefined">— Themenbereich › Herausforderung wählen —</option>
+                @for (grp of challengeGroups(); track grp.themeId) {
+                  <optgroup [label]="grp.themeTitle">
+                    @for (c of grp.challenges; track c.id) {
+                      <option [ngValue]="c.id">{{ c.title }}</option>
+                    }
+                  </optgroup>
                 }
               </select>
               <button class="btn primary-move"
@@ -2203,6 +2306,10 @@ export class ModerationComponent implements OnInit {
   confirmId: string | null = null;
   topicsById: Record<string, Topic> = {};
   challenges = signal<Topic[]>([]);
+  /** Herausforderungen gruppiert nach Themenbereich — für die optgroup-Auswahl
+   *  im Postfach, damit Themenbereich UND Herausforderung beim Einsortieren
+   *  sichtbar sind. */
+  challengeGroups = signal<{ themeId: string; themeTitle: string; challenges: Topic[] }[]>([]);
   moveTargets: Record<string, string | undefined> = {};
   moveError: Record<string, string> = {};
   movingId: string | null = null;
@@ -2544,7 +2651,10 @@ export class ModerationComponent implements OnInit {
   }
 
   /** Cache der schon geladenen Vorschau-Detaildaten je Inbox-Eintrag.
-   *  Lädt lazy beim ersten Aufklappen via /api/v1/ideas/{id}. */
+   *  Lädt lazy beim ersten Aufklappen via /api/v1/inbox/{id}/preview — direkt
+   *  aus edu-sharing, damit auch noch nicht einsortierte Einreichungen (die
+   *  `getIdea` mangels Cache-Eintrag mit 404 quittiert) vollständig mit
+   *  Beschreibung, Schlagwörtern und Anhängen geprüft werden können. */
   inboxPreview: Record<string, any> = {};
 
   toggleInboxPreview(id: string) {
@@ -2554,7 +2664,7 @@ export class ModerationComponent implements OnInit {
     }
     this.expandedInbox.add(id);
     if (!this.inboxPreview[id]) {
-      this.api.getIdea(id).subscribe({
+      this.api.inboxItemPreview(id).subscribe({
         next: (idea: any) => { this.inboxPreview[id] = idea; },
         error: () => {
           // Fallback: minimaler Stub mit Inbox-Daten, damit was angezeigt wird
@@ -2863,13 +2973,40 @@ export class ModerationComponent implements OnInit {
       this.topicsById = Object.fromEntries(ts.map((t) => [t.id, t]));
       // Challenge-Ebene (Ebene 2) als Move-Ziel — Moderator sortiert Ideen
       // konkret in eine Herausforderung, nicht in den Themen-Oberbereich.
-      this.challenges.set(ts.filter((t) => t.parent_id).sort(
+      const challenges = ts.filter((t) => t.parent_id);
+      this.challenges.set([...challenges].sort(
         (a, b) => this.topicTitleFor(a.id).localeCompare(this.topicTitleFor(b.id)),
       ));
+      // Nach Themenbereich gruppieren (für die optgroup-Auswahl).
+      const themes = ts.filter((t) => !t.parent_id);
+      const known = new Set(themes.map((t) => t.id));
+      const groups = themes
+        .map((theme) => ({
+          themeId: theme.id,
+          themeTitle: theme.title,
+          challenges: challenges
+            .filter((c) => c.parent_id === theme.id)
+            .sort((a, b) => a.title.localeCompare(b.title)),
+        }))
+        .filter((g) => g.challenges.length)
+        .sort((a, b) => a.themeTitle.localeCompare(b.themeTitle));
+      // Defensive: Herausforderungen ohne (bekanntes) Eltern-Thema separat.
+      const orphans = challenges.filter((c) => !c.parent_id || !known.has(c.parent_id));
+      if (orphans.length) {
+        groups.push({ themeId: '_orphan', themeTitle: 'Weitere', challenges: orphans });
+      }
+      this.challengeGroups.set(groups);
+      // Falls die Items schon geladen sind (Topics-Request kam später):
+      // Wunsch-Ziele jetzt vorbelegen.
+      this.prefillMoveTargets();
     });
     this.load();
     // Meldungen-Counter direkt initial laden, damit das Tab-Label stimmt.
     this.loadReports();
+    // Bewertungsmodus app-weit verfügbar machen (Sterne vs. Daumen) — wird in
+    // mehreren Tabs für die korrekte Darstellung gebraucht (Statistik-
+    // Engagement, Inbox-Vorschau), nicht nur im Veranstaltungs-Tab.
+    this.loadVotingGlobal();
   }
 
   inboxFilter: 'uncategorized' | 'all' | 'categorized' | 'diff' = 'uncategorized';
@@ -2909,7 +3046,7 @@ export class ModerationComponent implements OnInit {
     for (const f of filters) {
       this.api.inbox(f).subscribe({
         next: (r) => (this.inboxCounts[f] = (r as { total?: number }).total ?? r.count),
-        error: () => {},
+        error: () => { /* Zähler-Nebenabfrage — Fehler ignorieren */ },
       });
     }
   }
@@ -2934,6 +3071,7 @@ export class ModerationComponent implements OnInit {
     this.api.inbox(filter).subscribe({
       next: (r) => {
         this.items.set(r.items);
+        this.prefillMoveTargets();
         this.loading.set(false);
         // Counts mit aktualisieren — der aktuelle Filter ist schon da,
         // die übrigen drei laden wir parallel im Hintergrund.
@@ -2941,6 +3079,39 @@ export class ModerationComponent implements OnInit {
       },
       error: () => this.loading.set(false),
     });
+  }
+
+  /** Wunsch-Einsortierung des Einreichers (`target-topic:`) als Default in das
+   *  Ziel-Dropdown setzen, damit die Herausforderung bei der Annahme bereits
+   *  vorausgewählt ist und die Moderation nur noch „Verschieben" klicken muss.
+   *  Nur wenn das Ziel eine bekannte, wählbare Herausforderung (Ebene 2) ist
+   *  und die Mod noch keine eigene Auswahl getroffen hat — idempotent, daher
+   *  gefahrlos sowohl nach dem Items-Load als auch nach dem Topics-Load aufrufbar
+   *  (die beiden Requests laufen parallel, die Reihenfolge ist nicht garantiert). */
+  private prefillMoveTargets() {
+    for (const it of this.items()) {
+      if (this.moveTargets[it.id]) continue;
+      const t = it.target_topic;
+      if (t && this.topicsById[t]?.parent_id) {
+        this.moveTargets[it.id] = t;
+      }
+    }
+  }
+
+  /** Titel des Themenbereichs (Eltern-Themas) zur gewünschten Herausforderung. */
+  wishThemeTitle(targetTopicId: string): string {
+    const c = this.topicsById[targetTopicId];
+    const parent = c?.parent_id ? this.topicsById[c.parent_id] : null;
+    return parent?.title || c?.title || '';
+  }
+
+  /** Die vom Einreicher gewünschte, wählbare Herausforderung (Ebene 2) zu
+   *  einem Item — oder null, wenn kein bzw. kein bekanntes Ziel hinterlegt ist.
+   *  Kapselt die Null-Prüfung für die Template-Typsicherheit. */
+  wishedChallenge(it: InboxItem): Topic | null {
+    const t = it.target_topic;
+    const c = t ? this.topicsById[t] : null;
+    return c?.parent_id ? c : null;
   }
 
   doDelete(id: string) {
@@ -3052,7 +3223,7 @@ export class ModerationComponent implements OnInit {
         this.votingGlobal.set(s.voting_mode_global || 'stars');
         this.ratingEnabledGlobal.set(s.rating_enabled !== false);
       },
-      error: () => {},
+      error: () => { /* Default 'stars'/aktiv bleibt bei Fehler bestehen */ },
     });
   }
   setVotingGlobal(m: 'stars' | 'thumbs') {
@@ -3238,7 +3409,7 @@ export class ModerationComponent implements OnInit {
   loadTaxonomyUsage() {
     this.api.taxonomyUsage().subscribe({
       next: (r) => this.taxUsage.set({ phases: r.phases || {}, events: r.events || {} }),
-      error: () => {},
+      error: () => { /* Nutzungs-Statistik optional — Fehler ignorieren */ },
     });
   }
   usagePhase(slug: string): number { return this.taxUsage().phases[slug] || 0; }
@@ -3377,10 +3548,17 @@ export class ModerationComponent implements OnInit {
     });
   }
 
-  /** „Bearbeiten" in der Inhalts-Verwaltung → Ideenseite öffnen (dort liegt
-   *  der vorhandene Bearbeiten-Dialog, der so nachgenutzt wird). */
-  openIdeaById(id: string, title: string) {
-    this.ideaSelected.emit({ id, title } as any);
+  /** „Bearbeiten" in der Inhalts-Verwaltung → Idee direkt in einem Popup
+   *  bearbeiten (statt zur Ideenseite zu navigieren). Bindet die idea-detail-
+   *  Komponente im editOnly-Modus ein; nach Speichern/Schließen Liste neu laden. */
+  editId = signal<string | null>(null);
+  startEditIdea(id: string) {
+    this.editId.set(id);
+  }
+  onEditDone() {
+    this.editId.set(null);
+    this.loadAllIdeas();
+    this.loadHidden();
   }
 
   // Endgültiges Löschen einer Idee — zweistufig (Inline-Bestätigung).

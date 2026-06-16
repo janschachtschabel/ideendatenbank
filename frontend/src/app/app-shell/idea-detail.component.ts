@@ -646,7 +646,7 @@ import { ShareDialogComponent } from './share-dialog.component';
         <div class="edit-box" (click)="$event.stopPropagation()">
           <div class="edit-head">
             <h2>Idee bearbeiten</h2>
-            <button class="x" (click)="editing=false">×</button>
+            <button class="x" (click)="closeEdit()">×</button>
           </div>
           @if (api.isModerator()) {
             <label>Herausforderung
@@ -811,7 +811,7 @@ import { ShareDialogComponent } from './share-dialog.component';
 
           @if (editError) { <div class="edit-error">{{ editError }}</div> }
           <div class="edit-actions">
-            <button class="action-btn" (click)="editing=false">Abbrechen</button>
+            <button class="action-btn" (click)="closeEdit()">Abbrechen</button>
             <button class="action-btn primary" (click)="saveEdit(i.id)" [disabled]="editBusy">
               {{ editBusy ? 'Sendet…' : 'Speichern' }}
             </button>
@@ -819,7 +819,7 @@ import { ShareDialogComponent } from './share-dialog.component';
         </div>
       </div>
     }
-    @if (idea(); as i) {
+    @if (!editOnly && idea(); as i) {
       @if (i.restricted && !api.hasCredentials()) {
         <div class="restricted-banner">
           🔒 Diese Idee ist nicht öffentlich — manche Inhalte (Kommentare,
@@ -1477,12 +1477,18 @@ export class IdeaDetailComponent implements OnChanges {
   }
 
   private refreshAfterVote(id: string) {
-    this.api.getIdea(id).subscribe({ next: (i) => this.idea.set(i as any), error: () => {} });
+    this.api.getIdea(id).subscribe({ next: (i) => this.idea.set(i as any), error: () => { /* Re-Fetch nach Vote optional — Fehler ignorieren */ } });
   }
 
   @Input() ideaId!: string;
   @Input() apiBase = API_BASE_DEFAULT;
   @Input() repoBaseUrl = 'https://redaktion.openeduhub.net';
+  /** Edit-only-Modus: blendet die Detail-Ansicht aus, öffnet direkt den
+   *  Bearbeiten-Dialog und meldet das Schließen via (editClosed). Genutzt vom
+   *  Moderations-Tab „Inhalte verwalten", um in-place (Popup) statt per
+   *  Navigation zu bearbeiten. */
+  @Input() editOnly = false;
+  @Output() editClosed = new EventEmitter<void>();
   @Output() back = new EventEmitter<void>();
   @Output() requestLogin = new EventEmitter<void>();
   /** Klick auf den Topic-Crumb im Header — die Eltern-Shell soll auf die
@@ -1639,6 +1645,9 @@ export class IdeaDetailComponent implements OnChanges {
     this.api.getIdea(this.ideaId).subscribe({
       next: (i: any) => {
         this.idea.set(i);
+        // Im editOnly-Modus (Moderation „Inhalte verwalten") direkt den
+        // Bearbeiten-Dialog öffnen, statt die Detailseite zu zeigen.
+        if (this.editOnly && !this.editing) this.startEdit(i);
         this.quickPhase = i.phase || '';
         this.quickEvent = (i.events && i.events[0]) || '';
         // Eigenes Rating direkt aus den Live-Metadaten übernehmen, damit die
@@ -1649,6 +1658,8 @@ export class IdeaDetailComponent implements OnChanges {
       },
       error: () => {
         // Fresh idea, noch nicht im Cache — optimistische Anzeige beibehalten.
+        // Im editOnly-Popup ohne ladbare Idee: sauber schließen statt leer hängen.
+        if (this.editOnly) this.editClosed.emit();
       },
     });
     this.api.getInteractions(this.ideaId).subscribe((x) => this.interactions.set(x));
@@ -2273,7 +2284,14 @@ export class IdeaDetailComponent implements OnChanges {
   }
 
   cancelEdit(e: MouseEvent) {
-    if (e.target === e.currentTarget) this.editing = false;
+    if (e.target === e.currentTarget) this.closeEdit();
+  }
+
+  /** Schließt den Bearbeiten-Dialog; im editOnly-Modus zusätzlich (editClosed)
+   *  emittieren, damit der Host (Moderation) das Popup entfernt + neu lädt. */
+  closeEdit() {
+    this.editing = false;
+    if (this.editOnly) this.editClosed.emit();
   }
 
   saveEdit(id: string) {
@@ -2298,7 +2316,9 @@ export class IdeaDetailComponent implements OnChanges {
         const finish = () => {
           this.editBusy = false;
           this.editing = false;
-          this.load();
+          // editOnly: Host (Moderation) entfernt das Popup + lädt die Liste neu.
+          if (this.editOnly) this.editClosed.emit();
+          else this.load();
         };
         if (contactChanged) {
           this.api.setIdeaContact(id, newContact || null).subscribe({ next: finish, error: finish });

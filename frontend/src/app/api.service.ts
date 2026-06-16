@@ -133,13 +133,24 @@ export class ApiService {
     );
   }
 
-  meta(topicId?: string | null): Observable<{
+  meta(
+    opts: {
+      topicId?: string | null;
+      phase?: string | null;
+      event?: string | null;
+      q?: string | null;
+    } = {},
+  ): Observable<{
     phases: { value: string; count: number }[];
     events: { value: string; count: number }[];
     categories: { value: string; count: number }[];
+    topics: Record<string, number>;
   }> {
     let params = new HttpParams();
-    if (topicId) params = params.set('topic_id', topicId);
+    if (opts.topicId) params = params.set('topic_id', opts.topicId);
+    if (opts.phase) params = params.set('phase', opts.phase);
+    if (opts.event) params = params.set('event', opts.event);
+    if (opts.q && opts.q.trim()) params = params.set('q', opts.q.trim());
     return this.http.get<any>(`${this.base}/meta`, { params });
   }
 
@@ -223,6 +234,16 @@ export class ApiService {
       headers: this.authHeaders(),
       params: { filter },
     });
+  }
+
+  /** Vollständige Review-Vorschau einer Inbox-Einreichung (Mod). Liest direkt
+   *  aus edu-sharing und funktioniert daher auch für noch nicht einsortierte
+   *  Knoten, die `getIdea` mangels Cache-Eintrag mit 404 quittiert. */
+  inboxItemPreview(nodeId: string): Observable<any> {
+    return this.http.get<any>(
+      `${this.base}/inbox/${encodeURIComponent(nodeId)}/preview`,
+      { headers: this.authHeaders() },
+    );
   }
 
   /** Sync-Differenz App-Cache ↔ edu-sharing (Mod-Diagnose). */

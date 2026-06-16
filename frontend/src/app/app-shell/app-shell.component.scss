@@ -657,12 +657,12 @@ html[data-theme="hackathoern"] .topbar { box-shadow: 0 1px 3px rgba(0,0,0,.06); 
 .share-btn {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--wlo-surface, #fff);
-  color: var(--wlo-primary, #1d3a6e);
+  color: var(--wlo-text, #1a2334);
   border: 1px solid var(--wlo-border, #d8dde6);
   border-radius: 8px; padding: 9px 16px;
   font-weight: 600; cursor: pointer; font-size: .9rem;
   white-space: nowrap;
-  &:hover { border-color: var(--wlo-primary); background: var(--wlo-primary-soft, #e6edf7); }
+  &:hover { border-color: var(--wlo-primary); color: var(--wlo-primary); }
 }
 .event-share {
   margin: 0 0 18px; padding: 18px 20px;

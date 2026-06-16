@@ -226,4 +226,7 @@ export interface InboxItem {
   in_collection?: boolean;
   /** true wenn die Idee phase:/event:/target-topic:-Marker aus dem App-Submit trägt */
   has_app_marker?: boolean;
+  /** topic_ids der Herausforderung(en), in denen das Item bereits referenziert
+   *  ist — für die Anzeige der konkreten Einsortierung im Postfach. */
+  placements?: string[];
 }

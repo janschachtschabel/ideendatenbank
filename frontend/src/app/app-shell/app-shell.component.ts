@@ -478,7 +478,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                     <button [class.sel]="!currentRootId()" (click)="clearTopicFilter(); filterMenuOpen=null">Alle</button>
                     @for (t of rootTopics(); track t.id) {
                       <button [class.sel]="currentRootId()===t.id" (click)="openTopicById(t.id); filterMenuOpen=null">
-                        {{ t.title }} ({{ ideaCountByTopic[t.id] ?? 0 }})
+                        {{ t.title }} ({{ filterTopicCount(t.id) }})
                       </button>
                     }
                   </div>
@@ -502,7 +502,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                               (click)="openTopicById(currentRootId()!); filterMenuOpen=null">Alle</button>
                       @for (c of subTopicsForFilter(); track c.id) {
                         <button [class.sel]="filterTopic === c.id" (click)="openTopicById(c.id); filterMenuOpen=null">
-                          {{ c.title }} ({{ subtopicCount(c.id) }})
+                          {{ c.title }} ({{ filterTopicCount(c.id) }})
                         </button>
                       }
                     </div>
@@ -668,11 +668,13 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                   }
                 }
                 <button class="share-btn" (click)="shareOpen.set(true)">
-                  <svg class="card-ico" width="16" height="16" viewBox="0 0 24 24"
+                  <svg width="16" height="16" viewBox="0 0 24 24"
                        fill="none" stroke="currentColor" stroke-width="2"
                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                    <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/>
+                    <circle cx="18" cy="19" r="3"/>
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
                   </svg>
                   Teilen
                 </button>
@@ -893,7 +895,7 @@ export class AppShellComponent implements OnInit {
     if (!this.api.hasCredentials()) { this.unseenCount.set(0); return; }
     this.api.unseenNotifications().subscribe({
       next: (r) => this.unseenCount.set(r.count || 0),
-      error: () => {},
+      error: () => { /* Badge-Zähler ist unkritisch — bei Fehler still lassen */ },
     });
     // einmaliges Polling alle 60s einrichten
     if (!this.unseenPollHandle) {
@@ -901,7 +903,7 @@ export class AppShellComponent implements OnInit {
         if (this.api.hasCredentials()) {
           this.api.unseenNotifications().subscribe({
             next: (r) => this.unseenCount.set(r.count || 0),
-            error: () => {},
+            error: () => { /* Hintergrund-Poll: nächster Tick versucht es erneut */ },
           });
         }
       }, 60_000);
@@ -912,7 +914,7 @@ export class AppShellComponent implements OnInit {
     if (!this.api.hasCredentials()) return;
     this.api.markNotificationsSeen().subscribe({
       next: () => this.unseenCount.set(0),
-      error: () => {},
+      error: () => { /* „gelesen" markieren ist unkritisch — Fehler ignorieren */ },
     });
   }
   rootTopics = signal<Topic[]>([]);
@@ -956,6 +958,9 @@ export class AppShellComponent implements OnInit {
   availableEvents = signal<{ value: string; count: number }[]>([]);
   /** Globale Event-Counts (nie topic-scoped) — für Veranstaltungs-Seite. */
   allAvailableEvents = signal<{ value: string; count: number }[]>([]);
+  /** Filter-bewusste Idee-Zahlen pro Topic für die Filter-Pillen-Dropdowns
+   *  (berücksichtigt die übrigen aktiven Filter). Quelle: /meta `topics`. */
+  filterTopicCounts = signal<Record<string, number>>({});
   showLogin = false;
   userMenuOpen = false;
   mobileNavOpen = false;
@@ -989,7 +994,7 @@ export class AppShellComponent implements OnInit {
     if (this.api.hasCredentials()) {
       this.api.refreshMe().subscribe({
         next: () => this.refreshUnseenCount(),
-        error: () => {},
+        error: () => { /* Mod-Status-Refresh optional — Fehler ignorieren */ },
       });
     }
     this.loadFacets();
@@ -1150,15 +1155,24 @@ export class AppShellComponent implements OnInit {
    *  abgelegt, damit die Veranstaltungs-/Themen-Seite immer alle Optionen
    *  zeigt — unabhängig vom Browser-Filter. */
   private loadFacets() {
-    // Global (für Events-Seite, Themen-Übersicht)
-    this.api.meta(null).subscribe((m) => {
+    // Global (für Events-Seite, Themen-Übersicht) — ungefiltert
+    this.api.meta({}).subscribe((m) => {
       this.allAvailableEvents.set(m.events || []);
     });
-    // Scoped (für Browser-Pillen)
-    this.api.meta(this.filterTopic || null).subscribe((m) => {
-      this.availablePhases.set(m.phases || []);
-      this.availableEvents.set(m.events || []);
-    });
+    // Scoped: berücksichtigt die übrigen aktiven Filter, damit die Pillen-Counts
+    // zueinander passen (Drill-down: Phase=Anregung → nur Events in Anregung).
+    this.api
+      .meta({
+        topicId: this.filterTopic || null,
+        phase: this.filterPhase,
+        event: this.filterEvent,
+        q: this.searchQ,
+      })
+      .subscribe((m) => {
+        this.availablePhases.set(m.phases || []);
+        this.availableEvents.set(m.events || []);
+        this.filterTopicCounts.set(m.topics || {});
+      });
   }
 
   private loadTopicContext(id: string) {
@@ -1179,6 +1193,17 @@ export class AppShellComponent implements OnInit {
 
   subtopicCount(id: string): number {
     return this.subtopicCounts[id] ?? 0;
+  }
+
+  /** Filter-bewusste Idee-Zahl pro Topic für die Filter-Pillen-Dropdowns:
+   *  berücksichtigt die übrigen aktiven Filter (Phase/Event/Suche). Root-Thema
+   *  = Summe seiner Herausforderungen, Herausforderung = deren direkte Zahl.
+   *  (ideaCountByTopic/subtopicCount bleiben die globalen Übersichts-Zahlen.) */
+  filterTopicCount(id: string): number {
+    const m = this.filterTopicCounts();
+    const kids = this.allTopics().filter((t) => t.parent_id === id);
+    if (kids.length) return kids.reduce((s, k) => s + (m[k.id] ?? 0), 0);
+    return m[id] ?? 0;
   }
 
   /** ID des aktuellen Root-Topics (= Eltern-Sammlung, falls wir in einer
@@ -1205,8 +1230,8 @@ export class AppShellComponent implements OnInit {
     return this.allTopics().filter((x) => x.parent_id === parent.id);
   }
 
-  setPhase(v: string | null) { this.filterPhase = v; }
-  setEvent(v: string | null) { this.filterEvent = v; }
+  setPhase(v: string | null) { this.filterPhase = v; this.loadFacets(); }
+  setEvent(v: string | null) { this.filterEvent = v; this.loadFacets(); }
 
   // ----- Filter-Pillen (Ideenseite, analog zur Rangliste) -----
   filterMenuOpen: 'phase' | 'event' | 'topic' | 'subtopic' | 'sort' | null = null;
@@ -1512,6 +1537,7 @@ export class AppShellComponent implements OnInit {
     this.searchDebounce = window.setTimeout(() => {
       // Force input change via reassignment so tile-grid's ngOnChanges fires
       this.searchQ = (this.searchQ || '').trim();
+      this.loadFacets();  // Facetten-Counts an die aktive Suche anpassen
     }, 250);
   }
 

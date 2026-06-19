@@ -326,13 +326,14 @@ class EduSharingClient:
         mimetype: str,
         *,
         version_comment: str = "Initial upload via Ideendatenbank",
-        auth_header: str,
+        auth_header: str | None = None,
     ) -> Any:
         """Lädt eine Datei als content eines bestehenden ccm:io. Multipart mit
-        Feld `file`. mimetype + versionComment sind Query-Params."""
+        Feld `file`. mimetype + versionComment sind Query-Params.
+        `auth_header=None` → WLO-Gast (für anonyme Einreichungen)."""
         headers = {
             "Accept": "application/json",
-            "Authorization": auth_header,
+            "Authorization": auth_header or _guest_auth_header(),
         }
         params = {"mimetype": mimetype, "versionComment": version_comment}
         files = {"file": (filename, file_bytes, mimetype)}
@@ -355,12 +356,13 @@ class EduSharingClient:
         filename: str,
         mimetype: str,
         *,
-        auth_header: str,
+        auth_header: str | None = None,
     ) -> Any:
-        """Setzt das Vorschaubild eines Nodes. Multipart mit Feld `image`."""
+        """Setzt das Vorschaubild eines Nodes. Multipart mit Feld `image`.
+        `auth_header=None` → WLO-Gast (für anonyme Einreichungen)."""
         headers = {
             "Accept": "application/json",
-            "Authorization": auth_header,
+            "Authorization": auth_header or _guest_auth_header(),
         }
         params = {"mimetype": mimetype}
         files = {"image": (filename, image_bytes, mimetype)}
@@ -457,6 +459,87 @@ class EduSharingClient:
             f"/node/v1/nodes/-home-/{reference_id}",
             auth_header=auth_header,
         )
+
+    async def publish_node(self, node_id: str, *, auth_header: str | None = None) -> bool:
+        """Macht einen Knoten öffentlich lesbar: ergänzt `GROUP_EVERYONE`/`Consumer`
+        in der LOKALEN ACL. Bestehende lokale ACEs und die Vererbung
+        (`inherited`) bleiben erhalten — es wird gemerged, nicht überschrieben.
+
+        Hintergrund: edu-sharing veröffentlicht ein Original NICHT automatisch,
+        wenn es als Reference in eine (öffentliche) Sammlung gehängt wird. Ohne
+        diesen Schritt bleibt das Original privat und die eingebettete (anonyme)
+        Vorschau/Render zeigt „insufficient permissions".
+
+        Idempotent: ist `GROUP_EVERYONE`/`Consumer` lokal schon gesetzt, wird
+        nichts geschrieben. Caller muss `ChangePermissions`/`CCPublish` auf dem
+        Knoten halten (Mod als Coordinator).
+
+        Returns True, wenn der Knoten bereits öffentlich war (kein Write nötig)."""
+        cur = await self._req(
+            "GET",
+            f"/node/v1/nodes/-home-/{node_id}/permissions",
+            auth_header=auth_header,
+        )
+        local = ((cur or {}).get("permissions") or {}).get("localPermissions") or {}
+        perms = [p for p in (local.get("permissions") or []) if isinstance(p, dict)]
+        inherited = local.get("inherited", True)
+        already = any(
+            (p.get("authority") or {}).get("authorityName") == "GROUP_EVERYONE"
+            and "Consumer" in (p.get("permissions") or [])
+            for p in perms
+        )
+        if already:
+            return True
+        perms.append(
+            {
+                "authority": {"authorityName": "GROUP_EVERYONE", "authorityType": "EVERYONE"},
+                "permissions": ["Consumer"],
+            }
+        )
+        await self._req(
+            "POST",
+            f"/node/v1/nodes/-home-/{node_id}/permissions",
+            params={"sendMail": "false", "sendCopy": "false"},
+            json={"inherited": inherited, "permissions": perms},
+            auth_header=auth_header,
+        )
+        return False
+
+    async def unpublish_node(self, node_id: str, *, auth_header: str | None = None) -> bool:
+        """Gegenstück zu `publish_node`: entfernt das `GROUP_EVERYONE`/`Consumer`-
+        ACE wieder aus der LOKALEN ACL — der Knoten ist danach nicht mehr anonym
+        lesbar. Andere lokale ACEs + die Vererbung bleiben unangetastet.
+
+        Wird beim Verstecken/Löschen genutzt, damit eine zuvor veröffentlichte
+        Idee nicht als öffentliche Waise erreichbar bleibt. Idempotent.
+
+        Returns True, wenn nichts zu entfernen war (Knoten war nicht public)."""
+        cur = await self._req(
+            "GET",
+            f"/node/v1/nodes/-home-/{node_id}/permissions",
+            auth_header=auth_header,
+        )
+        local = ((cur or {}).get("permissions") or {}).get("localPermissions") or {}
+        perms = [p for p in (local.get("permissions") or []) if isinstance(p, dict)]
+        inherited = local.get("inherited", True)
+        kept = [
+            p
+            for p in perms
+            if not (
+                (p.get("authority") or {}).get("authorityName") == "GROUP_EVERYONE"
+                and "Consumer" in (p.get("permissions") or [])
+            )
+        ]
+        if len(kept) == len(perms):
+            return True  # war nicht public — nichts zu tun
+        await self._req(
+            "POST",
+            f"/node/v1/nodes/-home-/{node_id}/permissions",
+            params={"sendMail": "false", "sendCopy": "false"},
+            json={"inherited": inherited, "permissions": kept},
+            auth_header=auth_header,
+        )
+        return False
 
     # Self-registration: derzeit nicht via Backend-Proxy.
     # `POST /register/v1/register` auf redaktion.openeduhub.net hängt in einem

@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     upload_image_max_bytes: int = 10 * 1024 * 1024  # 10 MB Vorschaubilder
     upload_content_max_bytes: int = 50 * 1024 * 1024  # 50 MB Idee-Hauptinhalte
     upload_attachment_max_bytes: int = 50 * 1024 * 1024  # 50 MB pro Anhang
+    # Obergrenze für Serienobjekt-Anhänge pro Idee (Frontend-Submit erlaubt 4,
+    # die Ideenseite mehr; diese Gesamt-Grenze greift serverseitig — wichtig,
+    # seit anonyme Uploads über den Gast erlaubt sind).
+    max_attachments_per_idea: int = 20
     upload_restore_max_bytes: int = 200 * 1024 * 1024  # 200 MB Backup-Restore
 
     # KI (optional)

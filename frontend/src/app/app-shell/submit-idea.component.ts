@@ -198,7 +198,7 @@ import { TaxonomyEntry, Topic } from '../models';
 
         <div class="row">
           <div>
-            <label>Vorschaubild <small style="font-weight:400; opacity:.6">(optional)</small></label>
+            <label>Vorschaubild <small style="font-weight:400; opacity:.6">(optional, max. 10 MB)</small></label>
             <input type="file" accept="image/*" (change)="onPreviewPick($event)" />
             @if (previewFile) {
               <small style="color: var(--wlo-muted); display:block; margin-top:-6px">
@@ -209,7 +209,7 @@ import { TaxonomyEntry, Topic } from '../models';
           </div>
           <div>
             <label>Datei-Anhänge
-              <small style="font-weight:400; opacity:.6">(optional, bis zu {{ maxAttachments }})</small>
+              <small style="font-weight:400; opacity:.6">(optional, bis zu {{ maxAttachments }}, je max. 50 MB)</small>
             </label>
             <input type="file" multiple (change)="onFilePick($event)"
                    [disabled]="contentFiles.length >= maxAttachments" />
@@ -230,7 +230,7 @@ import { TaxonomyEntry, Topic } from '../models';
           Anhänge und Vorschaubild werden an die Idee gehängt. Jeder Anhang ist ein
           eigenes Dokument und lässt sich später einzeln austauschen oder entfernen,
           ohne die Idee selbst zu verändern. Weitere kannst Du nach dem Anlegen über
-          „Bearbeiten" ergänzen.
+          „Bearbeiten" ergänzen — insgesamt bis zu 20 Anhänge pro Idee.
         </small>
 
         <div class="row">

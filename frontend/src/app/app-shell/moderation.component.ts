@@ -584,6 +584,7 @@ import { IdeaDetailComponent } from './idea-detail.component';
       display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px;
       font-size: .82rem; font-weight: 600; color: #b00020;
     }
+    .publish-msg { font-size: .8rem; color: #137333; align-self: center; }
     /* Inhalts-Verwaltungs-Liste: Titel umbricht statt die Spalten nach rechts
        aus dem Bild zu schieben; Aktionen dürfen bei Platzmangel umbrechen. */
     .mi-list .tax-row {
@@ -875,6 +876,14 @@ import { IdeaDetailComponent } from './idea-detail.component';
                     </span>
                   } @else {
                     <button class="btn" (click)="startEditIdea(it.id)">Bearbeiten</button>
+                    <button class="btn" (click)="publishFix(it)"
+                            [disabled]="publishBusy() === it.id"
+                            title="Macht das Original öffentlich lesbar und behebt fehlende Vorschau-Rechte (insufficient permissions) — nötig, wenn das Einsortieren das Original nicht veröffentlicht hat">
+                      {{ publishBusy() === it.id ? '…' : '🛡 Vorschau reparieren' }}
+                    </button>
+                    @if (publishResult[it.id]) {
+                      <span class="publish-msg">{{ publishResult[it.id] }}</span>
+                    }
                     @if (it.hidden) {
                       <button class="btn primary-move" (click)="setVisibility(it, false)"
                               [disabled]="visBusy() === it.id">
@@ -2782,6 +2791,7 @@ export class ModerationComponent implements OnInit {
       idea_contact_changed: 'Kontaktdaten geändert',
       idea_hidden: 'Idee versteckt',
       idea_unhidden: 'Idee wieder eingeblendet',
+      idea_published: 'Vorschau-Rechte gesetzt (veröffentlicht)',
       phase_changed: 'Phase gewechselt',
       // Anhänge
       attachment_uploaded: 'Anhang hochgeladen',
@@ -3559,6 +3569,29 @@ export class ModerationComponent implements OnInit {
     this.editId.set(null);
     this.loadAllIdeas();
     this.loadHidden();
+  }
+
+  /** „Vorschau reparieren": macht das Original der Idee öffentlich lesbar, damit
+   *  die eingebettete (anonyme) Vorschau/Render nicht „insufficient permissions"
+   *  zeigt. Nötig für Ideen, deren Einsortieren das Original nicht veröffentlicht
+   *  hat (Altfälle vor dem Move-Publish-Fix). */
+  publishBusy = signal<string | null>(null);
+  publishResult: Record<string, string> = {};
+  publishFix(it: { id: string }) {
+    this.publishBusy.set(it.id);
+    delete this.publishResult[it.id];
+    this.api.publishIdea(it.id).subscribe({
+      next: (r) => {
+        this.publishBusy.set(null);
+        this.publishResult[it.id] = r.was_public
+          ? '✓ war bereits öffentlich'
+          : '✓ veröffentlicht — Vorschau klappt jetzt';
+      },
+      error: (e) => {
+        this.publishBusy.set(null);
+        this.publishResult[it.id] = 'Fehler: ' + (e?.error?.detail || e?.status || 'unbekannt');
+      },
+    });
   }
 
   // Endgültiges Löschen einer Idee — zweistufig (Inline-Bestätigung).

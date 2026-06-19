@@ -246,6 +246,16 @@ export class ApiService {
     );
   }
 
+  /** Macht das Original einer Idee öffentlich lesbar — repariert die anonyme
+   *  Vorschau/Render nach dem Einsortieren (Mod). */
+  publishIdea(ideaId: string): Observable<{ ok: boolean; original_id: string; was_public: boolean }> {
+    return this.http.post<any>(
+      `${this.base}/moderation/ideas/${encodeURIComponent(ideaId)}/publish`,
+      null,
+      { headers: this.authHeaders() },
+    );
+  }
+
   /** Sync-Differenz App-Cache ↔ edu-sharing (Mod-Diagnose). */
   syncDiff(): Observable<{
     missing: { id: string; title: string; challenge: string }[];

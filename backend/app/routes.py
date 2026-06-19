@@ -1235,7 +1235,11 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
             sz = int(sz)
         except (TypeError, ValueError):
             sz = 0
-        return bool(att.get("download_url")) or sz > 0
+        # download_url ist bei edu-sharing IMMER gesetzt (auch für inhaltslose
+        # Idee-Knoten) und daher KEIN verlässliches Signal — sonst erscheint der
+        # leere Idee-Knoten selbst als „Datei" mit kaputtem Download. Echter
+        # Datei-Inhalt zeigt sich an Bytes (size) oder einem konkreten mimetype.
+        return sz > 0 or bool(att.get("mimetype"))
 
     attachments: list[dict] = []
     if row["kind"] == "io":
@@ -2448,7 +2452,15 @@ async def inbox_item_preview(
     # Brainstorm-Karten ohne Bytes/Link nicht listen) + Child-Objekte (Serie).
     attachments: list[dict] = []
     self_att = _attachment_from_node(node)
-    if self_att.get("download_url") or (self_att.get("size") or 0):
+    # Nur listen, wenn der Knoten echten Datei-Inhalt trägt — der leere
+    # Idee-Knoten selbst (reine Karte) hätte sonst einen kaputten Download.
+    # download_url ist immer gesetzt und daher kein verlässliches Signal.
+    _self_sz = self_att.get("size") or 0
+    try:
+        _self_sz = int(_self_sz)
+    except (TypeError, ValueError):
+        _self_sz = 0
+    if _self_sz > 0 or self_att.get("mimetype"):
         attachments.append(self_att)
     try:
         for child in await edu_sharing.client.list_child_objects(
@@ -2629,10 +2641,22 @@ async def upload_idea_preview(
     file: UploadFile = File(...),
     authorization: str | None = Header(None),
 ):
-    """Setzt das Vorschaubild ans ccm:io der Idee (Owner/Mod/Mitwirkende)."""
+    """Setzt das Vorschaubild ans ccm:io der Idee (Owner/Mod/Mitwirkende).
+
+    Anonyme Einreicher dürfen ihr Vorschaubild an die FRISCH eingereichte, noch
+    nicht einsortierte Idee hängen — der Upload läuft dann über den WLO-Gast
+    (dafür ist er da). Bereits einsortierte Ideen liegen im Cache und verlangen
+    eine Anmeldung."""
     if not authorization:
-        raise HTTPException(401, "Anmeldung erforderlich")
-    if not (await _can_edit_idea(idea_id, authorization))[0]:
+        with connect() as con:
+            cached = con.execute(
+                "SELECT 1 FROM idea WHERE id=? OR original_id=?", (idea_id, idea_id)
+            ).fetchone()
+        if cached:
+            raise HTTPException(
+                403, "Für bereits einsortierte Ideen ist zum Bearbeiten eine Anmeldung nötig."
+            )
+    elif not (await _can_edit_idea(idea_id, authorization))[0]:
         raise HTTPException(
             403, "Keine Berechtigung, diese Idee zu bearbeiten (nur Team/Moderation)."
         )
@@ -2696,6 +2720,36 @@ class BulkMoveRequest(BaseModel):
     target_topic_id: str
 
 
+async def _publish_original_safe(node_id: str, authorization: str | None) -> bool:
+    """Best-effort: Original-Knoten öffentlich lesbar machen, damit die
+    eingebettete (anonyme) Vorschau/Render nach dem Einsortieren funktioniert.
+    edu-sharing publiziert das Original beim Referenzieren NICHT automatisch.
+    Scheitert das Publish (z.B. fehlendes ChangePermissions), bleibt der Move
+    trotzdem gültig — die Mod kann es über „Vorschau reparieren" nachholen."""
+    if not node_id:
+        return False
+    try:
+        await edu_sharing.client.publish_node(node_id, auth_header=authorization)
+        return True
+    except Exception as e:
+        log.warning("publish_node(%s) nach Einsortieren fehlgeschlagen: %s", node_id, e)
+        return False
+
+
+async def _unpublish_original_safe(node_id: str, authorization: str | None) -> bool:
+    """Best-effort-Gegenstück zu `_publish_original_safe`: entzieht dem Original
+    die öffentliche Freigabe (beim Verstecken/Löschen), damit kein anonym
+    erreichbarer Rest übrig bleibt. Scheitert es, bleibt die Aktion gültig."""
+    if not node_id:
+        return False
+    try:
+        await edu_sharing.client.unpublish_node(node_id, auth_header=authorization)
+        return True
+    except Exception as e:
+        log.warning("unpublish_node(%s) fehlgeschlagen: %s", node_id, e)
+        return False
+
+
 async def _reference_into_collection(
     source_id: str,
     target_topic_id: str,
@@ -2732,6 +2786,9 @@ async def _reference_into_collection(
                     source_id,
                     target_topic_id,
                 )
+                # Auch im idempotenten Pfad veröffentlichen — heilt Altfälle,
+                # die referenziert, aber nie öffentlich gemacht wurden.
+                await _publish_original_safe(source_id, authorization)
                 return existing
         raise
 
@@ -2749,6 +2806,9 @@ async def _reference_into_collection(
                 )
         except Exception as e:
             log.warning("upsert nach addReference für %s: %s", ref_id, e)
+    # Original öffentlich lesbar machen, damit die (anonyme) Vorschau/Render
+    # nach dem Einsortieren funktioniert (sonst „insufficient permissions").
+    await _publish_original_safe(source_id, authorization)
     return ref_id or source_id
 
 
@@ -3006,6 +3066,44 @@ async def move_to_topic(
     )
 
     return {"ok": True, "moved_to": t["title"], "result_id": new_id}
+
+
+@router.post("/moderation/ideas/{idea_id}/publish", tags=["moderation"])
+async def publish_idea(idea_id: str, authorization: str | None = Header(None)):
+    """Macht das Original einer Idee öffentlich lesbar (GROUP_EVERYONE/Consumer),
+    damit Vorschau/Render auch für anonyme Betrachter funktioniert.
+
+    Reparatur-Endpoint für die Moderation: Beim Einsortieren wird die Idee nur
+    als Reference in die Sammlung gehängt; das Original bleibt in der Inbox und
+    ist u.U. nicht öffentlich → die eingebettete (anonyme) Vorschau zeigt
+    „insufficient permissions". Dieser Endpoint holt die Veröffentlichung
+    nachträglich nach. Nur Moderation.
+
+    Das eigentliche Original wird live über `ccm:original` ermittelt (robust für
+    Referenz- wie Original-Knoten)."""
+    await _require_moderator(authorization)
+    try:
+        meta = await edu_sharing.client.node_metadata(idea_id, auth_header=authorization)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:160]}")
+    node = (meta or {}).get("node") or {}
+    if not node:
+        raise HTTPException(404, "Idee nicht gefunden")
+    props = node.get("properties") or {}
+    original = (props.get("ccm:original") or [None])[0] or idea_id
+    try:
+        was_public = await edu_sharing.client.publish_node(original, auth_header=authorization)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:160]}")
+    _log_activity(
+        action="idea_published",
+        authorization=authorization,
+        is_mod=True,
+        target_type="idea",
+        target_id=idea_id,
+        detail={"original_id": original, "was_public": was_public},
+    )
+    return {"ok": True, "original_id": original, "was_public": was_public}
 
 
 # Selbstregistrierung läuft extern über https://wirlernenonline.de/register/.
@@ -3692,6 +3790,12 @@ async def delete_idea(
             "Diese Idee gehört nicht dir. Nur der Einreicher oder die Moderation kann sie löschen.",
         )
 
+    # Titel + Original-ID VOR dem Löschen retten (für Log + Original-Cleanup).
+    with connect() as con:
+        pre = con.execute("SELECT title, original_id FROM idea WHERE id = ?", (idea_id,)).fetchone()
+    deleted_title: str | None = pre["title"] if pre else None
+    original_id: str | None = pre["original_id"] if pre else None
+
     try:
         await edu_sharing.client.delete_node(idea_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
@@ -3703,11 +3807,25 @@ async def delete_idea(
         else:
             raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
 
-    # Cache aufräumen + Titel für Log retten BEVOR wir löschen
-    deleted_title: str | None = None
+    # Original (Inbox-Knoten) mitlöschen, damit keine — durch den Publish-Fix
+    # jetzt ÖFFENTLICHE — Waise zurückbleibt. `delete_node(idea_id)` löscht nur
+    # die Sammlungs-Referenz. NUR löschen, wenn (a) idea_id wirklich eine
+    # Referenz war (eigenes Original vorhanden) und (b) keine ANDERE Referenz
+    # dieses Original noch nutzt (Mehrfach-Referenz-Schutz über die App-DB).
+    if original_id and original_id != idea_id:
+        with connect() as con:
+            others = con.execute(
+                "SELECT COUNT(*) AS c FROM idea WHERE original_id = ? AND id != ?",
+                (original_id, idea_id),
+            ).fetchone()["c"]
+        if others == 0:
+            try:
+                await edu_sharing.client.delete_node(original_id, auth_header=authorization)
+            except Exception as e:
+                log.warning("delete_idea: Original %s nicht gelöscht: %s", original_id, e)
+
+    # Cache aufräumen
     with connect() as con:
-        row = con.execute("SELECT title FROM idea WHERE id = ?", (idea_id,)).fetchone()
-        deleted_title = row["title"] if row else None
         con.execute("DELETE FROM idea WHERE id = ?", (idea_id,))
         con.execute("DELETE FROM idea_fts WHERE id = ?", (idea_id,))
         con.execute("DELETE FROM idea_interaction WHERE idea_id = ?", (idea_id,))
@@ -4590,10 +4708,21 @@ async def upload_attachment(
 ):
     """Lädt einen Anhang direkt als Child-IO (`ccm:childio` +
     `ccm:io_childobject`-Aspekt) unter die Idee. App-Gate: Owner/Mod/
-    angenommene Mitwirkende."""
+    angenommene Mitwirkende.
+
+    Anonyme Einreicher dürfen Anhänge an die FRISCH eingereichte, noch nicht
+    einsortierte Idee hängen — der Upload läuft dann über den WLO-Gast.
+    Bereits einsortierte Ideen liegen im Cache und verlangen eine Anmeldung."""
     if not authorization:
-        raise HTTPException(401, "Anmeldung erforderlich")
-    if not (await _can_edit_idea(idea_id, authorization))[0]:
+        with connect() as con:
+            cached = con.execute(
+                "SELECT 1 FROM idea WHERE id=? OR original_id=?", (idea_id, idea_id)
+            ).fetchone()
+        if cached:
+            raise HTTPException(
+                403, "Für bereits einsortierte Ideen ist zum Anhängen eine Anmeldung nötig."
+            )
+    elif not (await _can_edit_idea(idea_id, authorization))[0]:
         raise HTTPException(
             403, "Keine Berechtigung, an diese Idee Anhänge zu hängen (nur Team/Moderation)."
         )
@@ -4614,6 +4743,13 @@ async def upload_attachment(
     except Exception:
         existing = []
     order = len(existing)
+    # Gesamt-Obergrenze pro Idee serverseitig durchsetzen (Frontend-Limit allein
+    # reicht nicht, seit anonyme Uploads über den Gast laufen).
+    if order >= settings.max_attachments_per_idea:
+        raise HTTPException(
+            409,
+            f"Maximal {settings.max_attachments_per_idea} Anhänge pro Idee erreicht.",
+        )
 
     try:
         result = await edu_sharing.client.add_child_object(
@@ -5320,7 +5456,7 @@ async def hide_idea(
     reason = (body or {}).get("reason") if isinstance(body, dict) else None
     with connect() as con:
         row = con.execute(
-            "SELECT title FROM idea WHERE id=?",
+            "SELECT title, original_id FROM idea WHERE id=?",
             (idea_id,),
         ).fetchone()
         if not row:
@@ -5329,6 +5465,10 @@ async def hide_idea(
             "UPDATE idea SET hidden = 1, hidden_reason = ? WHERE id=?",
             (reason, idea_id),
         )
+    # Öffentliche Freigabe des Originals entziehen, damit die versteckte Idee
+    # auch direkt über edu-sharing nicht mehr anonym erreichbar ist (das App-DB-
+    # Flag allein blendet sie nur in der App aus).
+    await _unpublish_original_safe(row["original_id"] or idea_id, authorization)
     _log_activity(
         action="idea_hidden",
         authorization=authorization,
@@ -5350,7 +5490,7 @@ async def unhide_idea(
     await _require_moderator(authorization)
     with connect() as con:
         row = con.execute(
-            "SELECT title FROM idea WHERE id=?",
+            "SELECT title, original_id FROM idea WHERE id=?",
             (idea_id,),
         ).fetchone()
         if not row:
@@ -5359,6 +5499,9 @@ async def unhide_idea(
             "UPDATE idea SET hidden = 0, hidden_reason = NULL WHERE id=?",
             (idea_id,),
         )
+    # Wieder veröffentlichen, damit Vorschau/Inhalt erneut anonym sichtbar sind
+    # (symmetrisch zum Un-Publish beim Verstecken).
+    await _publish_original_safe(row["original_id"] or idea_id, authorization)
     _log_activity(
         action="idea_unhidden",
         authorization=authorization,

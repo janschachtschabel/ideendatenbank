@@ -708,7 +708,7 @@ import { ShareDialogComponent } from './share-dialog.component';
 
           <!-- Vorschaubild ersetzen ───────────────────────────────────── -->
           <div class="upload-row">
-            <label>Vorschaubild</label>
+            <label>Vorschaubild <small style="font-weight:400; opacity:.6">(max. 10 MB)</small></label>
             @if (i.preview_url) {
               <div class="preview-thumb">
                 <img [src]="previewSrc(i.preview_url)" alt="Aktuelle Vorschau" />
@@ -792,6 +792,7 @@ import { ShareDialogComponent } from './share-dialog.component';
               <input type="file" (change)="onAttachmentPick($event, i.id)" hidden />
               ➕ {{ folderUploadBusy ? folderUploadStatus : 'Datei als Anhang hochladen' }}
             </label>
+            <small class="meta" style="display:block; margin-top:4px">Bis zu 20 Anhänge pro Idee, je max. 50 MB.</small>
             @if (folderUploadError) { <div class="error">{{ folderUploadError }}</div> }
           </div>
 
@@ -1001,7 +1002,8 @@ import { ShareDialogComponent } from './share-dialog.component';
                   </label>
                   @if (folderUploadError) { <div class="error">{{ folderUploadError }}</div> }
                   <p class="hint">
-                    Anhänge werden direkt unter der Idee gespeichert (Serienobjekt).
+                    Anhänge werden direkt unter der Idee gespeichert (Serienobjekt) —
+                    bis zu 20 pro Idee, je max. 50 MB.
                     Beim Löschen der Idee werden sie automatisch mit entfernt.
                   </p>
                 </div>

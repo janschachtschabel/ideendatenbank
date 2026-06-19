@@ -583,7 +583,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
             } @else {
               <div class="topics-hero">
                 <h2>Themenbereiche durchstöbern</h2>
-                <p>Elf Themenbereiche rund um bessere OER-Infrastrukturen. Klick
+                <p>{{ rootTopics().length }} Themenbereiche rund um bessere OER-Infrastrukturen. Klick
                    auf eine Karte, um die Herausforderungen des Themenbereichs zu sehen.</p>
               </div>
               <div class="topic-grid-compact">

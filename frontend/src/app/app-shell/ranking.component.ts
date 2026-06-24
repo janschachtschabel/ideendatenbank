@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+
 import {
   ChangeDetectionStrategy,
   Component,
@@ -7,8 +7,10 @@ import {
   OnChanges,
   Output,
   SimpleChanges,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { ApiService } from '../api.service';
 import { Idea, VotingMode } from '../models';
@@ -36,7 +38,7 @@ interface RankItem {
 @Component({
   standalone: true,
   selector: 'ideendb-ranking',
-  imports: [CommonModule, ShareDialogComponent],
+  imports: [ShareDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host { display: block; }
@@ -620,6 +622,30 @@ export class RankingComponent implements OnChanges {
   api = inject(ApiService);
   private voting = inject(VotingService);
 
+  /** Letzter gesehener globaler Voting-Modus — Wächter, um die Rangliste genau
+   *  EINMAL nachzuladen, wenn der Modus asynchron aus /settings eintrifft. */
+  private _lastMode: VotingMode | null = null;
+
+  constructor() {
+    // Bewertungs-Rangliste neu laden, sobald der globale Voting-Modus aus
+    // /settings eintrifft. `voting.load()` ist asynchron; der erste Fetch in
+    // `ngOnChanges` läuft sonst noch mit dem Default 'stars' und holt damit den
+    // Sterne-Score (sort=rating, z. B. 4.53) — der dann unter dem inzwischen
+    // auf 👍 gewechselten Daumen-Icon steht. Nur bei der Bewertungs-Sortierung
+    // relevant, da nur dort der Modus die Backend-Sortierung (rating ↔ likes)
+    // umschaltet.
+    effect(() => {
+      const m = this.voting.globalMode();
+      untracked(() => {
+        const prev = this._lastMode;
+        this._lastMode = m;
+        if (prev !== null && prev !== m && this.sortKey() === 'rating') {
+          this.load(true);
+        }
+      });
+    });
+  }
+
   /** Effektiver Modus für den aktuellen Filter-Kontext (Event oder global). */
   mode(): VotingMode {
     return this.voting.effective(this.eventFilter());
@@ -867,7 +893,10 @@ export class RankingComponent implements OnChanges {
     const items = (this.data()?.items || []).slice(0, this.TOP_FOR_CHART);
     const useDecay = this.barsUseDecay();
     const valOf = (t: RankItem) => (useDecay ? this.decayVal(t) : this.absoluteVal(t));
-    const max = Math.max(1, ...items.map(valOf));
+    // Nenner nur gegen Division-durch-0 absichern (NICHT auf 1 anheben): im
+    // Daumen-Modus liegt der Spitzen-Verfallswert unter 1 (z. B. 0,91), sonst
+    // erreichte der oberste Balken nie 100 % und die Skala spränge auf „1".
+    const max = Math.max(0.0001, ...items.map(valOf));
     return items.map((t, i) => ({
       id: t.idea?.id || String(i),
       rank: t.rank,
@@ -881,7 +910,10 @@ export class RankingComponent implements OnChanges {
   barMax(): string {
     const useDecay = this.barsUseDecay();
     const items = (this.data()?.items || []).slice(0, this.TOP_FOR_CHART);
-    const max = Math.max(1, ...items.map((t) => (useDecay ? this.decayVal(t) : this.absoluteVal(t))));
+    // Echten Spitzenwert anzeigen (Daumen-Verfall kann < 1 sein) — konsistent
+    // zur Trend-Box auf den Event-Seiten (rank-trend), die ebenfalls den rohen
+    // Max-Wert zeigt statt auf eine ganze Zahl aufzurunden.
+    const max = Math.max(0, ...items.map((t) => (useDecay ? this.decayVal(t) : this.absoluteVal(t))));
     return this.fmtScore(max, useDecay);
   }
   selectBar(b: { idea?: Idea | null }) { if (b.idea) this.ideaSelected.emit(b.idea); }

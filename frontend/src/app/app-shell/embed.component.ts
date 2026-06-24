@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ApiService } from '../api.service';
 
@@ -11,7 +11,7 @@ import { ApiService } from '../api.service';
 @Component({
   selector: 'ideendb-embed',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host { display: block; max-width: 1200px;

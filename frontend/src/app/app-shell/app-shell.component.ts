@@ -782,6 +782,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
         @case ('detail') {
           <ideendb-idea-detail
             [ideaId]="currentIdeaId()!"
+            [initialIdea]="currentIdea()"
             [apiBase]="apiBase"
             [repoBaseUrl]="repoBaseUrl()"
             (back)="go('browser')"
@@ -879,6 +880,9 @@ export class AppShellComponent implements OnInit {
 
   view = signal<View>('home');
   currentIdeaId = signal<string | null>(null);
+  // Beim Klick bekanntes Idee-Objekt (aus der Liste) → Detailseite rendert den
+  // Kern sofort, get_idea lädt die Live-Teile (Kommentare/Dokumente) nach (B-lite).
+  currentIdea = signal<Idea | null>(null);
   /** Aus URL-Query gelesener Event-Slug, der ans Submit-Formular durchgereicht wird. */
   presetEventForSubmit: string | null = null;
   /** Vorausgewählte Herausforderung fürs Submit-Formular (Mitmach-Kachel). */
@@ -1106,6 +1110,7 @@ export class AppShellComponent implements OnInit {
   }
 
   openIdea(i: Idea) {
+    this.currentIdea.set(i);
     this.currentIdeaId.set(i.id);
     this.go('detail');
   }

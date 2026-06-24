@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+
 import {
   Component,
   EventEmitter,
@@ -6,6 +6,7 @@ import {
   Output,
   signal,
 } from '@angular/core';
+import qrcode from 'qrcode-generator';
 
 /** Optionales Mehrfach-Ziel: mehrere Links (je mit eigenem QR-Code) in EINEM
  *  Dialog — z.B. „Eventseite" + „Idee einreichen". */
@@ -18,8 +19,8 @@ export interface ShareTarget {
 
 /**
  * Wiederverwendbares Share-Modal: zeigt einen kopierbaren Link, einen
- * QR-Code (extern via qrserver.com — keine PII enthalten) und optional
- * ein Embed-Snippet für den Web-Component-Einbau.
+ * QR-Code (lokal im Browser erzeugt — kein externer Dienst, DSGVO-konform) und
+ * optional ein Embed-Snippet für den Web-Component-Einbau.
  *
  * Nutzung:
  *   <ideendb-share-dialog
@@ -37,7 +38,7 @@ export interface ShareTarget {
 @Component({
   selector: 'ideendb-share-dialog',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   styles: [`
     :host { display: contents; }
     .backdrop {
@@ -226,8 +227,50 @@ export class ShareDialogComponent {
   private copyTimer?: number;
   private embedTimer?: number;
 
+  /** Cache (size|url → Data-URI), damit die wiederholten Template-Aufrufe während
+   *  der Change Detection den QR nicht bei jedem Zyklus neu rendern. */
+  private qrCache = new Map<string, string>();
+
+  /**
+   * Erzeugt einen QR-Code lokal im Browser (kein externer Dienst) und gibt ihn
+   * als PNG-Data-URI zurück — direkt nutzbar als `img[src]` und als Download.
+   * `size` ist die ungefähre Zielkantenlänge in Pixeln. Ergebnis wird gecached.
+   */
   qrFor(url: string, size: number): string {
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(url)}`;
+    const key = `${size}|${url}`;
+    const cached = this.qrCache.get(key);
+    if (cached !== undefined) return cached;
+    const qr = qrcode(0, 'M'); // type 0 = automatische Größe, Fehlerkorrektur „M"
+    qr.addData(url);
+    qr.make();
+    // getModuleCount()/isDark() sind reale Methoden der Lib, fehlen aber in den @types.
+    const api = qr as unknown as {
+      getModuleCount(): number;
+      isDark(row: number, col: number): boolean;
+    };
+    const count = api.getModuleCount();
+    const quiet = 4; // Ruhezone in Modulen (QR-Spezifikation)
+    const total = count + quiet * 2;
+    const cell = Math.max(1, Math.floor(size / total));
+    const dim = cell * total;
+    const canvas = document.createElement('canvas');
+    canvas.width = dim;
+    canvas.height = dim;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, dim, dim);
+    ctx.fillStyle = '#000000';
+    for (let r = 0; r < count; r++) {
+      for (let c = 0; c < count; c++) {
+        if (api.isDark(r, c)) {
+          ctx.fillRect((c + quiet) * cell, (r + quiet) * cell, cell, cell);
+        }
+      }
+    }
+    const dataUrl = canvas.toDataURL('image/png');
+    this.qrCache.set(key, dataUrl);
+    return dataUrl;
   }
 
   qrUrl(size: number): string {

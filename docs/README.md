@@ -6,6 +6,7 @@ Diese Doku-Sammlung deckt Installation, Architektur, Endnutzung und Moderation a
 
 | Dokument | Inhalt |
 |---|---|
+| [DEPLOYMENT.md](DEPLOYMENT.md) | **Deployment-Plan Staging & Prod**: Umgebungen, URLs, edu-sharing-Anbindung je Umgebung, Container-Env, Smoke-Test |
 | [INSTALL-DOCKER.md](INSTALL-DOCKER.md) | Vollständige Server-Installation: Docker, nginx + TLS, Backup-Strategie, Härtung, Troubleshooting |
 | [DOCKER-UPDATE.md](DOCKER-UPDATE.md) | Schnellreferenz fürs Image-Update |
 
@@ -13,8 +14,12 @@ Diese Doku-Sammlung deckt Installation, Architektur, Endnutzung und Moderation a
 
 | Dokument | Inhalt |
 |---|---|
-| [ARCHITEKTUR.md](ARCHITEKTUR.md) | Eingesetzte Techniken in Backend & Frontend |
+| [ARCHITEKTUR-UEBERSICHT.md](ARCHITEKTUR-UEBERSICHT.md) | **Kompakte Übersicht für die IT-Abnahme & -Prüfung** (System, Stack, Rechte-/Sicherheitsmodell, Betrieb, Prüf-Checkliste) — Einstiegspunkt |
+| [ARCHITEKTUR.md](ARCHITEKTUR.md) | Eingesetzte Techniken in Backend & Frontend (Detailtiefe) |
 | [EDU-SHARING-ZUSAMMENSPIEL.md](EDU-SHARING-ZUSAMMENSPIEL.md) | Wo App-Cache/-DB vs. edu-sharing genutzt wird und wie das Zusammenspiel funktioniert |
+| [SICHERHEIT-ABHAENGIGKEITEN.md](SICHERHEIT-ABHAENGIGKEITEN.md) | Sicherheits-Status der Abhängigkeiten (Backend/Frontend), was im Hotfix gepatcht wurde, Restrisiken |
+| [AUTH-OAUTH-SPIKE.md](AUTH-OAUTH-SPIKE.md) | OAuth-Machbarkeit bei edu-sharing: Spike-Befunde, was vom Admin fehlt, Selbst-Test-Rezept, Entscheidung (vorerst Basic-Härtung) |
+| [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) | Bewusste Auth-Trade-offs: Basic im sessionStorage (+ Interceptor-Schutz), Mod-Status-Cache (60 s TTL), warum kein `Depends()`-Layer |
 
 Architektur-Kurzüberblick, Datenmodell und alle Env-Variablen stehen außerdem in
 der [`../README.md`](../README.md) in der Repo-Wurzel.

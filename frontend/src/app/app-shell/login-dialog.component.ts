@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { ApiService } from '../api.service';
@@ -11,7 +11,7 @@ type Mode = 'login' | 'register';
 @Component({
   selector: 'ideendb-login-dialog',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   styles: [`
     :host { display: block; }
     .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;

@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+
 import { Component, Input } from '@angular/core';
 
 /** Statische Rechtsseiten der HackathOERn Ideendatenbank.
@@ -12,7 +12,7 @@ import { Component, Input } from '@angular/core';
 @Component({
   selector: 'ideendb-legal',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   styles: [`
     :host {
       display: block;

@@ -1,0 +1,26 @@
+{{ .Chart.Name }} {{ .Chart.Version }} (app {{ default .Chart.AppVersion .Values.image.tag }}) deployed.
+
+Image: {{ include "ideendatenbank.image" . }}
+
+{{- if .Values.ingress.enabled }}
+
+URL(s):
+{{- range .Values.ingress.hosts }}
+{{- $scheme := "http" }}
+{{- if $.Values.ingress.tls }}{{ $scheme = "https" }}{{ end }}
+  {{ $scheme }}://{{ . }}{{ index $.Values.ingress.paths 0 }}
+{{- end }}
+{{- else }}
+
+No ingress enabled. Reach the app via port-forward:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ideendatenbank.fullname" . }} 8000:{{ .Values.service.port }}
+  open http://localhost:8000
+{{- end }}
+
+Health check: GET /api/v1/health
+{{- if not .Values.config.edu.guestUser }}
+
+WARNING: config.edu.guestUser / config.edu.guestPass were not set — the
+release will fail to render. Provide the edu-sharing guest credentials, e.g.:
+  --set config.edu.guestUser=... --set config.edu.guestPass=...
+{{- end }}

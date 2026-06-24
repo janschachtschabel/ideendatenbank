@@ -14,7 +14,7 @@ zusammenspielt (was im Cache, was im Repo liegt), steht separat in
    FastAPI-Backend (ein Prozess)
    ├── Routen (REST, /api/v1/*) + Rate-Limiting
    ├── EduSharingClient (httpx async)
-   ├── Sync-Worker (asyncio-Loop, alle 5 min)
+   ├── Sync-Worker (asyncio-Loop, alle 15 min)
    ├── Backup-Worker (asyncio-Loop)
    └── SQLite (WAL + FTS5)  ◄── lokaler Lese-Cache + App-eigene Daten
             │
@@ -102,7 +102,7 @@ einem `try/except` aus, sodass alte DBs beim Deploy automatisch mitziehen.
 
 ### Sync-Worker (Periodischer Voll-Sync)
 
-Ein asyncio-Task läuft alle `SYNC_INTERVAL_SECONDS` (Default 300 s = 5 min),
+Ein asyncio-Task läuft alle `SYNC_INTERVAL_SECONDS` (Default 900 s = 15 min),
 serialisiert über einen `asyncio.Lock` (kein Doppellauf). Der Walk geht
 Root-Sammlung → Themenbereiche → Herausforderungen → **Reference-Knoten** und
 schreibt jede Idee per `_upsert_idea` (`INSERT … ON CONFLICT DO UPDATE`) in den

@@ -2,7 +2,7 @@
 #
 # Ideendatenbank — kombiniertes Image (Backend + gebautes Frontend)
 #
-# Stage 1: Frontend bauen (Node 20)
+# Stage 1: Frontend bauen (Node 22)
 # Stage 2: Backend mit FastAPI + slim Python, kopiert das gebaute Bundle rein
 # Laufzeit: uvicorn serviert API + Bundle aus dem gleichen Container.
 #
@@ -13,9 +13,9 @@
 # =========================================================================
 # Stage 1 — Frontend bauen
 # =========================================================================
-# Node 22 LTS: Angular 19 + @angular-eslint 21 + typescript-eslint 8
-# erwarten >=20.19; Node 20 in der `slim`-Variante hängt auf 20.x ohne
-# Patch-Updates und führte beim CI-Build zu Auflösungsfehlern.
+# Node 22 LTS: Angular 21 + @angular-eslint 21 + typescript-eslint 8
+# erwarten Node ^20.19 || ^22.12 || ^24; node:22 erfüllt das. (Node 20 in der
+# `slim`-Variante hing auf 20.x ohne Patch-Updates → CI-Auflösungsfehler.)
 FROM node:22-bookworm-slim AS frontend-builder
 
 WORKDIR /build

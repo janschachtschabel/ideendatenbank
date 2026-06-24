@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+
 import {
   Component,
   Input,
@@ -28,7 +28,7 @@ interface RankItem {
 @Component({
   standalone: true,
   selector: 'ideendb-rank-trend',
-  imports: [CommonModule],
+  imports: [],
   styles: [`
     :host { display: block; }
     .card {

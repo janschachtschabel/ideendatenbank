@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnInit, Output, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
@@ -16,7 +16,7 @@ interface TeamRequest {
 @Component({
   selector: 'ideendb-profile',
   standalone: true,
-  imports: [CommonModule, FormsModule, ShareDialogComponent],
+  imports: [FormsModule, ShareDialogComponent],
   styles: [`
     :host { display: block; }
     .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }

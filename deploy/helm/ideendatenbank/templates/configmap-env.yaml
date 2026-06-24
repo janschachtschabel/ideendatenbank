@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ideendatenbank.fullname" . }}-env
+  labels: {{ include "ideendatenbank.labels" . | nindent 4 }}
+data:
+  # ---- App ----
+  APP_HOST: "0.0.0.0"
+  APP_PORT: {{ .Values.service.port | quote }}
+  APP_CORS_ORIGINS: {{ .Values.config.app.corsOrigins | quote }}
+
+  # ---- Daten ----
+  SQLITE_PATH: {{ printf "%s/ideendb.sqlite" .Values.persistence.mountPath | quote }}
+  SYNC_INTERVAL_SECONDS: {{ .Values.config.app.syncIntervalSeconds | quote }}
+
+  # ---- edu-sharing ----
+  EDU_REPO_BASE_URL: {{ .Values.config.edu.repoBaseUrl | quote }}
+  EDU_REPO_API: {{ .Values.config.edu.repoApi | quote }}
+  EDU_GUEST_INBOX_ID: {{ .Values.config.edu.guestInboxId | quote }}
+  IDEENDB_ROOT_COLLECTION_ID: {{ .Values.config.edu.rootCollectionId | quote }}
+
+  # ---- Backup ----
+  BACKUP_ENABLED: {{ .Values.config.backup.enabled | quote }}
+  BACKUP_DIR: {{ printf "%s/backups" .Values.persistence.mountPath | quote }}
+  BACKUP_INTERVAL_HOURS: {{ .Values.config.backup.intervalHours | quote }}
+  BACKUP_KEEP: {{ .Values.config.backup.keep | quote }}
+  BACKUP_AUTO_RESTORE_MARKER: {{ .Values.config.backup.autoRestoreMarker | quote }}
+
+  # ---- Upload-Limits ----
+  UPLOAD_IMAGE_MAX_BYTES: {{ .Values.config.upload.imageMaxBytes | quote }}
+  UPLOAD_CONTENT_MAX_BYTES: {{ .Values.config.upload.contentMaxBytes | quote }}
+  UPLOAD_ATTACHMENT_MAX_BYTES: {{ .Values.config.upload.attachmentMaxBytes | quote }}
+  UPLOAD_RESTORE_MAX_BYTES: {{ .Values.config.upload.restoreMaxBytes | quote }}
+
+  # ---- Moderation ----
+  MODERATION_FALLBACK_GROUPS: {{ .Values.config.moderation.fallbackGroups | quote }}
+  MODERATION_BOOTSTRAP_USERS: {{ .Values.config.moderation.bootstrapUsers | quote }}
+
+  {{- if .Values.config.llm.enabled }}
+  # ---- LLM ----
+  LLM_BASE_URL: {{ .Values.config.llm.baseUrl | quote }}
+  LLM_MODEL: {{ .Values.config.llm.model | quote }}
+  {{- end }}
+  {{- range $key, $value := .Values.config.extraEnv }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

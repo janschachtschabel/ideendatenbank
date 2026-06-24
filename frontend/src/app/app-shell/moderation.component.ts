@@ -1582,9 +1582,12 @@ import { IdeaDetailComponent } from './idea-detail.component';
             @if (syncDiffData(); as d) {
               <div class="intro" style="margin-bottom:12px">
                 Dry-Run-Abgleich: {{ d.cache_count }} im App-Cache · {{ d.live_count }}
-                in Sammlungen referenziert. Bei Auffälligkeiten den „edu-sharing Sync"
-                oben auslösen.
+                in Sammlungen referenziert. <strong>Fehlende</strong> über „edu-sharing Sync"
+                (oben) nachziehen, <strong>Karteileichen</strong> unten gezielt bereinigen.
               </div>
+              @if (syncDiffMsg()) {
+                <div class="intro" style="margin-bottom:12px; color:var(--wlo-success)">{{ syncDiffMsg() }}</div>
+              }
               @if (d.in_sync && !staleHidden().length) {
                 <div class="empty"><p>✅ App-Cache und edu-sharing sind synchron.</p></div>
               } @else {
@@ -1614,14 +1617,54 @@ import { IdeaDetailComponent } from './idea-detail.component';
                 @if (staleReal().length) {
                   <h3 style="margin:16px 0 6px; font-size:1rem">Karteileichen im Cache ({{ staleReal().length }})</h3>
                   <p style="font-size:.85rem; color:var(--wlo-muted); margin:0 0 8px">
-                    Im App-Cache, aber in keiner Sammlung mehr referenziert (Knoten gelöscht/umgehängt) — werden beim nächsten Sync bereinigt.
+                    Im App-Cache, aber in keiner Sammlung referenziert. Aktion je nach
+                    edu-sharing-Status: <strong>gelöscht</strong> → nur entfernen;
+                    <strong>in Inbox</strong> / <strong>verwaist</strong> (Knoten existiert noch) →
+                    wieder einsortieren oder entfernen. „Entfernen" betrifft nur den lokalen Cache,
+                    „Wieder einsortieren" legt eine Referenz in edu-sharing an. Versteckte Ideen sind nicht betroffen.
                   </p>
+                  @if (staleDeletable().length) {
+                    <button class="btn" (click)="removeStale(staleDeletableIds())" [disabled]="syncDiffCleaning()"
+                            style="margin:0 0 10px">
+                      {{ syncDiffCleaning() ? 'Bereinige…' : '🗑 Gelöschte entfernen (' + staleDeletable().length + ')' }}
+                    </button>
+                  }
                   @for (s of staleReal(); track s.id) {
                     <div class="item">
                       <div class="head"><div class="titlewrap">
                         <h3>{{ s.title || '(ohne Titel)' }}</h3>
-                        <div class="tags"><span class="slug" style="font-size:.78rem">{{ s.id }}</span></div>
+                        <div class="tags">
+                          @switch (s.node_status) {
+                            @case ('deleted') { <span class="vis-badge hidden">🗑 in edu-sharing gelöscht</span> }
+                            @case ('in_inbox') { <span class="tag target">📥 in Inbox – nur Referenz fehlt</span> }
+                            @case ('orphaned') { <span class="tag target">⚠ verwaist (existiert, nicht referenziert)</span> }
+                            @default { <span class="slug">Status unklar</span> }
+                          }
+                          <span class="slug" style="font-size:.78rem">{{ s.id }}</span>
+                        </div>
                       </div></div>
+                      <div class="actions">
+                        @if (s.node_status === 'in_inbox' || s.node_status === 'orphaned') {
+                          <select [(ngModel)]="restoreTargets[s.id]">
+                            <option [ngValue]="undefined">— Herausforderung wählen —</option>
+                            @for (grp of challengeGroups(); track grp.themeId) {
+                              <optgroup [label]="grp.themeTitle">
+                                @for (c of grp.challenges; track c.id) {
+                                  <option [ngValue]="c.id">{{ c.title }}</option>
+                                }
+                              </optgroup>
+                            }
+                          </select>
+                          <button class="btn primary-move"
+                                  [disabled]="!restoreTargets[s.id] || restoringId() === s.id"
+                                  (click)="restoreStale(s.id)">
+                            {{ restoringId() === s.id ? 'Stelle wieder her…' : '➜ Wieder einsortieren' }}
+                          </button>
+                        }
+                        <button class="btn" (click)="removeStale([s.id])" [disabled]="syncDiffCleaning()">
+                          Aus Cache entfernen
+                        </button>
+                      </div>
                     </div>
                   }
                 }
@@ -3025,11 +3068,13 @@ export class ModerationComponent implements OnInit {
   // Sync-Differenz (App-Cache ↔ edu-sharing)
   syncDiffData = signal<{
     missing: { id: string; title: string; challenge: string }[];
-    stale: { id: string; title: string; hidden?: boolean }[];
+    stale: { id: string; title: string; hidden?: boolean; node_status?: string; source_id?: string }[];
     hidden_stale_count?: number;
     live_count: number; cache_count: number; in_sync: boolean;
   } | null>(null);
   syncDiffLoading = signal(false);
+  syncDiffCleaning = signal(false);
+  syncDiffMsg = signal('');
 
   /** Echte Karteileichen (nicht referenziert + nicht versteckt). */
   staleReal() {
@@ -3071,6 +3116,63 @@ export class ModerationComponent implements OnInit {
         this.syncDiffLoading.set(false);
       },
       error: () => this.syncDiffLoading.set(false),
+    });
+  }
+
+  restoreTargets: Record<string, string | undefined> = {};
+  restoringId = signal<string | null>(null);
+
+  /** Karteileichen, bei denen nur „entfernen" sinnvoll ist (Knoten gelöscht/unklar). */
+  staleDeletable() {
+    return this.staleReal().filter(
+      (s) => !s.node_status || s.node_status === 'deleted' || s.node_status === 'unknown',
+    );
+  }
+  staleDeletableIds() {
+    return this.staleDeletable().map((s) => s.id);
+  }
+
+  /** Entfernt verwaiste Cache-Einträge (Karteileichen) aus dem App-Cache. */
+  removeStale(ids: string[]) {
+    if (!ids.length) return;
+    const msg =
+      ids.length === 1
+        ? 'Diesen Eintrag aus dem App-Cache entfernen?'
+        : `${ids.length} Einträge aus dem App-Cache entfernen?`;
+    if (!window.confirm(`${msg}\n\nNur der lokale Cache — edu-sharing bleibt unberührt.`)) return;
+    this.syncDiffCleaning.set(true);
+    this.syncDiffMsg.set('');
+    this.api.cleanupSyncDiff(ids).subscribe({
+      next: (r) => {
+        this.syncDiffCleaning.set(false);
+        this.syncDiffMsg.set(`${r.removed} Eintrag/Einträge entfernt.`);
+        this.loadSyncDiff();
+      },
+      error: () => {
+        this.syncDiffCleaning.set(false);
+        this.syncDiffMsg.set('Entfernen fehlgeschlagen (edu-sharing nicht erreichbar?) — nichts gelöscht.');
+      },
+    });
+  }
+
+  /** Stellt eine noch existierende Karteileiche wieder her: referenziert den
+   *  Knoten in die gewählte Herausforderung (Change-Topic-Flow). */
+  restoreStale(id: string) {
+    const target = this.restoreTargets[id];
+    if (!target) return;
+    this.restoringId.set(id);
+    this.syncDiffMsg.set('');
+    this.api.changeIdeaTopic(id, target).subscribe({
+      next: () => {
+        this.restoringId.set(null);
+        delete this.restoreTargets[id];
+        this.syncDiffMsg.set('Idee wieder einsortiert.');
+        this.loadSyncDiff();
+      },
+      error: () => {
+        this.restoringId.set(null);
+        this.syncDiffMsg.set('Wieder-Einsortieren fehlgeschlagen (Knoten evtl. nicht mehr vorhanden).');
+      },
     });
   }
 

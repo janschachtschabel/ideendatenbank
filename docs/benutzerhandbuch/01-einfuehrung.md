@@ -73,7 +73,7 @@ FastAPI Backend
        (redaktion.openeduhub.net)
 ```
 
-Source of Truth ist immer edu-sharing. Die App liest periodisch (alle 5 Min) und
+Source of Truth ist immer edu-sharing. Die App liest periodisch (alle 15 Min) und
 schreibt deine Aktionen direkt zurück.
 
 ---

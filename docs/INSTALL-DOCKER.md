@@ -123,7 +123,7 @@ APP_CORS_ORIGINS=https://<deine-domain>
 # === Persistenz ===
 # Pfade im Container — werden via Docker-Volume persistiert.
 SQLITE_PATH=/data/ideendb.sqlite
-SYNC_INTERVAL_SECONDS=300
+SYNC_INTERVAL_SECONDS=900
 
 # === Backup ===
 BACKUP_ENABLED=true

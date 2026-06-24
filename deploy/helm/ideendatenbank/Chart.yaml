@@ -1,0 +1,14 @@
+apiVersion: v2
+
+name: edu_sharing-projects-wlo-ideendatenbank
+description: HackathOERn Ideendatenbank — FastAPI backend + embedded Angular frontend
+
+icon: https://raw.githubusercontent.com/openeduhub/ideendatenbank/main/logos/logo.svg
+
+type: application
+
+# Chart-Version (SemVer der Verpackung selbst).
+version: 0.1.0
+# Version der ausgelieferten Anwendung — entspricht dem Image-Tag.
+appVersion: "latest"
+kubeVersion: ">=1.23.0-0"

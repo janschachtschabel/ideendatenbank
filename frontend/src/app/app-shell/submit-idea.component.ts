@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
@@ -7,7 +7,7 @@ import { TaxonomyEntry, Topic } from '../models';
 @Component({
   selector: 'ideendb-submit-idea',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   styles: [`
     :host { display: block; }
     .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 24px 48px; }
@@ -565,6 +565,10 @@ export class SubmitIdeaComponent implements OnInit {
       .subscribe({
         next: async (r) => {
           const nodeId = r.node_id;
+          // Anonyme Einreichung: das Upload-Token autorisiert Anhang/Vorschaubild
+          // an genau diesen frischen Knoten (eingeloggt → null, dann gilt der
+          // Auth-Header).
+          const uploadToken = r.upload_token;
           // Optional: file + preview hochladen, sequenziell (Status anzeigen)
           try {
             if (this.contentFiles.length && nodeId) {
@@ -572,12 +576,12 @@ export class SubmitIdeaComponent implements OnInit {
               // nie als Primär-Content der Idee.
               for (let idx = 0; idx < this.contentFiles.length; idx++) {
                 this.uploadStatus = `Anhang ${idx + 1}/${this.contentFiles.length} wird hochgeladen…`;
-                await this.api.uploadAttachment(nodeId, this.contentFiles[idx]).toPromise();
+                await this.api.uploadAttachment(nodeId, this.contentFiles[idx], uploadToken).toPromise();
               }
             }
             if (this.previewFile && nodeId) {
               this.uploadStatus = 'Vorschaubild wird hochgeladen…';
-              await this.api.uploadIdeaPreview(nodeId, this.previewFile).toPromise();
+              await this.api.uploadIdeaPreview(nodeId, this.previewFile, uploadToken).toPromise();
             }
           } catch (e: any) {
             // Idee ist trotzdem da — Upload-Fehler nicht als kompletten Misserfolg werten

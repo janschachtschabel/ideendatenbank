@@ -24,7 +24,7 @@ Du                  Mod-Team             edu-sharing-Repo
    ergänzen
                                                          
                                           ⇄ Sync
-                                            (alle 5 Min)
+                                            (alle 15 Min)
                                                          
 5. Idee jetzt für alle als Kachel
    in der App sichtbar

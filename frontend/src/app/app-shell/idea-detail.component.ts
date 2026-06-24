@@ -1012,7 +1012,7 @@ import { ShareDialogComponent } from './share-dialog.component';
           }
 
           <section class="card comments-card">
-            <h2>Kommentare <small>({{ i.comments?.length ?? 0 }})</small></h2>
+            <h2>Kommentare <small>({{ i.comments === undefined ? '…' : i.comments.length }})</small></h2>
 
             @if (!i.main_content_id) {
               <div class="notice">
@@ -1075,7 +1075,11 @@ import { ShareDialogComponent } from './share-dialog.component';
                 </div>
               </div>
             } @empty {
-              @if (api.hasCredentials()) {
+              @if (i.comments === undefined) {
+                <p style="color: var(--wlo-muted); font-style: italic; margin: 10px 0 0;">
+                  Lädt Kommentare …
+                </p>
+              } @else if (api.hasCredentials()) {
                 <p style="color: var(--wlo-muted); font-style: italic; margin: 10px 0 0;">
                   Sei der/die Erste, die einen Kommentar hinterlässt.
                 </p>
@@ -1483,6 +1487,9 @@ export class IdeaDetailComponent implements OnChanges {
   }
 
   @Input() ideaId!: string;
+  /** Beim Klick aus der Liste bekanntes Idee-Objekt → sofortiger Kern-Render
+   *  (B-lite); get_idea ersetzt es gleich mit den Live-Daten. */
+  @Input() initialIdea: Idea | null = null;
   @Input() apiBase = API_BASE_DEFAULT;
   @Input() repoBaseUrl = 'https://redaktion.openeduhub.net';
   /** Edit-only-Modus: blendet die Detail-Ansicht aus, öffnet direkt den
@@ -1640,7 +1647,10 @@ export class IdeaDetailComponent implements OnChanges {
   load(opts: { keepCurrent?: boolean } = {}) {
     this.voting.load();  // Bewertungs-Modus (idempotent)
     if (!opts.keepCurrent) {
-      this.idea.set(null);
+      // B-lite: Kern sofort aus dem bereits bekannten Listen-Objekt rendern
+      // (kein „Lädt…"-Vollbild); get_idea ersetzt es gleich mit den Live-Daten
+      // (Kommentare, Dokumente, frisches Rating).
+      this.idea.set(this.initialIdea ?? null);
       this.interactions.set(null);
       this.userRating = 0;
     }

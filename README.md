@@ -50,7 +50,7 @@ edu-sharing REST-API (Source of Truth: Ideen, Rating, Kommentare, User)
 - **SQLite** ist nur ein Performance-Cache + Speicher für App-spezifische
   Zusätze (Mithacken, Folgen, Reports, Versteckt-Flag, Aktivitäts-Log,
   Captcha-Challenges)
-- Sync alle 5 Min, plus Single-Node-Refresh bei jeder Schreib-Aktion
+- Sync alle 15 Min, plus Single-Node-Refresh bei jeder Schreib-Aktion
 
 ### Datenmodell
 
@@ -384,6 +384,30 @@ npx ng lint --fix
 ```
 
 Konfiguration in `frontend/eslint.config.js`.
+
+### Tests
+
+Backend (pytest) — der Harness mockt edu-sharing über das Singleton
+`app.edu_sharing.client` und nutzt eine temporäre SQLite pro Test; es fließt
+kein Netz-/Prod-Zugriff:
+
+```bash
+cd backend
+pip install -e ".[dev]"      # einmalig: pytest + ruff
+pytest                       # Auth-Gating, Ideen, Ratings, Moderation,
+                             # Sync-Diff/Karteileichen, Captcha, Health …
+```
+
+Frontend (Karma + Jasmine, headless):
+
+```bash
+cd frontend
+npx ng test --watch=false --browsers=ChromeHeadless
+# CI/Linux-Runner ohne Sandbox-Rechte:
+#   npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
+```
+
+Beide laufen in CI (`.github/workflows/ci.yml`, `.gitlab-ci.yml`).
 
 ---
 

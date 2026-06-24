@@ -32,11 +32,16 @@ App-DB ist nur ein Performance-Cache + Speicher für app-spezifische Zusätze
 
 ## Wie wird Mod-Status erkannt?
 
-Im Backend prüft `_is_moderator()` pro Request **ausschließlich** die
+Im Backend prüft `_is_moderator()` (in `app/auth.py`) **ausschließlich** die
 **Gruppen-Mitgliedschaft**: ist der eingeloggte User in edu-sharing Mitglied
 einer der `MODERATION_FALLBACK_GROUPS` (Default `GROUP_ALFRESCO_ADMINISTRATORS`)?
 Der dafür nötige `my_memberships`-Call verifiziert die Credentials gegen
 edu-sharing (falsches Passwort → 401 → kein Mod).
+
+> Der Mod-Status wird pro Anmeldung **kurz (≤ 60 s) gecacht**, damit nicht jeder
+> geschützte Request einen edu-sharing-Roundtrip auslöst. Praktische Folge:
+> entzogene Mod-Rechte greifen mit bis zu 60 s Verzögerung (siehe
+> [`../KNOWN-LIMITATIONS.md`](../KNOWN-LIMITATIONS.md)).
 
 > Hinweis: Einen Username-Bootstrap (`MODERATION_BOOTSTRAP_USERS`) gibt es
 > bewusst **nicht** mehr. Er hätte dem aus dem Basic-Header dekodierten,

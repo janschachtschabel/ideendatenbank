@@ -1,15 +1,25 @@
 import { createApplication } from '@angular/platform-browser';
 import { createCustomElement } from '@angular/elements';
-import { provideHttpClient } from '@angular/common/http';
-import { importProvidersFrom } from '@angular/core';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { importProvidersFrom, provideZoneChangeDetection } from '@angular/core';
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 
 import { AppShellComponent } from './app/app-shell/app-shell.component';
 import { TileGridComponent } from './app/tile-grid/tile-grid.component';
+import { authInterceptor } from './app/auth.interceptor';
 
 createApplication({
   providers: [
-    provideHttpClient(),
+    // Zone-basierte Change Detection EXPLIZIT aktivieren. createApplication()
+    // (Angular-Elements-Bootstrap) verdrahtet sie — anders als
+    // bootstrapApplication() — NICHT automatisch. Ohne sie lösen asynchrone
+    // HTTP-Antworten keine View-Aktualisierung aus (nur Events/Signals täten es)
+    // → Kacheln blieben nach Navigation/Filter auf „Lädt…" stehen.
+    // eventCoalescing: mehrere Events im selben Tick lösen NUR EINEN CD-Lauf aus
+    // (Angulars empfohlener Default seit v18) — weniger Render-Last bei den
+    // großen Default-CD-Komponenten (app-shell, idea-detail, tile-grid).
+    provideZoneChangeDetection({ eventCoalescing: true }),
+    provideHttpClient(withInterceptors([authInterceptor])),
     importProvidersFrom(BrowserAnimationsModule),
   ],
 }).then((appRef) => {

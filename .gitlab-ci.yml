@@ -26,13 +26,16 @@
 stages:
   - lint
   - build
+  - deploy
 
 variables:
-  # Image-Pfad in der Registry — löst automatisch zum vollen Gruppen-/
-  # Projektpfad auf (z.B. "projects/wlo/ideendatenbank"). $CI_PROJECT_PATH
-  # ist eine GitLab-Standardvariable; kein Platzhalter nötig. Bei Bedarf
-  # überschreiben (z.B. fester Pfad oder als CI/CD-Variable im Projekt).
-  DOCKER_IMAGE_PATH: "projects/$CI_PROJECT_PATH"
+  # Image-Pfad in der Registry (ohne Registry-Host). Voller Pull-Pfad ergibt
+  # sich als "$DOCKER_REGISTRY/$DOCKER_IMAGE_PATH" →
+  #   docker.edu-sharing.com/projects/wlo/ideendatenbank
+  # Fester Pfad statt $CI_PROJECT_PATH, damit die GitLab-Gruppenhierarchie
+  # (z.B. "edu-sharing/projects/...") nicht ins Image-Repo durchschlägt.
+  # Bei Bedarf als CI/CD-Variable überschreiben.
+  DOCKER_IMAGE_PATH: "projects/wlo/ideendatenbank"
 
   # --- Folgende Variablen NICHT hier setzen, sondern als CI/CD-Variablen ---
   # DOCKER_REGISTRY   z.B. registry.example.com         (Registry-Host)
@@ -42,6 +45,11 @@ variables:
   # DIND_HOST         z.B. tcp://docker:2376
   # DIND_DRIVER       z.B. overlay2
   # DIND_TLS_CERTDIR  z.B. /certs
+  #
+  # --- Helm-Chart-Push (Stage „deploy") ---
+  # HELM_REGISTRY     Upload-URL des Chart-Repos (z.B. https://charts.example.com/...)
+  # HELM_USERNAME     Chart-Repo-Benutzer / Deploy-Token-User
+  # HELM_PASSWORD     Chart-Repo-Token / Passwort  (masked + protected)
 
 # -----------------------------------------------------------------------------
 # Backend-Lint (ruff) — Konfiguration liegt in backend/pyproject.toml
@@ -145,3 +153,38 @@ build and push (tags):
   rules:
     # Nur bei Tag UND konfigurierter Registry (siehe oben).
     - if: "$CI_COMMIT_TAG && $DOCKER_REGISTRY"
+
+# -----------------------------------------------------------------------------
+# Helm-Chart paketieren + ins Chart-Repo pushen
+# Chart-/App-Version = Git-Tag (bei Tag) bzw. 0.0.0-<branch-slug> (bei Branch)
+# -----------------------------------------------------------------------------
+.helm_base:
+  stage: deploy
+  image:
+    name: alpine/helm:latest
+    entrypoint: [""]
+  before_script:
+    - helm version
+  script:
+    - helm package deploy/helm/ideendatenbank
+        --version "$CHART_VERSION"
+        --app-version "$APP_VERSION"
+    - >
+      curl --fail --silent --show-error
+      -u "$HELM_USERNAME:$HELM_PASSWORD"
+      --upload-file edu_sharing-projects-wlo-ideendatenbank-${CHART_VERSION}.tgz
+      $HELM_REGISTRY
+
+build and push helm chart:
+  extends: .helm_base
+  variables:
+    CHART_VERSION: "0.0.0-$CI_COMMIT_REF_SLUG"
+    APP_VERSION: "$CI_COMMIT_REF_SLUG"
+  rules:
+    # Tag → Chart-/App-Version = exakter Tag-Name. Nur mit konfiguriertem
+    # Chart-Repo (HELM_REGISTRY) — sonst übersprungen, Pipeline bleibt grün.
+    - if: "$CI_COMMIT_TAG && $HELM_REGISTRY"
+      variables:
+        CHART_VERSION: "$CI_COMMIT_REF_NAME"
+        APP_VERSION: "$CI_COMMIT_REF_NAME"
+    - if: "$CI_COMMIT_BRANCH && $HELM_REGISTRY"

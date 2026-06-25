@@ -477,81 +477,72 @@ async def _run_sync_locked() -> dict:
             return None
 
     try:
-        with connect() as con:
-            # Root's immediate children = Themen
-            themes = await edu_sharing.client.collection_subcollections(
-                settings.ideendb_root_collection_id, max_items=100, property_filter=_SYNC_PROPS
-            )
-            for theme in themes.get("collections") or []:
-                tid = (theme.get("ref") or {}).get("id")
-                if not tid:
-                    continue
-                await _upsert_topic(con, theme, parent_id=None)
-                topics_seen += 1
+        # ---- PHASE 1: NUR LESEN (Netzwerk-Awaits, KEINE DB-Connection) ------
+        # Erst den kompletten Sammlungs-Baum aus edu-sharing holen und in
+        # einfache Python-Listen sammeln. Hier ist KEIN SQLite-Lock offen — das
+        # langsame Alfresco-Backend blockiert also keine parallelen Schreibenden
+        # mehr (vorher hing der Write-Lock über genau diesen Roundtrips, was
+        # User-Writes bis zum busy_timeout staute → sporadische 503/Hänger).
+        topic_writes: list[tuple[dict, str | None]] = []  # (node, parent_id)
+        idea_writes: list[tuple[dict, str]] = []  # (ref_node, topic_id=chid)
+        attach_writes: list[tuple[str, str]] = []  # (sub_id, attach_of)
 
-                # Herausforderungen (2. Ebene)
-                challenges = (
+        # Root's immediate children = Themen
+        themes = await edu_sharing.client.collection_subcollections(
+            settings.ideendb_root_collection_id, max_items=100, property_filter=_SYNC_PROPS
+        )
+        for theme in themes.get("collections") or []:
+            tid = (theme.get("ref") or {}).get("id")
+            if not tid:
+                continue
+            topic_writes.append((theme, None))
+
+            # Herausforderungen (2. Ebene)
+            challenges = (
+                await _safe(
+                    edu_sharing.client.collection_subcollections(
+                        tid, max_items=100, property_filter=_SYNC_PROPS
+                    ),
+                    f"theme:{tid}",
+                )
+                or {}
+            )
+            for ch in challenges.get("collections") or []:
+                chid = (ch.get("ref") or {}).get("id")
+                if not chid:
+                    continue
+                topic_writes.append((ch, tid))
+
+                # HackathOERn-Architektur: Ideen leben als ccm:io in der Inbox.
+                # Sammlungen (Challenges) hängen sie als `ccm:io_reference`-
+                # Knoten ein (originalId → Inbox-Knoten).
+                ch_refs = (
                     await _safe(
-                        edu_sharing.client.collection_subcollections(
-                            tid, max_items=100, property_filter=_SYNC_PROPS
+                        edu_sharing.client.collection_references(
+                            chid, max_items=200, property_filter=_SYNC_PROPS
                         ),
-                        f"theme:{tid}",
+                        f"challenge:{chid}",
                     )
                     or {}
                 )
-                for ch in challenges.get("collections") or []:
-                    chid = (ch.get("ref") or {}).get("id")
-                    if not chid:
+                for ref_node in ch_refs.get("references") or []:
+                    if not (ref_node.get("ref") or {}).get("id"):
                         continue
-                    await _upsert_topic(con, ch, parent_id=tid)
-                    topics_seen += 1
+                    idea_writes.append((ref_node, chid))
 
-                    # HackathOERn-Architektur: Ideen leben als ccm:io in der
-                    # Inbox. Sammlungen (Challenges) hängen sie als
-                    # `ccm:io_reference`-Knoten ein (originalId → Inbox-Knoten).
-                    # Direct-Children-Pattern wurde 2026-05-11 aus dem Code
-                    # entfernt; bestehende Direct-Children wurden rückgängig
-                    # gemacht und als Reference neu eingehängt.
-                    ch_refs = (
+                # Anhänge-Sammlungen sind ccm:map-Geschwister mit Keyword
+                # `attachment-of:<idea-id>`. LEGACY: nur jeden N-ten Lauf scannen
+                # (teuerste Untersammlungs-Abfrage).
+                if scan_attachments:
+                    ch_subs = (
                         await _safe(
-                            edu_sharing.client.collection_references(
+                            edu_sharing.client.collection_subcollections(
                                 chid, max_items=200, property_filter=_SYNC_PROPS
                             ),
-                            f"challenge:{chid}",
+                            f"challenge-subs:{chid}",
                         )
                         or {}
                     )
-                    for ref_node in ch_refs.get("references") or []:
-                        ref_id = (ref_node.get("ref") or {}).get("id")
-                        if not ref_id:
-                            continue
-                        try:
-                            await _upsert_idea(
-                                con,
-                                ref_node,
-                                kind="io",
-                                topic_id=chid,
-                                main_content_id=ref_id,
-                            )
-                            ideas_seen += 1
-                        except Exception as e:
-                            log.warning("sync upsert ref %s failed: %s", ref_id, e)
-                            skipped.append(f"idea-ref:{ref_id}")
-
-                    # Anhänge-Sammlungen sind ccm:map-Geschwister mit Keyword
-                    # `attachment-of:<idea-id>` — an die Idee verknüpfen. LEGACY:
-                    # nur jeden N-ten Lauf scannen (teuerste Untersammlungs-Abfrage).
-                    ch_subs: dict = {}
-                    if scan_attachments:
-                        ch_subs = (
-                            await _safe(
-                                edu_sharing.client.collection_subcollections(
-                                    chid, max_items=200, property_filter=_SYNC_PROPS
-                                ),
-                                f"challenge-subs:{chid}",
-                            )
-                            or {}
-                        )
                     for sub in ch_subs.get("collections") or []:
                         sub_kws = _keywords(_props(sub))
                         attach_of = next(
@@ -567,18 +558,39 @@ async def _run_sync_locked() -> dict:
                         sub_id = (sub.get("ref") or {}).get("id")
                         if not sub_id:
                             continue
-                        con.execute(
-                            "UPDATE idea SET attachment_folder_id=? WHERE id=?",
-                            (sub_id, attach_of),
-                        )
+                        attach_writes.append((sub_id, attach_of))
 
-                    # Schreibsperre nach jeder Herausforderung freigeben.
-                    # Sonst hält der Sync den SQLite-Write-Lock über die
-                    # gesamte Laufzeit (~25s) und blockiert parallele
-                    # Mod-Schreibvorgänge (Event speichern etc.) bis zum
-                    # Timeout → 500 "database is locked". Mit dem Commit
-                    # entstehen Fenster, in denen andere Writer drankommen.
-                    con.commit()
+        # ---- PHASE 2: NUR SCHREIBEN (synchron, kurzer Lock, KEIN await) ------
+        # Jetzt EINE Connection öffnen und alles am Stück schreiben. In diesem
+        # Block gibt es KEIN `await` auf Netzwerk-I/O → der SQLite-Write-Lock
+        # wird nur für die millisekunden-schnellen Schreibvorgänge gehalten,
+        # nicht über die edu-sharing-Roundtrips. (`_upsert_topic`/`_upsert_idea`
+        # sind zwar `async`, suspendieren auf diesem Pfad aber nicht:
+        # main_content_id == ref → kein node_metadata-Await; sie laufen rein
+        # synchron durch.) Ein einziger Commit am Blockende reicht.
+        with connect() as con:
+            for node, parent_id in topic_writes:
+                await _upsert_topic(con, node, parent_id=parent_id)
+                topics_seen += 1
+            for ref_node, chid in idea_writes:
+                ref_id = (ref_node.get("ref") or {}).get("id")
+                try:
+                    await _upsert_idea(
+                        con,
+                        ref_node,
+                        kind="io",
+                        topic_id=chid,
+                        main_content_id=ref_id,
+                    )
+                    ideas_seen += 1
+                except Exception as e:
+                    log.warning("sync upsert ref %s failed: %s", ref_id, e)
+                    skipped.append(f"idea-ref:{ref_id}")
+            for sub_id, attach_of in attach_writes:
+                con.execute(
+                    "UPDATE idea SET attachment_folder_id=? WHERE id=?",
+                    (sub_id, attach_of),
+                )
 
             # Trend-Snapshot: aktuellen Stand der Top-Listen je Event/Sort
             # persistieren. Throttled auf SNAPSHOT_MIN_INTERVAL, damit das

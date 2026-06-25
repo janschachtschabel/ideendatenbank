@@ -424,9 +424,10 @@ def connect():
     User-Aktionen (rate, comment, refresh_idea) schreibt.
 
     `busy_timeout=30000` lässt SQLite bis zu 30 Sekunden auf einen Lock warten,
-    statt sofort mit `database is locked` abzubrechen. Der Sync committet
-    inkrementell (pro Herausforderung), sodass der Lock nicht über die ganze
-    Sync-Laufzeit gehalten wird — der 30s-Timeout ist nur das Sicherheitsnetz.
+    statt sofort mit `database is locked` abzubrechen. Der Sync hält die
+    Connection NICHT über die edu-sharing-Roundtrips offen (erst alles lesen,
+    dann in EINER kurzen Transaktion schreiben), sodass der Write-Lock nur
+    Millisekunden gehalten wird — der 30s-Timeout ist nur das Sicherheitsnetz.
     """
     _ensure_dir()
     con = sqlite3.connect(settings.sqlite_path, timeout=30.0)

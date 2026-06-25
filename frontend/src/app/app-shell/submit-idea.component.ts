@@ -1,6 +1,7 @@
 
 import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { TaxonomyEntry, Topic } from '../models';
 
@@ -576,12 +577,16 @@ export class SubmitIdeaComponent implements OnInit {
               // nie als Primär-Content der Idee.
               for (let idx = 0; idx < this.contentFiles.length; idx++) {
                 this.uploadStatus = `Anhang ${idx + 1}/${this.contentFiles.length} wird hochgeladen…`;
-                await this.api.uploadAttachment(nodeId, this.contentFiles[idx], uploadToken).toPromise();
+                await firstValueFrom(
+                  this.api.uploadAttachment(nodeId, this.contentFiles[idx], uploadToken),
+                );
               }
             }
             if (this.previewFile && nodeId) {
               this.uploadStatus = 'Vorschaubild wird hochgeladen…';
-              await this.api.uploadIdeaPreview(nodeId, this.previewFile, uploadToken).toPromise();
+              await firstValueFrom(
+                this.api.uploadIdeaPreview(nodeId, this.previewFile, uploadToken),
+              );
             }
           } catch (e: any) {
             // Idee ist trotzdem da — Upload-Fehler nicht als kompletten Misserfolg werten

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import UTC
+from datetime import UTC, datetime
 
 from .config import settings
 
@@ -393,11 +393,12 @@ def init_db() -> None:
         con.execute(
             "CREATE INDEX IF NOT EXISTS topic_sort_idx ON topic(parent_id, sort_order, title)"
         )
+        # Index für den Ghost-Cleanup (DELETE … WHERE id IN (SELECT original_id …))
+        # und das Inbox-„bereits einsortiert"-Lookup — beide gehen über original_id.
+        con.execute("CREATE INDEX IF NOT EXISTS idea_original_idx ON idea(original_id)")
         # seed phases on first start (idempotent)
         existing = con.execute("SELECT COUNT(*) FROM taxonomy_phase").fetchone()[0]
         if existing == 0:
-            from datetime import datetime
-
             now = datetime.now(UTC).isoformat()
             con.executemany(
                 "INSERT INTO taxonomy_phase (slug,label,sort_order,active,created_at,created_by) "

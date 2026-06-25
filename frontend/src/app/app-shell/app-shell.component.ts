@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, HostListener, Input, OnInit, inject, signal } from '@angular/core';
+import { Component, HostListener, Input, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { ThemeService, ThemeKey } from '../theme.service';
@@ -851,7 +851,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
     }
   `,
 })
-export class AppShellComponent implements OnInit {
+export class AppShellComponent implements OnInit, OnDestroy {
   api = inject(ApiService);
   themeSvc = inject(ThemeService);
   themeMenuOpen = false;
@@ -1553,5 +1553,15 @@ export class AppShellComponent implements OnInit {
   logout() {
     this.api.clearCredentials();
     if (this.view() === 'moderation' || this.view() === 'profile') this.go('home');
+  }
+
+  ngOnDestroy() {
+    // Hintergrund-Poll (unseenCount, 60s) beim Zerstören stoppen — sonst läuft
+    // der Timer unbegrenzt weiter (tickt ohne Credentials zwar nur leer, aber
+    // ein nie geräumtes Interval ist ein Leak).
+    if (this.unseenPollHandle) {
+      clearInterval(this.unseenPollHandle);
+      this.unseenPollHandle = undefined;
+    }
   }
 }

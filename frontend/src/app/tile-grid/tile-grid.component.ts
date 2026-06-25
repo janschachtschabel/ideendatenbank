@@ -4,11 +4,13 @@ import {
   EventEmitter,
   Input,
   OnChanges,
+  OnDestroy,
   OnInit,
   Output,
   SimpleChanges,
   inject,
 } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
 import { ThemeService } from '../theme.service';
 import { VotingService } from '../voting.service';
@@ -175,7 +177,7 @@ import { Idea, SortBy, VotingMode } from '../models';
     }
   `,
 })
-export class TileGridComponent implements OnInit, OnChanges {
+export class TileGridComponent implements OnInit, OnChanges, OnDestroy {
   private api = inject(ApiService);
   private themeSvc = inject(ThemeService);
   private voting = inject(VotingService);
@@ -351,8 +353,14 @@ export class TileGridComponent implements OnInit, OnChanges {
       const changed = ['topicId', 'phase', 'event', 'category', 'q', 'ids', 'sort', 'order', 'limit'].some(
         (k) => ch[k] && !ch[k].firstChange,
       );
+      // Sofort neu laden — auch pro Buchstabe im Suchfeld (bewusst reaktiv). Die
+      // überholte Anfrage wird in fetch() abgebrochen, daher kein Debounce nötig.
       if (changed) this.reload();
     }
+  }
+
+  ngOnDestroy() {
+    this._fetchSub?.unsubscribe();
   }
 
   reload() {
@@ -364,9 +372,16 @@ export class TileGridComponent implements OnInit, OnChanges {
     this.fetch(this.ideas.length);
   }
 
+  private _fetchSub?: Subscription;
+
   private fetch(offset: number) {
+    // Laufende (durch einen neuen Tastenanschlag überholte) Anfrage abbrechen:
+    // hält die Suche pro Buchstabe reaktiv, verhindert aber Out-of-Order-
+    // Ergebnisse und unnötige Parallel-Requests beim schnellen Tippen. Beim
+    // Unsubscribe bricht Angulars HttpClient den XHR tatsächlich ab.
+    this._fetchSub?.unsubscribe();
     this.loading = true;
-    this.api
+    this._fetchSub = this.api
       .listIdeas({
         topic_id: this.topicId ?? undefined,
         phase: this.phase ?? undefined,

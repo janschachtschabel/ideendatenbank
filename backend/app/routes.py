@@ -222,10 +222,16 @@ def _captcha_verify(token: str | None, answer: int | str | None) -> None:
         if row["expires_at"] < now:
             raise HTTPException(400, "Captcha abgelaufen — bitte neu laden")
         if int(row["answer"]) != ans_int:
+            # Falsche Antwort verbraucht das Token NICHT → Tippfehler-Retry möglich.
             raise HTTPException(400, "Captcha-Antwort falsch — bitte neu versuchen")
-        # Single-Use: sofort löschen (statt nur als used markieren) hält
-        # die Tabelle klein.
-        con.execute("DELETE FROM captcha_challenge WHERE token = ?", (token,))
+        # Single-Use ATOMAR einlösen: das DELETE ist der Claim. Gewinnt ein
+        # paralleler Request mit demselben Token das Rennen (TOCTOU zwischen
+        # SELECT und DELETE), löscht er die Zeile zuerst; unser DELETE trifft dann
+        # 0 Zeilen → wir lehnen ab. So kann ein gelöstes Captcha nicht doppelt
+        # eingelöst werden. (Löschen statt „used"-Flag hält die Tabelle klein.)
+        claimed = con.execute("DELETE FROM captcha_challenge WHERE token = ?", (token,)).rowcount
+        if claimed != 1:
+            raise HTTPException(400, "Captcha schon verwendet — bitte neu laden")
 
 
 @router.get("/captcha", tags=["public"])
@@ -807,7 +813,7 @@ def list_ideas(
     phase: str | None = None,
     event: str | None = None,
     category: str | None = None,
-    q: str | None = Query(None, description="Full-text search"),
+    q: str | None = Query(None, max_length=200, description="Full-text search"),
     # Query-Param heißt `ids` (öffentlicher Vertrag), die Python-Variable
     # `id_filter` vermeidet die Kollision mit `ids` aus dem topic-subtree-
     # Pfad weiter unten.
@@ -2857,8 +2863,6 @@ async def upload_idea_preview(
                 (idea_id,),
             ).fetchone()
             if row and row["preview_url"]:
-                from datetime import datetime
-
                 bust = int(datetime.now(UTC).timestamp())
                 sep = "&" if "?" in row["preview_url"] else "?"
                 new_url = f"{row['preview_url']}{sep}cb={bust}"

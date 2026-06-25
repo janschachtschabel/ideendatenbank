@@ -1465,19 +1465,22 @@ export class IdeaDetailComponent implements OnChanges {
   /** Daumen-Modus: Zustimmung setzen/zurücknehmen. */
   toggleThumb(id: string) {
     if (!this.api.hasCredentials()) { this.requestLogin.emit(); return; }
+    const prev = this.userRating;
     this.thumbBusy = true;
     this.rateStatus = '';
     if (this.userRating > 0) {
       this.userRating = 0;
       this.api.unrateIdea(id).subscribe({
         next: () => { this.thumbBusy = false; this.refreshAfterVote(id); },
-        error: () => { this.thumbBusy = false; this.refreshAfterVote(id); },
+        // Fehler beim Zurücknehmen → vorigen Stand wiederherstellen (Daumen
+        // bleibt an, die Bewertung existiert ja noch), statt fälschlich auf 0.
+        error: (e) => { this.thumbBusy = false; this.userRating = prev; this.rateStatus = e?.error?.detail || 'Fehler'; this.rateStatusOk = false; },
       });
     } else {
       this.userRating = 5;
       this.api.rateIdea(id, 5).subscribe({
         next: () => { this.thumbBusy = false; this.rateStatus = '✓ Danke!'; this.rateStatusOk = true; this.refreshAfterVote(id); },
-        error: (e) => { this.thumbBusy = false; this.userRating = 0; this.rateStatus = e?.error?.detail || 'Fehler'; this.rateStatusOk = false; },
+        error: (e) => { this.thumbBusy = false; this.userRating = prev; this.rateStatus = e?.error?.detail || 'Fehler'; this.rateStatusOk = false; },
       });
     }
   }
@@ -1983,9 +1986,19 @@ export class IdeaDetailComponent implements OnChanges {
     this.quickBusy = true;
     this.quickError = '';
     this.quickStatus = `Speichert ${field === 'phase' ? 'Phase' : 'Veranstaltung'}…`;
-    const patch: { phase?: string; event?: string } = {};
-    if (field === 'phase') patch.phase = this.quickPhase || undefined;
-    else patch.event = this.quickEvent || undefined;
+    const patch: { phase?: string; events?: string[] } = {};
+    // Event-Quick-Edit ändert nur den im Dropdown gezeigten ERSTEN Event und
+    // behält alle weiteren — sonst würde eine Mehr-Event-Idee auf ein Event
+    // reduziert (Datenverlust). Die VOLLE Liste wird gesendet, da das Backend
+    // die event:-Keywords ersetzt (nicht ergänzt).
+    let newEvents: string[] = i.events || [];
+    if (field === 'phase') {
+      patch.phase = this.quickPhase || undefined;
+    } else {
+      const rest = (i.events || []).slice(1).filter((e) => e !== this.quickEvent);
+      newEvents = this.quickEvent ? [this.quickEvent, ...rest] : (i.events || []).slice(1);
+      patch.events = newEvents;
+    }
     this.api.editIdea(i.id, patch).subscribe({
       next: () => {
         this.quickBusy = false;
@@ -1993,7 +2006,7 @@ export class IdeaDetailComponent implements OnChanges {
         // Optimistic local update
         const updated: any = { ...i };
         if (field === 'phase') updated.phase = this.quickPhase || null;
-        else updated.events = this.quickEvent ? [this.quickEvent] : [];
+        else updated.events = newEvents;
         this.idea.set(updated);
         // Status-Hinweis nach 2s wieder ausblenden
         setTimeout(() => {
@@ -2223,6 +2236,7 @@ export class IdeaDetailComponent implements OnChanges {
   }
 
   setRating(id: string, n: number) {
+    const prev = this.userRating;
     this.userRating = n;
     this.rateError = '';
     this.rateStatus = `Speichere ${n} ★…`;
@@ -2243,8 +2257,9 @@ export class IdeaDetailComponent implements OnChanges {
         setTimeout(() => { if (this.rateStatus.startsWith('✓')) this.rateStatus = ''; }, 2500);
       },
       error: (e) => {
-        // Stern-Auswahl visuell zurücknehmen — die Aktion ist gescheitert.
-        this.userRating = 0;
+        // Auf den vorherigen Wert zurück (NICHT 0) — sonst sieht ein bereits
+        // bewertender User nach einem Fehler fälschlich „nicht bewertet".
+        this.userRating = prev;
         this.rateStatus = '';
         // Backend liefert klare Fehlermeldungen: 401 (Login) oder 403
         // (Permission verweigert) — beide haben ein `detail`-Feld mit

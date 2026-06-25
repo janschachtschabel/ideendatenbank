@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, catchError, tap, throwError } from 'rxjs';
 
 /**
  * Default API base. Relative so the web component works out-of-the-box when
@@ -132,9 +132,15 @@ export class AuthService {
     display_name?: string;
     is_moderator?: boolean;
   }> {
-    return new Observable((sub) => {
-      this.http.get<any>(`${this.apiBase}/me`).subscribe({
-        next: (r) => {
+    return this.http
+      .get<{
+        authenticated: boolean;
+        username?: string;
+        display_name?: string;
+        is_moderator?: boolean;
+      }>(`${this.apiBase}/me`)
+      .pipe(
+        tap((r) => {
           this._isModerator = !!r.is_moderator;
           this._displayName = r.display_name || this._user;
           try {
@@ -145,14 +151,11 @@ export class AuthService {
             /* quota */
           }
           this.bumpAuth(); // Login vollständig → auth-abhängige Views neu laden
-          sub.next(r);
-          sub.complete();
-        },
-        error: (e) => {
+        }),
+        catchError((e) => {
           this._isModerator = false;
-          sub.error(e);
-        },
-      });
-    });
+          return throwError(() => e);
+        }),
+      );
   }
 }

@@ -738,15 +738,19 @@ export class RankingComponent implements OnChanges {
   ngOnChanges(ch: SimpleChanges) {
     if (ch['apiBase']) this.api.setBase(this.apiBase);
     this.voting.load();  // Modus + Event-Overrides (idempotent)
-    // Verfalls-Parameter laden (für Umschalter + Transparenz-Box).
-    this.api.getSettings().subscribe({
-      next: (s) => this.decayInfo.set({
-        enabled: s.rating_decay_enabled !== false,
-        halflife: s.rating_decay_halflife_days ?? 90,
-        floor: s.rating_decay_floor ?? 0.2,
-      }),
-      error: () => this.decayInfo.set(null),
-    });
+    // Verfalls-Parameter laden (für Umschalter + Transparenz-Box). Statische
+    // Server-Config → nur EINMAL holen; ngOnChanges feuert bei jeder
+    // Input-Änderung, sonst ein doppelter /settings-Request pro Change.
+    if (this.decayInfo() === null) {
+      this.api.getSettings().subscribe({
+        next: (s) => this.decayInfo.set({
+          enabled: s.rating_decay_enabled !== false,
+          halflife: s.rating_decay_halflife_days ?? 90,
+          floor: s.rating_decay_floor ?? 0.2,
+        }),
+        error: () => this.decayInfo.set(null),
+      });
+    }
     // Start-Event-Filter aus URL übernehmen (einmalig, wenn gesetzt).
     if (ch['initialEvent'] && this.initialEvent) {
       this.eventFilter.set(this.initialEvent);

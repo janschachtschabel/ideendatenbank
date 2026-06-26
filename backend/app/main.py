@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -90,6 +91,14 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Regex-Fallback mehr (war zu offen — jede App auf localhost:* hätte
 # mit Credentials zugreifen können). Für lokale Entwicklung trage die
 # Origin in APP_CORS_ORIGINS ein (env).
+# Antworten komprimieren (gzip). Vor allem das ~800-KB-Frontend-Bundle wird
+# sonst UNKOMPRIMIERT ausgeliefert (StaticFiles gzippt nicht, und der
+# Reverse-Proxy tut es hier aktuell auch nicht) → mehrere Sekunden Erstladezeit,
+# besonders nach jedem Deploy (Cache-Bust erzwingt Re-Download). gzip drückt das
+# Bundle auf ~1/4. Greift nur, wenn der Client `Accept-Encoding: gzip` sendet
+# (alle Browser) und die Antwort > 1 KB ist.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

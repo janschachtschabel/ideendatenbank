@@ -1028,22 +1028,22 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.api.topics().subscribe((ts) => {
       this.allTopics.set(ts);
       this.rootTopics.set(ts.filter((t) => !t.parent_id));
-      // count ideas per root topic (best-effort, single request per root)
-      this.rootTopics().forEach((root) => {
-        // count across its children
-        const childIds = ts.filter((t) => t.parent_id === root.id).map((t) => t.id);
-        if (!childIds.length) return;
-        // aggregate via API: count ideas whose topic_id is root/any child — we do it roughly by querying children
-        // simpler: one query per child is expensive; skip precise count, show approximate total
-        let sum = 0;
-        let remaining = childIds.length;
-        childIds.forEach((cid) => {
-          this.api.listIdeas({ topic_id: cid, limit: 1 }).subscribe((r) => {
-            sum += r.total;
-            this.ideaCountByTopic[root.id] = sum;
-            if (--remaining === 0) this.rootTopics.set([...this.rootTopics()]);
-          });
+      // Idee-Zahlen pro Themenbereich über EINEN /meta-Call — früher lief je
+      // Herausforderung eine eigene listIdeas-Abfrage (N+1-Flut beim Aufbau,
+      // ~25 Requests). /meta liefert die exakten Counts pro topic_id; die
+      // Subtree-Summe bilden wir aus dem geladenen Themenbaum nach (identisch
+      // zur Subtree-Semantik von listIdeas({topic_id})).
+      this.api.meta({}).subscribe((m) => {
+        const counts: Record<string, number> = m.topics || {};
+        this.rootTopics().forEach((root) => {
+          const childIds = ts.filter((t) => t.parent_id === root.id).map((t) => t.id);
+          if (!childIds.length) return;
+          this.ideaCountByTopic[root.id] = childIds.reduce(
+            (s, cid) => s + this.subtreeIdeaCount(cid, counts),
+            0,
+          );
         });
+        this.rootTopics.set([...this.rootTopics()]);
       });
     });
   }
@@ -1120,13 +1120,17 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.topicDrillRoot.set(t);
     this.topicDrillChild.set(null);
     this.api.topicDetail(t.id).subscribe((d) => {
-      this.subtopicCounts = {};
-      for (const c of d.children) {
-        this.api.listIdeas({ topic_id: c.id, limit: 1 }).subscribe((r) => {
-          this.subtopicCounts[c.id] = r.total;
-          this.subtopicCounts = { ...this.subtopicCounts };
-        });
-      }
+      // Counts der Herausforderungen über EINEN /meta-Call statt je eine
+      // listIdeas-Abfrage pro Kind (vormals N+1).
+      this.api.meta({}).subscribe((m) => {
+        // Stale-Guard: ein spät auflösender Callback eines inzwischen
+        // gewechselten/verlassenen Drills darf die Counts nicht überschreiben.
+        if (this.topicDrillRoot()?.id !== t.id) return;
+        const counts: Record<string, number> = m.topics || {};
+        this.subtopicCounts = {};
+        for (const c of d.children) this.subtopicCounts[c.id] = this.subtreeIdeaCount(c.id, counts);
+        this.subtopicCounts = { ...this.subtopicCounts };
+      });
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -1185,19 +1189,47 @@ export class AppShellComponent implements OnInit, OnDestroy {
       this.currentTopic.set(d.topic);
       this.topicParent.set(d.parent);
       this.topicChildren.set(d.children);
-      // Idea counts per child (one small request each — max ~7)
-      this.subtopicCounts = {};
-      d.children.forEach((c) => {
-        this.api.listIdeas({ topic_id: c.id, limit: 1 }).subscribe((r) => {
-          this.subtopicCounts[c.id] = r.total;
-          this.subtopicCounts = { ...this.subtopicCounts };
-        });
+      // Idee-Zahlen je Herausforderung über EINEN /meta-Call (vormals N+1).
+      this.api.meta({}).subscribe((m) => {
+        // Stale-Guard: nur anwenden, wenn diese Sammlung noch die aktuelle ist.
+        if (this.currentTopic()?.id !== id) return;
+        const counts: Record<string, number> = m.topics || {};
+        this.subtopicCounts = {};
+        for (const c of d.children) this.subtopicCounts[c.id] = this.subtreeIdeaCount(c.id, counts);
+        this.subtopicCounts = { ...this.subtopicCounts };
       });
     });
   }
 
   subtopicCount(id: string): number {
     return this.subtopicCounts[id] ?? 0;
+  }
+
+  /** Summiert die /meta-Idee-Counts über einen Topic + alle Nachfahren.
+   *  Repliziert die Subtree-Semantik von listIdeas({topic_id}) (das per Default
+   *  `include_descendants` zählt) client-seitig aus dem geladenen Themenbaum —
+   *  so ersetzt ein einziger /meta-Call die früheren N+1 Einzelabfragen, ohne
+   *  die angezeigten Zahlen zu verändern. */
+  private subtreeIdeaCount(topicId: string, counts: Record<string, number>): number {
+    const all = this.allTopics();
+    // `seen` schützt vor einem Browser-Hang, falls der extern (via edu-sharing-
+    // Sync) gelieferte Themenbaum je einen `parent_id`-Zyklus enthielte; für
+    // einen gültigen Baum ändert es nichts (jeder Knoten wird ohnehin nur
+    // einmal besucht).
+    const seen = new Set<string>([topicId]);
+    let sum = counts[topicId] ?? 0;
+    const stack = [topicId];
+    while (stack.length) {
+      const pid = stack.pop()!;
+      for (const t of all) {
+        if (t.parent_id === pid && !seen.has(t.id)) {
+          seen.add(t.id);
+          sum += counts[t.id] ?? 0;
+          stack.push(t.id);
+        }
+      }
+    }
+    return sum;
   }
 
   /** Filter-bewusste Idee-Zahl pro Topic für die Filter-Pillen-Dropdowns:

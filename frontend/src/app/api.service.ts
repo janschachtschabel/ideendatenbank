@@ -1,6 +1,6 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, finalize, shareReplay } from 'rxjs';
 import { FeaturedEvent, Idea, IdeaList, InboxItem, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
 import { AuthService } from './auth.service';
 
@@ -21,6 +21,23 @@ export interface TaxDeleteResult {
 export class ApiService {
   private http = inject(HttpClient);
   private auth = inject(AuthService);
+
+  // In-Flight-Dedup für idempotente GETs: feuern beim Seitenaufbau mehrere
+  // Komponenten GLEICHZEITIG denselben Request (settings/events/meta/phases/
+  // featured/topics), teilen sie sich EINEN HTTP-Call statt N. Nach Abschluss
+  // wird der Eintrag verworfen → kein Caching, keine Staleness; nur der
+  // Lade-Schwall (der die ~6 Browser-Verbindungen verstopft) verschwindet.
+  private _inflight = new Map<string, Observable<unknown>>();
+  private coalesced<T>(key: string, factory: () => Observable<T>): Observable<T> {
+    const existing = this._inflight.get(key);
+    if (existing) return existing as Observable<T>;
+    const shared = factory().pipe(
+      finalize(() => this._inflight.delete(key)),
+      shareReplay({ bufferSize: 1, refCount: false }),
+    );
+    this._inflight.set(key, shared);
+    return shared;
+  }
 
   // ---- Auth-Facade ---------------------------------------------------------
   // Credential-/Identitätslogik lebt jetzt in AuthService (eine Quelle der
@@ -61,7 +78,7 @@ export class ApiService {
   }
 
   topics(): Observable<Topic[]> {
-    return this.http.get<Topic[]>(`${this.base}/topics`);
+    return this.coalesced('topics', () => this.http.get<Topic[]>(`${this.base}/topics`));
   }
 
   topicDetail(id: string): Observable<{ topic: Topic; parent: Topic | null; children: Topic[] }> {
@@ -88,7 +105,9 @@ export class ApiService {
     if (opts.phase) params = params.set('phase', opts.phase);
     if (opts.event) params = params.set('event', opts.event);
     if (opts.q && opts.q.trim()) params = params.set('q', opts.q.trim());
-    return this.http.get<any>(`${this.base}/meta`, { params });
+    return this.coalesced(`meta?${params.toString()}`, () =>
+      this.http.get<any>(`${this.base}/meta`, { params }),
+    );
   }
 
   submitIdea(payload: {
@@ -218,9 +237,10 @@ export class ApiService {
 
   // ---- Taxonomie: Events + Phasen ----
   listPhases(includeInactive = false): Observable<TaxonomyEntry[]> {
-    return this.http.get<TaxonomyEntry[]>(`${this.base}/phases`, {
-      params: { only_active: includeInactive ? 'false' : 'true' },
-    });
+    const only = includeInactive ? 'false' : 'true';
+    return this.coalesced(`phases?${only}`, () =>
+      this.http.get<TaxonomyEntry[]>(`${this.base}/phases`, { params: { only_active: only } }),
+    );
   }
   /** Endnutzer-Sicht: live + archived. Mod kann via includeDrafts=true
    * auch Entwürfe sehen. */
@@ -231,12 +251,16 @@ export class ApiService {
     };
     if (opts.includeDrafts) params['include_drafts'] = 'true';
     // Login optional; nur für include_drafts nötig (Header via authInterceptor).
-    return this.http.get<TaxonomyEntry[]>(`${this.base}/events`, { params });
+    return this.coalesced(`events?${JSON.stringify(params)}`, () =>
+      this.http.get<TaxonomyEntry[]>(`${this.base}/events`, { params }),
+    );
   }
 
   /** Alle aktuell auf der Startseite hervorgehobenen Events (Liste). */
   featuredEvents(): Observable<FeaturedEvent[]> {
-    return this.http.get<FeaturedEvent[]>(`${this.base}/events/featured`);
+    return this.coalesced('events/featured', () =>
+      this.http.get<FeaturedEvent[]>(`${this.base}/events/featured`),
+    );
   }
 
   upsertEvent(entry: TaxonomyEntry): Observable<unknown> {
@@ -564,7 +588,9 @@ export class ApiService {
 
   // ---- App-Settings (Voting-Modus) ----
   getSettings(): Observable<import('./models').AppSettings> {
-    return this.http.get<import('./models').AppSettings>(`${this.base}/settings`);
+    return this.coalesced('settings', () =>
+      this.http.get<import('./models').AppSettings>(`${this.base}/settings`),
+    );
   }
   updateSettings(body: Partial<import('./models').AppSettings>): Observable<unknown> {
     return this.http.put(`${this.base}/admin/settings`, body);

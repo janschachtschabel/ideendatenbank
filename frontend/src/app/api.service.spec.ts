@@ -90,3 +90,62 @@ describe('AuthService/Facade & authInterceptor', () => {
     expect(api.currentInitials()).toBe('JS');
   });
 });
+
+/**
+ * Pinnt das In-Flight-Coalescing der globalen GETs: feuern beim Seitenaufbau
+ * mehrere Komponenten gleichzeitig denselben Request, darf nur EIN HTTP-Call
+ * rausgehen (sonst verstopfen die ~6 Browser-Verbindungen → mehrsekündige
+ * Ladezeiten). Nach Abschluss kein Caching → der nächste Aufruf holt frisch.
+ */
+describe('ApiService — In-Flight-Coalescing globaler GETs', () => {
+  let api: ApiService;
+  let httpMock: HttpTestingController;
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(withInterceptors([authInterceptor])), provideHttpClientTesting()],
+    });
+    api = TestBed.inject(ApiService);
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    httpMock.verify();
+    sessionStorage.clear();
+  });
+
+  it('fasst gleichzeitige identische getSettings() zu EINEM HTTP-Call zusammen', () => {
+    const results: unknown[] = [];
+    api.getSettings().subscribe((v) => results.push(v));
+    api.getSettings().subscribe((v) => results.push(v));
+    // expectOne wirft, falls es zwei Requests gäbe → beweist den Dedup.
+    httpMock.expectOne(`${api.base}/settings`).flush({ voting_mode_global: 'stars' });
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual(results[1]);
+  });
+
+  it('holt nach Abschluss frisch (kein Caching, keine Staleness)', () => {
+    const seen: unknown[] = [];
+    api.getSettings().subscribe((v) => seen.push(v));
+    httpMock.expectOne(`${api.base}/settings`).flush({ voting_mode_global: 'stars' });
+    // Zweiter Aufruf NACH Abschluss → erneuter Request mit FRISCHEM Wert
+    // (Eintrag wurde verworfen → keine Staleness).
+    api.getSettings().subscribe((v) => seen.push(v));
+    httpMock.expectOne(`${api.base}/settings`).flush({ voting_mode_global: 'thumbs' });
+    expect(seen).toEqual([{ voting_mode_global: 'stars' }, { voting_mode_global: 'thumbs' }]);
+  });
+
+  it('coalesct NICHT über unterschiedliche Parameter (meta mit verschiedenem event)', () => {
+    api.meta({ event: 'a' }).subscribe();
+    api.meta({ event: 'b' }).subscribe();
+    // Verschiedene Keys → zwei eigenständige Requests (würde coalescing fälschlich
+    // mergen, fände das zweite expectOne keinen Request und würfe).
+    const reqA = httpMock.expectOne((r) => r.url === `${api.base}/meta` && r.params.get('event') === 'a');
+    const reqB = httpMock.expectOne((r) => r.url === `${api.base}/meta` && r.params.get('event') === 'b');
+    expect(reqA.request.params.get('event')).toBe('a');
+    expect(reqB.request.params.get('event')).toBe('b');
+    reqA.flush({});
+    reqB.flush({});
+  });
+});

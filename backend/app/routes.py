@@ -5185,7 +5185,7 @@ def idea_report_status(idea_id: str, authorization: str | None = Header(None)):
 
 @router.get("/ranking/risers", tags=["ranking"])
 def ranking_risers(
-    sort: Literal["rating", "comments", "interest"] = "rating",
+    sort: Literal["rating", "likes", "comments", "interest"] = "rating",
     event: str | None = None,
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(5, ge=1, le=20),

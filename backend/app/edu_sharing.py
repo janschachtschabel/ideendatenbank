@@ -23,7 +23,17 @@ def _guest_auth_header() -> str:
 class EduSharingClient:
     def __init__(self, base: str | None = None) -> None:
         self.base = (base or settings.edu_repo_api).rstrip("/")
-        self._client = httpx.AsyncClient(timeout=30.0)
+        # Verbindungs-Pool explizit: mehr warme Keepalive-Verbindungen (Default
+        # 20 → 40), damit unter Last-Spitzen (Sync + parallele Detail-Requests)
+        # nicht ständig neue TLS-Handshakes zu edu-sharing nötig sind.
+        # max_connections bleibt beim Default (100); keepalive_expiry wird bewusst
+        # NICHT erhöht (sonst Risiko, eine serverseitig bereits geschlossene
+        # Verbindung wiederzuverwenden). Reine Wiederverwendung → KEINE
+        # zusätzliche gleichzeitige edu-sharing-Last.
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=40),
+        )
 
     async def close(self) -> None:
         await self._client.aclose()

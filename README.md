@@ -213,9 +213,9 @@ Event-Seite mit eigenem QR-Code):
 - `?view=events&event=<slug>` — „Stöbert & stimmt ab" (Event-Hub)
 - `?view=ranking&event=<slug>` — „Schaut euch den Live-Stand an"
 
-> Die QR-Codes werden clientseitig über einen öffentlichen QR-Dienst
-> (`api.qrserver.com`) erzeugt — es werden ausschließlich die öffentlichen
-> Deep-Link-URLs übergeben, keine personenbezogenen Daten.
+> Die QR-Codes werden **lokal im Browser** erzeugt (`qrcode-generator` →
+> Data-URI-PNG, **kein externer Dienst**) — DSGVO-neutral, es verlassen keine
+> Daten die Seite.
 
 ---
 
@@ -292,7 +292,8 @@ Troubleshooting.
 
 ### CI/CD (`.github/workflows/`)
 
-- **`ci.yml`** — bei jedem Push/PR: Backend-Imports + Frontend-Build prüfen
+- **`ci.yml`** — bei jedem Push/PR: Backend `ruff` + `pytest`, Frontend `ng lint`
+  + `ng test` + `build:embed`
 - **`docker.yml`** — bei Push auf `main`, git-Tag `vX.Y.Z` oder manuell:
   Image bauen + nach `ghcr.io/janschachtschabel/ideendatenbank` pushen
 

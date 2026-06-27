@@ -68,6 +68,27 @@ def test_owner_display_name_from_cached_realname(client, seed_idea):
     assert r.json()["owner_display_name"] == "Bob Builder"
 
 
+def test_list_never_exposes_username_as_name(client, seed_idea):
+    """Security: in der Liste (und damit Rangliste/Karten via _row_to_idea) wird
+    der Login-Username weder als `author` noch als `owner_display_name`
+    ausgeliefert, wenn `author` nur der Login (cm:creator) ist."""
+    seed_idea("i1", owner_username="bob")
+    _set("i1", author="bob")  # author == Login, kein echter Freitext-Autor
+    item = next(x for x in client.get("/api/v1/ideas").json()["items"] if x["id"] == "i1")
+    assert item["author"] is None
+    assert item["owner_display_name"] is None
+    assert item["owner_username"] == "bob"  # bleibt für Profil-Link/Owner-Check
+
+
+def test_list_keeps_real_freetext_author(client, seed_idea):
+    """Ein echter Freitext-Autor (≠ Login) bleibt als Name erhalten."""
+    seed_idea("i2", owner_username="bob")
+    _set("i2", author="Bob Builder")
+    item = next(x for x in client.get("/api/v1/ideas").json()["items"] if x["id"] == "i2")
+    assert item["author"] == "Bob Builder"
+    assert item["owner_display_name"] == "Bob Builder"
+
+
 def test_my_rating_from_vote_event_ledger(client, seed_idea, user_headers):
     """A: eigene Stimme aus dem `vote_event`-Ledger statt live."""
     seed_idea("i1")

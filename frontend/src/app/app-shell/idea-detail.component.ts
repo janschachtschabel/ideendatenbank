@@ -1802,11 +1802,10 @@ export class IdeaDetailComponent implements OnChanges {
 
   /** Anzeige-Label für den Eigentümer: bevorzugt der Real-Name aus dem
    *  edu-sharing-Profil (firstName + lastName, wie in den Kommentaren),
-   *  fallback der Freitext-Autor aus dem Submit-Formular, dann der
-   *  Login-Username, sonst leer. Login wird NICHT zusätzlich angezeigt
-   *  (konsistent mit Kommentaren). */
+   *  fallback der Freitext-Autor aus dem Submit-Formular, sonst leer.
+   *  Der Login-Username wird NIE angezeigt (er ist zugleich der Anmeldename). */
   ownerLabel(i: any): string {
-    return (i.owner_display_name || i.author || i.owner_username || '').trim();
+    return (i.owner_display_name || i.author || '').trim();
   }
 
   /** Klickbarer Link aus dem Kontakt: mailto: bei E-Mail, href bei http(s)-URL,

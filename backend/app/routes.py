@@ -32,6 +32,13 @@ SortBy = Literal["modified", "created", "rating", "comments", "title"]
 
 
 def _row_to_idea(r) -> dict:
+    # Login-Username NIE als Anzeigename ausliefern: `author` ist im Cache evtl.
+    # nur cm:creator (= Login). Daher author verwerfen, wenn er == owner_username,
+    # und einen sicheren owner_display_name bilden (Klarname aus edu-sharing,
+    # sonst ein echter Freitext-Autor, sonst None — nie der Login).
+    _un = _safe_get(r, "owner_username")
+    _au = r["author"]
+    _safe_author = _au if (_au and _au != _un) else None
     return {
         "id": r["id"],
         "kind": r["kind"],
@@ -40,7 +47,7 @@ def _row_to_idea(r) -> dict:
         "title": r["title"],
         "description": r["description"],
         "preview_url": r["preview_url"],
-        "author": r["author"],
+        "author": _safe_author,
         "project_url": r["project_url"],
         "phase": r["phase"],
         "events": json.loads(r["events"] or "[]"),
@@ -53,7 +60,8 @@ def _row_to_idea(r) -> dict:
         "attachment_size": _safe_get(r, "attachment_size"),
         "attachment_name": _safe_get(r, "attachment_name"),
         "attachment_url": _safe_get(r, "attachment_url"),
-        "owner_username": _safe_get(r, "owner_username"),
+        "owner_username": _un,
+        "owner_display_name": _safe_get(r, "owner_display_name") or _safe_author,
         "attachment_folder_id": _safe_get(r, "attachment_folder_id"),
         "created_at": r["created_at"],
         "modified_at": r["modified_at"],
@@ -5321,6 +5329,7 @@ def ranking_risers(
                       (prev.rank - cur.rank) AS delta,
                       cur.score AS score,
                       i.title, i.description, i.preview_url, i.author,
+                      i.owner_username, i.owner_display_name,
                       i.phase, i.events, i.hidden
                  FROM ranking_snapshot cur
                  JOIN ranking_snapshot prev
@@ -5340,13 +5349,17 @@ def ranking_risers(
     for r in rows:
         if (r["delta"] or 0) <= 0:
             continue
+        # Login-Username nie als Anzeigename ausliefern (analog _row_to_idea).
+        _au = r["author"]
+        _safe_au = _au if (_au and _au != _safe_get(r, "owner_username")) else None
         items.append(
             {
                 "idea_id": r["idea_id"],
                 "title": r["title"],
                 "description": r["description"],
                 "preview_url": r["preview_url"],
-                "author": r["author"],
+                "author": _safe_au,
+                "owner_display_name": _safe_get(r, "owner_display_name") or _safe_au,
                 "phase": r["phase"],
                 "events": json.loads(r["events"] or "[]"),
                 "rank": r["rank"],

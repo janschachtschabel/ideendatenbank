@@ -31,6 +31,9 @@ export interface Idea {
   comments?: Comment[];
   attachments?: Attachment[];
   owner_username?: string | null;
+  /** Sicherer Anzeigename des Owners (Klarname aus edu-sharing/App-Profil);
+   *  NIE der Login-Username (der ist zugleich der Anmeldename). */
+  owner_display_name?: string | null;
   /** Kontakt (E-Mail/Link) der Einreichenden — nur für eingeloggte Nutzer:innen
    *  vom Backend ausgeliefert, nur mit Einwilligung gespeichert. */
   contact?: string | null;

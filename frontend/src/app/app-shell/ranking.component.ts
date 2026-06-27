@@ -479,7 +479,7 @@ interface RankItem {
               <div class="riser-rank">#{{ r.rank }}</div>
               <div class="riser-title">
                 {{ r.title || '(unbekannt)' }}
-                @if (r.author) { <span class="meta-line">von {{ r.author }}</span> }
+                @if (r.owner_display_name) { <span class="meta-line">von {{ r.owner_display_name }}</span> }
               </div>
               <div class="delta up">▲ {{ r.delta }}</div>
               <div class="prev">vorher #{{ r.prev_rank }}</div>
@@ -513,7 +513,7 @@ interface RankItem {
                  (click)="select(item)">
               {{ item.idea?.title || '(Idee gelöscht)' }}
               <span class="meta-line">
-                @if (item.idea?.author) { von {{ item.idea?.author }} · }
+                @if (item.idea?.owner_display_name) { von {{ item.idea?.owner_display_name }} · }
                 @if (item.idea?.events?.length) {
                   <svg class="ico-inline" width="11" height="11" viewBox="0 0 24 24"
                        fill="none" stroke="currentColor" stroke-width="2"

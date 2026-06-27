@@ -386,6 +386,13 @@ def init_db() -> None:
                 con.execute(_ddl)
             except sqlite3.OperationalError:
                 pass
+        # Owner-Klarname (Vor- + Nachname aus edu-sharing createdBy/owner) im
+        # Cache halten, damit die Detailseite ihn ohne Live-Call zeigt — und NIE
+        # den Login-Username (zugleich Anmeldename) öffentlich anzeigen muss.
+        try:
+            con.execute("ALTER TABLE idea ADD COLUMN owner_display_name TEXT")
+        except sqlite3.OperationalError:
+            pass
         # User-Notification-Cursor: wann hat der User seinen Feed zuletzt
         # angesehen? Aktivitäten danach gelten als „neu" und werden im
         # Profil-Tab "Was ist neu" mit Badge gezählt.

@@ -287,6 +287,19 @@ async def _upsert_idea(
         or _first(props, "cm:creator")
         or (node.get("owner") or {}).get("authorityName")
     )
+    # Owner-Klarname (Vor- + Nachname) aus den Node-Metadaten — im Cache halten,
+    # damit get_idea ihn ohne Live-Call zeigen kann und NIE den Login-Username
+    # (= zugleich Anmeldename) preisgeben muss. node_metadata (über refresh_idea)
+    # liefert createdBy/owner sicher; im Sammlungs-Walk evtl. nicht → dann None
+    # (per COALESCE im UPSERT wird ein bereits bekannter Name NICHT mit None
+    # überschrieben).
+    owner_display_name = None
+    for _src in ("createdBy", "owner"):
+        _obj = node.get(_src) or {}
+        _full = f"{(_obj.get('firstName') or '').strip()} {(_obj.get('lastName') or '').strip()}".strip()
+        if _full:
+            owner_display_name = _full
+            break
 
     # Original-ID merken: Reference-Knoten in Sammlungen tragen
     # `originalId`, der auf den ursprünglichen Inbox-Knoten zeigt.
@@ -299,8 +312,8 @@ async def _upsert_idea(
              (id,kind,topic_id,main_content_id,title,description,preview_url,author,
               project_url,phase,events,categories,keywords,rating_avg,rating_count,
               rating_sum,comment_count,attachment_mimetype,attachment_size,attachment_name,
-              attachment_url,owner_username,original_id,created_at,modified_at,synced_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              attachment_url,owner_username,owner_display_name,original_id,created_at,modified_at,synced_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
              kind=excluded.kind,
              topic_id=excluded.topic_id,
@@ -323,6 +336,7 @@ async def _upsert_idea(
              attachment_name=excluded.attachment_name,
              attachment_url=excluded.attachment_url,
              owner_username=excluded.owner_username,
+             owner_display_name=COALESCE(excluded.owner_display_name, owner_display_name),
              original_id=excluded.original_id,
              modified_at=excluded.modified_at,
              synced_at=excluded.synced_at""",
@@ -349,6 +363,7 @@ async def _upsert_idea(
             attach_name,
             attach_url,
             owner_username,
+            owner_display_name,
             original_id,
             node.get("createdAt"),
             node.get("modifiedAt"),

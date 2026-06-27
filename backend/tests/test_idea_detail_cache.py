@@ -50,11 +50,22 @@ def test_owner_display_name_from_profile_cache(client, seed_idea):
     assert r.json()["owner_display_name"] == "Alice Wonder"
 
 
-def test_owner_display_name_falls_back_to_username(client, seed_idea):
-    """A: ohne App-Profilnamen → Login-Username (graceful, +0 Calls)."""
-    seed_idea("i1", owner_username="bob")
+def test_owner_display_name_never_exposes_username(client, seed_idea):
+    """A (Security): ohne App-Profilnamen UND ohne gecachten Klarnamen wird der
+    Login-Username NICHT angezeigt (er ist zugleich der Anmeldename) → None."""
+    seed_idea("i1", owner_username="bob")  # kein user_profile_meta, kein owner_display_name
     r = client.get("/api/v1/ideas/i1")
-    assert r.json()["owner_display_name"] == "bob"
+    assert r.json()["owner_display_name"] is None
+    assert r.json()["owner_display_name"] != "bob"
+
+
+def test_owner_display_name_from_cached_realname(client, seed_idea):
+    """A: der beim Sync aus edu-sharing (createdBy/owner) gespeicherte Klarname
+    wird ohne Live-Call angezeigt — nicht der Username."""
+    seed_idea("i1", owner_username="bob")
+    _set("i1", owner_display_name="Bob Builder")
+    r = client.get("/api/v1/ideas/i1")
+    assert r.json()["owner_display_name"] == "Bob Builder"
 
 
 def test_my_rating_from_vote_event_ledger(client, seed_idea, user_headers):

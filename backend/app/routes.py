@@ -1144,24 +1144,25 @@ async def get_ranking(
 CHILD_CACHE_TTL_SECONDS = 60
 
 
-def _owner_display_name_cached(owner_username: str | None) -> str | None:
-    """Owner-Anzeigename OHNE Live-Call (Voll-Cache A): bevorzugt der selbst
-    gepflegte App-Profilname (user_profile_meta), sonst der Login-Username.
-    Ersetzt den früheren node_metadata-Live-Read (firstName+lastName)."""
-    if not owner_username:
-        return None
-    try:
-        with connect() as con:
-            r = con.execute(
-                "SELECT display_name FROM user_profile_meta "
-                "WHERE username=? AND display_name IS NOT NULL AND display_name <> ''",
-                (owner_username,),
-            ).fetchone()
-        if r and r["display_name"]:
-            return r["display_name"]
-    except Exception:
-        pass
-    return owner_username
+def _owner_display_name_cached(owner_username: str | None, cached_name: str | None) -> str | None:
+    """Owner-Anzeigename OHNE Live-Call und OHNE je den Login-Username
+    preiszugeben (der ist zugleich der Anmeldename): bevorzugt der selbst
+    gepflegte App-Profilname (user_profile_meta), sonst der beim Sync/Refresh aus
+    edu-sharing (createdBy/owner) gespeicherte Klarname. Ist keiner bekannt →
+    None; das Frontend zeigt dann KEINEN Namen statt des Logins."""
+    if owner_username:
+        try:
+            with connect() as con:
+                r = con.execute(
+                    "SELECT display_name FROM user_profile_meta "
+                    "WHERE username=? AND display_name IS NOT NULL AND display_name <> ''",
+                    (owner_username,),
+                ).fetchone()
+            if r and r["display_name"]:
+                return r["display_name"]
+        except Exception:
+            pass
+    return cached_name or None
 
 
 def _invalidate_children_cache(idea_id: str) -> None:
@@ -1261,7 +1262,9 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     # App-Profilname, sonst der Login-Username — vermeidet den Live-node_metadata-
     # Call, der früher firstName+lastName lieferte. Rating bleibt der gecachte
     # Wert (base); die eigene Stimme liefert der Client aus dem VotingService.
-    base["owner_display_name"] = _owner_display_name_cached(_safe_get(row, "owner_username"))
+    base["owner_display_name"] = _owner_display_name_cached(
+        _safe_get(row, "owner_username"), _safe_get(row, "owner_display_name")
+    )
 
     # Phase-Workflow: dem Frontend mitteilen, welche Phasen der Caller setzen
     # darf. Mod sieht alle, Owner nur „aktuelle + 1 vorwärts" (ohne Archive).

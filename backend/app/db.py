@@ -368,6 +368,24 @@ def init_db() -> None:
             )
         except sqlite3.OperationalError:
             pass
+        # Voll-Cache der Detailseite (Juni 2026): die teuren Live-Reads von
+        # get_idea im Cache halten.
+        #  - Kommentar-Thread (`comments_cache`): `comments_cache_count` merkt den
+        #    comment_count zum Cache-Zeitpunkt; weicht er vom aktuellen ab
+        #    (nächster Sync / Post / Delete bumpen die Zahl), wird neu geholt.
+        #  - Child-IO-Anhänge (`children_cache`): kein Count-Signal verfügbar →
+        #    `children_cache_at` (ISO-Zeitstempel) steuert eine kurze TTL.
+        # Alle Spalten additiv/optional → kein Bruch des bestehenden Stands.
+        for _ddl in (
+            "ALTER TABLE idea ADD COLUMN comments_cache TEXT",
+            "ALTER TABLE idea ADD COLUMN comments_cache_count INTEGER",
+            "ALTER TABLE idea ADD COLUMN children_cache TEXT",
+            "ALTER TABLE idea ADD COLUMN children_cache_at TEXT",
+        ):
+            try:
+                con.execute(_ddl)
+            except sqlite3.OperationalError:
+                pass
         # User-Notification-Cursor: wann hat der User seinen Feed zuletzt
         # angesehen? Aktivitäten danach gelten als „neu" und werden im
         # Profil-Tab "Was ist neu" mit Badge gezählt.

@@ -990,7 +990,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
       }, 0);
     } else if (this.initialView === 'user' && this.initialUser) {
       this.profileUsername = this.initialUser;
-      setTimeout(() => this.view.set('user'), 0);
+      this.view.set('user');
     } else {
       this.parseUrlParams();
     }
@@ -1071,7 +1071,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
       // Öffentliches Profil: ?view=user&u=<name>
       if (view === 'user' && userParam) {
         this.profileUsername = userParam;
-        setTimeout(() => this.view.set('user'), 0);
+        this.view.set('user');
         return;
       }
       // Rangliste mit Event-Filter: ?view=ranking&event=<slug>
@@ -1080,15 +1080,19 @@ export class AppShellComponent implements OnInit, OnDestroy {
       }
       // Eventseite direkt zu einer Veranstaltung: ?view=events&event=<slug>
       if (view === 'events' && event) {
-        setTimeout(() => { this.view.set('events'); this.eventDrill.set(event); }, 0);
+        this.view.set('events');
+        this.eventDrill.set(event);
         return;
       }
+      // View SYNCHRON setzen (kein setTimeout), damit der Ziel-View schon beim
+      // ERSTEN Render steht. Sonst rendert kurz die Home-Ansicht mit, deren
+      // Ideen-Vorschau einen ideas?limit=8-Request feuert, der beim View-Wechsel
+      // sofort wieder abgebrochen wird (rotes „(canceled)" + verschwendeter Call).
       if (view && ['home','browser','topics','events','ranking','submit','profile','moderation','imprint','privacy','embed','help'].includes(view)) {
-        // setTimeout, damit ngOnInit zuerst durchläuft
-        setTimeout(() => this.view.set(view as View), 0);
+        this.view.set(view as View);
       } else if (event) {
         // Event ohne explizite View → direkt aufs Submit
-        setTimeout(() => this.view.set('submit'), 0);
+        this.view.set('submit');
       }
     } catch {
       // Web-Component-Kontext könnte ohne Location laufen

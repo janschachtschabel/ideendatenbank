@@ -137,3 +137,25 @@ def test_logged_in_attachment_needs_no_token(client, fake_es, seed_idea):
         headers={"Authorization": _auth("bob")},
     )
     assert r.status_code == 200
+
+
+def test_attachment_upload_invalidates_children_cache(client, fake_es, seed_idea):
+    """Tier-C-Fix: ein erfolgreicher Anhang-Upload leert den children_cache sofort,
+    damit der neue Anhang nicht erst nach Ablauf der TTL erscheint."""
+    seed_idea("i1", owner_username="bob")
+    with connect() as con:
+        # Frischer (weit zukünftiger) Cache → ohne Invalidierung gäbe es einen
+        # Cache-Hit und der neue Anhang bliebe ≤TTL unsichtbar.
+        con.execute(
+            "UPDATE idea SET children_cache='[]', "
+            "children_cache_at='2099-01-01T00:00:00+00:00' WHERE id='i1'"
+        )
+    r = client.post(
+        "/api/v1/ideas/i1/attachments/upload",
+        files=_file(),
+        headers={"Authorization": _auth("bob")},
+    )
+    assert r.status_code == 200
+    with connect() as con:
+        row = con.execute("SELECT children_cache FROM idea WHERE id='i1'").fetchone()
+    assert row["children_cache"] is None  # sofort invalidiert

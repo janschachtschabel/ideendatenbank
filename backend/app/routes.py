@@ -1138,6 +1138,44 @@ async def get_ranking(
     }
 
 
+# Tier C: TTL (Sekunden) für den Child-IO-Anhang-Cache der Detailseite. Kurz
+# genug, dass Anhang-Änderungen zeitnah erscheinen; lang genug, dass unter Last
+# (viele gleichzeitige Views) der Per-View-`list_child_objects`-Call entfällt.
+CHILD_CACHE_TTL_SECONDS = 60
+
+
+def _owner_display_name_cached(owner_username: str | None) -> str | None:
+    """Owner-Anzeigename OHNE Live-Call (Voll-Cache A): bevorzugt der selbst
+    gepflegte App-Profilname (user_profile_meta), sonst der Login-Username.
+    Ersetzt den früheren node_metadata-Live-Read (firstName+lastName)."""
+    if not owner_username:
+        return None
+    try:
+        with connect() as con:
+            r = con.execute(
+                "SELECT display_name FROM user_profile_meta "
+                "WHERE username=? AND display_name IS NOT NULL AND display_name <> ''",
+                (owner_username,),
+            ).fetchone()
+        if r and r["display_name"]:
+            return r["display_name"]
+    except Exception:
+        pass
+    return owner_username
+
+
+def _invalidate_children_cache(idea_id: str) -> None:
+    """Tier-C-Anhang-Cache (Child-IOs) einer Idee verwerfen — aufrufen, sobald
+    sich die Anhänge ändern (Add/Rename/Delete/Replace), damit die Änderung
+    SOFORT statt erst nach Ablauf der TTL erscheint. Best-effort; die TTL bleibt
+    der Backstop, falls dies fehlschlägt."""
+    try:
+        with connect() as con:
+            con.execute("UPDATE idea SET children_cache=NULL WHERE id=?", (idea_id,))
+    except Exception:
+        pass
+
+
 @router.get("/ideas/{idea_id}")
 async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     with connect() as con:
@@ -1177,26 +1215,33 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     # den Anhang in EINEM Call (vorher wurde derselbe Knoten doppelt geholt).
     # Auth-Passthrough: eingeloggte Caller lesen mit eigener Identität (Zugriff
     # auf Ideen, die der Gast nicht sehen darf); Rating ist auch anonym lesbar.
-    import asyncio
-
     target_id = row["main_content_id"] or row["id"]
-    meta_res, comments_res = await asyncio.gather(
-        edu_sharing.client.node_metadata(target_id, auth_header=authorization),
-        edu_sharing.client.comments(target_id, auth_header=authorization),
-        return_exceptions=True,
-    )
 
-    is_private = False  # markiert: Gast hat keinen Lesezugriff
+    # Voll-Cache der Detailseite (A): KEIN Live-`node_metadata` mehr — Rating,
+    # Owner und Anhang-Metadaten kommen aus dem SQLite-Cache (der Sync hält sie
+    # aktuell; App-Writes triggern refresh_idea). `live_meta_node` bleibt leer,
+    # sodass der Anhang-Block unten automatisch den Cache-Fallback nutzt. Die
+    # eigene Stimme (my_rating) füllt der Client aus seinem VotingService-Cache.
+    # Cached Ideen stammen aus den ÖFFENTLICHEN Sammlungen → nie „privat".
+    is_private = False  # markiert: Gast hat keinen Lesezugriff (nur Live-Pfade)
     live_meta_node: dict = {}
-    if isinstance(meta_res, Exception):
-        if isinstance(meta_res, httpx.HTTPStatusError) and meta_res.response.status_code in (
-            401,
-            403,
-        ):
-            is_private = True
-        log.debug("get_idea: node_metadata fehlgeschlagen: %s", meta_res)
-    else:
-        live_meta_node = (meta_res or {}).get("node") or {}
+    # Eigene Stimme (A): aus dem App-eigenen vote_event-Ledger (rate_idea/unrate
+    # pflegen es) statt live von edu-sharing — +0 Calls, überlebt Reload. Das
+    # Frontend konsumiert `my_rating` unverändert weiter.
+    base["my_rating"] = 0.0
+    if authorization:
+        _uk = _user_key_from_auth(authorization)
+        if _uk:
+            try:
+                with connect() as con:
+                    _vr = con.execute(
+                        "SELECT value FROM vote_event WHERE idea_id=? AND user_key=?",
+                        (row["id"], _uk),
+                    ).fetchone()
+                if _vr and _vr["value"] is not None:
+                    base["my_rating"] = float(_vr["value"])
+            except Exception:
+                pass
 
     # can_edit / can_delete: NICHT aus ES-accessEffective ableiten — die
     # HackathOERn-Gruppe hat dort durch Vererbung pauschal Write-Rechte und
@@ -1212,35 +1257,11 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     base["can_edit"] = can_edit
     base["can_delete"] = can_delete
 
-    # Display-Name des Erstellers/Owners — konsistent mit Kommentaren, die
-    # `firstName + lastName` aus dem ES-Profil zeigen. Frontend nutzt das
-    # statt des reinen Login-Usernamens.
-    owner_display_name: str | None = None
-    if live_meta_node:
-        for src in ("createdBy", "owner"):
-            obj = live_meta_node.get(src) or {}
-            fn = (obj.get("firstName") or "").strip()
-            ln = (obj.get("lastName") or "").strip()
-            full = f"{fn} {ln}".strip()
-            if full:
-                owner_display_name = full
-                break
-    base["owner_display_name"] = owner_display_name
-
-    # Live-Rating aus den Node-Metadaten — der Cache-Wert kann durch
-    # Schein-500-Fehler hinterherhinken, bis der nächste Sync läuft.
-    # Auf der Detail-Seite ist es vertretbar, einen aktuellen Wert zu zeigen.
-    base["my_rating"] = 0.0
-    if live_meta_node:
-        live_rating = live_meta_node.get("rating") or {}
-        overall = live_rating.get("overall") or {}
-        live_avg = float(overall.get("rating") or 0.0)
-        live_count = int(overall.get("count") or 0)
-        if live_count > 0 or live_avg > 0:
-            base["rating_avg"] = live_avg
-            base["rating_count"] = live_count
-        if authorization:
-            base["my_rating"] = float(live_rating.get("user") or 0.0)
+    # Owner-Anzeigename aus dem Cache (A): bevorzugt der selbst gepflegte
+    # App-Profilname, sonst der Login-Username — vermeidet den Live-node_metadata-
+    # Call, der früher firstName+lastName lieferte. Rating bleibt der gecachte
+    # Wert (base); die eigene Stimme liefert der Client aus dem VotingService.
+    base["owner_display_name"] = _owner_display_name_cached(_safe_get(row, "owner_username"))
 
     # Phase-Workflow: dem Frontend mitteilen, welche Phasen der Caller setzen
     # darf. Mod sieht alle, Owner nur „aktuelle + 1 vorwärts" (ohne Archive).
@@ -1262,16 +1283,43 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         else []
     )
 
-    # Live-Kommentare (oben parallel mit den Node-Metadaten geholt; immer gegen
-    # das ccm:io-Target). 401/403 → Gast hat keinen Lesezugriff.
-    if isinstance(comments_res, Exception):
-        if isinstance(
-            comments_res, httpx.HTTPStatusError
-        ) and comments_res.response.status_code in (401, 403):
-            is_private = True
-        base["comments"] = []
+    # Kommentare aus dem Voll-Cache (B): ist der gecachte Thread aktuell
+    # (comments_cache_count == comment_count), ohne Live-Call ausliefern. Sonst
+    # einmal live holen und den Cache füllen. Post/Delete bumpen comment_count
+    # (über refresh_idea) → der Count-Mismatch invalidiert den Cache automatisch.
+    # Invariante: der Cache ist caller-unabhängig (Schlüssel = Idee, nicht Auth).
+    # Sicher, weil gecachte Ideen ausschließlich aus ÖFFENTLICHEN Sammlungen
+    # stammen (private/Inbox-Knoten landen nie im Cache; refresh_idea überspringt
+    # sie) → die Kommentare sind für alle Leser identisch. Falls je nicht-
+    # öffentliche Kommentare eingeführt werden, muss hier nach Auth geschlüsselt
+    # werden.
+    cur_count = _safe_get(row, "comment_count") or 0
+    cached_count = _safe_get(row, "comments_cache_count")
+    cached_json = _safe_get(row, "comments_cache")
+    if cached_json is not None and cached_count == cur_count:
+        try:
+            base["comments"] = json.loads(cached_json)
+        except Exception:
+            base["comments"] = []
     else:
-        base["comments"] = (comments_res or {}).get("comments") or []
+        try:
+            cm = await edu_sharing.client.comments(target_id, auth_header=authorization)
+            comments_list = (cm or {}).get("comments") or []
+            base["comments"] = comments_list
+            try:
+                with connect() as con:
+                    con.execute(
+                        "UPDATE idea SET comments_cache=?, comments_cache_count=? WHERE id=?",
+                        (json.dumps(comments_list), cur_count, row["id"]),
+                    )
+            except Exception:
+                pass  # Cache-Write ist best-effort — die Antwort stimmt trotzdem
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (401, 403):
+                is_private = True
+            base["comments"] = []
+        except Exception:
+            base["comments"] = []
 
     # Live attachments — documents the user can download / preview.
     def _has_real_content(att: dict) -> bool:
@@ -1331,20 +1379,48 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     # Serienobjekt-Anhänge: Child-IOs unter der Idee (ccm:io_childobject-
     # Aspekt). Ersetzt die alte Geschwister-Sammlungs-Lösung.
     base["attachment_folder"] = None  # Legacy-Feld — Frontend ignoriert es jetzt
-    try:
-        # Bei kind="io" hängen Children am Knoten selbst; bei kind="collection"
-        # hängen sie ebenfalls am Idee-Knoten (= ccm:map). Funktioniert für beide.
-        children = await edu_sharing.client.list_child_objects(
-            row["id"],
-            auth_header=authorization,
-        )
-        for n in children:
-            a = _attachment_from_node(n)
-            a["from_folder"] = True  # Backwards-compat-Flag fürs Frontend
-            a["is_child_object"] = True
-            attachments.append(a)
-    except Exception:
-        pass
+    # Child-IO-Anhänge (Serienobjekte) — Tier C: `list_child_objects` ist der
+    # letzte Live-Call der Detailseite. Das Ergebnis mit kurzer TTL cachen, damit
+    # unter Last nicht jeder View edu-sharing trifft. Es gibt kein zuverlässiges
+    # Änderungssignal (Anhang-Adds bumpen modified_at nicht) → die TTL bound die
+    # Staleness einheitlich; bei Cache-Miss/abgelaufen wird live geholt und der
+    # Cache neu geschrieben. (Bei kind="io" hängen Children am Knoten selbst, bei
+    # kind="collection" am Idee-Knoten = ccm:map — funktioniert für beide.)
+    # Invariante wie bei den Kommentaren (B): caller-unabhängiger Cache, sicher
+    # weil gecachte Ideen — und damit ihre Anhänge — öffentlich sind.
+    child_atts: list[dict] | None = None
+    _cc_at = _safe_get(row, "children_cache_at")
+    _cc = _safe_get(row, "children_cache")
+    if _cc is not None and _cc_at:
+        try:
+            age = (datetime.now(UTC) - datetime.fromisoformat(_cc_at)).total_seconds()
+            if 0 <= age < CHILD_CACHE_TTL_SECONDS:
+                child_atts = json.loads(_cc)
+        except Exception:
+            child_atts = None
+    if child_atts is None:
+        child_atts = []
+        try:
+            children = await edu_sharing.client.list_child_objects(
+                row["id"],
+                auth_header=authorization,
+            )
+            for n in children:
+                a = _attachment_from_node(n)
+                a["from_folder"] = True  # Backwards-compat-Flag fürs Frontend
+                a["is_child_object"] = True
+                child_atts.append(a)
+            try:
+                with connect() as con:
+                    con.execute(
+                        "UPDATE idea SET children_cache=?, children_cache_at=? WHERE id=?",
+                        (json.dumps(child_atts), datetime.now(UTC).isoformat(), row["id"]),
+                    )
+            except Exception:
+                pass  # Cache-Write best-effort — die Antwort stimmt trotzdem
+        except Exception:
+            child_atts = []
+    attachments.extend(child_atts)
 
     base["attachments"] = attachments
     # Kontaktdaten der Einreichenden NUR für eingeloggte Nutzer:innen ausliefern
@@ -2792,6 +2868,12 @@ async def upload_idea_content(
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, hier Inhalte zu speichern.")
         raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
+    # io-Selbstanhang im Cache auffrischen (seit dem Voll-Cache wird er aus dem
+    # idea-Row bedient statt live) → der hochgeladene Inhalt erscheint sofort.
+    try:
+        await sync_mod.refresh_idea(idea_id, auth_header=authorization)
+    except Exception:
+        pass
     return {"ok": True, "size": len(data), "name": file.filename}
 
 
@@ -4086,6 +4168,7 @@ async def rename_attachment(
         target_label=new_name,
         detail={"idea_id": idea_id},
     )
+    _invalidate_children_cache(idea_id)
     return {"ok": True, "name": new_name}
 
 
@@ -4124,6 +4207,7 @@ async def delete_attachment(
         target_label=att_name,
         detail={"idea_id": idea_id},
     )
+    _invalidate_children_cache(idea_id)
     return {"ok": True}
 
 
@@ -4189,6 +4273,7 @@ async def replace_attachment_content(
         target_label=filename,
         detail={"idea_id": idea_id, "size": len(data), "mimetype": mimetype},
     )
+    _invalidate_children_cache(idea_id)
     return {"ok": True, "name": filename, "size": len(data)}
 
 
@@ -4839,6 +4924,7 @@ async def upload_attachment(
         target_label=filename,
         detail={"idea_id": idea_id, "size": len(data), "mimetype": mimetype},
     )
+    _invalidate_children_cache(idea_id)
     return {"ok": True, "node_id": new_id, "name": filename, "size": len(data)}
 
 

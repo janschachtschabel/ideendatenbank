@@ -67,32 +67,29 @@ export class VotingService {
   private eventRatingOpen = signal<Record<string, boolean>>(this._cache.events);
   private loaded = false;
 
-  /** Lädt globalen Modus + Bewertungs-Schalter + pro-Event-Bewertungsphase. */
+  /** Lädt globalen Modus + Bewertungs-Schalter + pro-Event-Bewertungsphase aus
+   *  dem gebündelten `/bootstrap` (Felder `settings` + `events`). Da
+   *  `api.bootstrap()` über den Coalesce-Key 'bootstrap' läuft, TEILT sich
+   *  dieser Aufruf die bereits beim App-Start ausgelöste Bootstrap-Anfrage —
+   *  es entstehen KEINE separaten settings/events-XHRs mehr (früher zwei eigene
+   *  Requests pro Session). */
   load(force = false) {
     if (this.loaded && !force) return;
     this.loaded = true;
-    this.api.getSettings().subscribe({
-      next: (s) => {
-        this.globalMode.set(s.voting_mode_global || 'stars');
-        this.ratingEnabled.set(s.rating_enabled !== false);
+    this.api.bootstrap().subscribe({
+      next: (b) => {
+        this.globalMode.set(b.settings.voting_mode_global || 'stars');
+        this.ratingEnabled.set(b.settings.rating_enabled !== false);
+        const m: Record<string, boolean> = {};
+        for (const e of b.events) m[e.slug] = e.rating_open !== false;
+        this.eventRatingOpen.set(m);
         this._persist();
       },
       // Fehler: zuletzt bekannten (Init-/Cache-)Stand behalten — NICHT auf die
       // permissiven Defaults zurücksetzen, sonst flackert ein transienter
-      // /settings-Fehler die UI (z. B. auf Sterne, obwohl Daumen aktiv ist).
+      // Fehler die UI (z. B. auf Sterne, obwohl Daumen aktiv ist).
       error: () => {
         /* Werte bleiben auf dem Init-/Cache-Stand */
-      },
-    });
-    this.api.listEvents({ includeInactive: true, includeArchived: true }).subscribe({
-      next: (evs) => {
-        const m: Record<string, boolean> = {};
-        for (const e of evs) m[e.slug] = e.rating_open !== false;
-        this.eventRatingOpen.set(m);
-        this._persist();
-      },
-      error: () => {
-        /* Event-Liste optional — Fehler still ignorieren */
       },
     });
   }

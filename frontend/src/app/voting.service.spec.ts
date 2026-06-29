@@ -7,19 +7,24 @@ import { VotingService } from './voting.service';
 /**
  * Pinnt den localStorage-Cache des Voting-Stands (Modus + Master-Schalter +
  * pro-Event-Phase). Hintergrund: `load()` holt diese Werte asynchron aus
- * `/settings` bzw. der Event-Liste; ohne Cache zeigt jede Seite bis zur Antwort
- * den permissiven Default (Sterne, Voting an, Phase offen) und kippt dann auf
- * den echten Stand — sichtbares Flackern beim Reload. Der Cache initialisiert
- * die Signale mit dem zuletzt bestätigten Stand.
+ * `/bootstrap` (Felder `settings` + `events` gebündelt); ohne Cache zeigt jede
+ * Seite bis zur Antwort den permissiven Default (Sterne, Voting an, Phase
+ * offen) und kippt dann auf den echten Stand — sichtbares Flackern beim Reload.
+ * Der Cache initialisiert die Signale mit dem zuletzt bestätigten Stand.
  */
 describe('VotingService — Voting-Cache (kein Flackern beim Reload)', () => {
   const KEY = 'ideendb_voting_cache';
 
-  /** Baut den Service mit gefaktem ApiService (kein HTTP nötig). */
-  function setup(settings$: unknown, events$: unknown = of([])): VotingService {
+  /** Baut eine /bootstrap-Antwort mit den voting-relevanten Teilen. */
+  function boot(settings: object, events: unknown[] = []) {
+    return of({ settings, events });
+  }
+
+  /** Baut den Service mit gefaktem ApiService (kein HTTP nötig). `bootstrap$`
+   *  ist nur relevant, wenn der Test `load()` aufruft. */
+  function setup(bootstrap$: unknown = of({ settings: {}, events: [] })): VotingService {
     const fakeApi = {
-      getSettings: () => settings$,
-      listEvents: () => events$,
+      bootstrap: () => bootstrap$,
     };
     TestBed.configureTestingModule({
       providers: [{ provide: ApiService, useValue: fakeApi }],
@@ -44,20 +49,20 @@ describe('VotingService — Voting-Cache (kein Flackern beim Reload)', () => {
 
   it('initialisiert den Modus aus dem Cache (kein Sterne→Daumen-Flackern)', () => {
     localStorage.setItem(KEY, JSON.stringify({ mode: 'thumbs', enabled: true, events: {} }));
-    const v = setup(of({ voting_mode_global: 'thumbs', rating_enabled: true }));
+    const v = setup();
     // Schon VOR load() korrekt — genau das verhindert das Aufblitzen.
     expect(v.globalMode()).toBe('thumbs');
   });
 
   it('ohne Cache gelten die Defaults (Sterne, Voting an)', () => {
-    const v = setup(of({ voting_mode_global: 'thumbs', rating_enabled: true }));
+    const v = setup();
     expect(v.globalMode()).toBe('stars');
     expect(v.ratingActive()).toBe(true);
   });
 
   it('initialisiert den Master-Schalter aus dem Cache (Voting global aus)', () => {
     localStorage.setItem(KEY, JSON.stringify({ mode: 'thumbs', enabled: false, events: {} }));
-    const v = setup(of({ voting_mode_global: 'thumbs', rating_enabled: false }));
+    const v = setup();
     // Reload zeigt sofort „aus" statt erst „an" (Vote-Buttons blitzen nicht auf).
     expect(v.ratingActive()).toBe(false);
     expect(v.isEventRatingOpen('egal')).toBe(false);
@@ -68,15 +73,17 @@ describe('VotingService — Voting-Cache (kein Flackern beim Reload)', () => {
       KEY,
       JSON.stringify({ mode: 'stars', enabled: true, events: { 'evt-zu': false } }),
     );
-    const v = setup(of({ voting_mode_global: 'stars', rating_enabled: true }));
+    const v = setup();
     expect(v.isEventRatingOpen('evt-zu')).toBe(false); // gestopptes Event
     expect(v.isEventRatingOpen('evt-offen')).toBe(true); // unbekannt = offen
   });
 
   it('load() schreibt Modus + Schalter + Events in den Cache', () => {
     const v = setup(
-      of({ voting_mode_global: 'thumbs', rating_enabled: false }),
-      of([{ slug: 'evt-zu', rating_open: false }]),
+      boot(
+        { voting_mode_global: 'thumbs', rating_enabled: false },
+        [{ slug: 'evt-zu', rating_open: false }],
+      ),
     );
     v.load();
     expect(v.globalMode()).toBe('thumbs');
@@ -89,9 +96,9 @@ describe('VotingService — Voting-Cache (kein Flackern beim Reload)', () => {
 
   it('load()-Fehler behält den gecachten Stand (kein Reset auf die Defaults)', () => {
     localStorage.setItem(KEY, JSON.stringify({ mode: 'thumbs', enabled: false, events: {} }));
-    const v = setup(throwError(() => new Error('settings down')));
+    const v = setup(throwError(() => new Error('bootstrap down')));
     v.load();
-    // Ein transienter /settings-Fehler darf weder auf Sterne noch auf „Voting an"
+    // Ein transienter /bootstrap-Fehler darf weder auf Sterne noch auf „Voting an"
     // zurückfallen.
     expect(v.globalMode()).toBe('thumbs');
     expect(v.ratingActive()).toBe(false);

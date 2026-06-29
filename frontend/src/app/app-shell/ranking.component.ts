@@ -740,13 +740,17 @@ export class RankingComponent implements OnChanges {
     this.voting.load();  // Modus + Event-Overrides (idempotent)
     // Verfalls-Parameter laden (für Umschalter + Transparenz-Box). Statische
     // Server-Config → nur EINMAL holen; ngOnChanges feuert bei jeder
-    // Input-Änderung, sonst ein doppelter /settings-Request pro Change.
+    // Input-Änderung, sonst ein doppelter Request pro Change. Quelle ist das
+    // gebündelte /bootstrap (Feld `settings`) statt eines eigenen /settings-
+    // Calls: über den Coalesce-Key 'bootstrap' teilt sich dieser Aufruf die
+    // ohnehin via voting.load() ausgelöste Bootstrap-Anfrage → keine separate
+    // settings-XHR mehr.
     if (this.decayInfo() === null) {
-      this.api.getSettings().subscribe({
-        next: (s) => this.decayInfo.set({
-          enabled: s.rating_decay_enabled !== false,
-          halflife: s.rating_decay_halflife_days ?? 90,
-          floor: s.rating_decay_floor ?? 0.2,
+      this.api.bootstrap().subscribe({
+        next: (b) => this.decayInfo.set({
+          enabled: b.settings.rating_decay_enabled !== false,
+          halflife: b.settings.rating_decay_halflife_days ?? 90,
+          floor: b.settings.rating_decay_floor ?? 0.2,
         }),
         error: () => this.decayInfo.set(null),
       });

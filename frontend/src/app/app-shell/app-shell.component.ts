@@ -785,6 +785,9 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
             [initialIdea]="currentIdea()"
             [apiBase]="apiBase"
             [repoBaseUrl]="repoBaseUrl()"
+            [events]="eventMeta()"
+            [phases]="phaseMeta()"
+            [topicList]="allTopics()"
             (back)="go('browser')"
             (openTopic)="openTopicById($event)"
             (openEvent)="enterEventDrillFromHome($event)"
@@ -938,6 +941,9 @@ export class AppShellComponent implements OnInit, OnDestroy {
    * öffnen"-Links + Registrierung). Deployment-spezifisch. */
   repoBaseUrl = signal<string>('https://redaktion.openeduhub.net');
   phaseLabels = new Map<string, string>();
+  /** Volle Phasen-Taxonomie aus dem Bootstrap — wird der Detailseite als
+   *  @Input gereicht, damit diese keinen eigenen /phases-Call mehr braucht. */
+  phaseMeta = signal<TaxonomyEntry[]>([]);
   currentTopic = signal<Topic | null>(null);
   topicParent = signal<Topic | null>(null);
   topicChildren = signal<Topic[]>([]);
@@ -1022,6 +1028,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
         // Phasen-Labels.
         this.phaseLabels.clear();
         for (const p of b.phases) this.phaseLabels.set(p.slug, p.label);
+        this.phaseMeta.set(b.phases);
         // Themenbaum + Idee-Zahlen pro Themenbereich. Die Counts stammen aus
         // den ungefilterten /meta-`topics` (vormals ein eigener /meta-Call,
         // verschachtelt in topics()); die Subtree-Summe bilden wir aus dem

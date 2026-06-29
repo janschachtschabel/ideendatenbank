@@ -1630,13 +1630,24 @@ export class IdeaDetailComponent implements OnChanges {
   /** Kontakt-Stand beim Öffnen des Edit-Dialogs — um beim Speichern nur bei
    *  echter Änderung den (separaten) App-DB-Endpoint zu rufen. */
   private editContactInitial = '';
-  phases: TaxonomyEntry[] = [];
-  events: TaxonomyEntry[] = [];
+  /** Phasen-/Event-Taxonomie für Label-Anzeige + Edit-Dropdowns. Wird von der
+   *  App-Shell aus dem bereits geladenen Bootstrap als @Input gereicht, sodass
+   *  die Detailseite KEINE eigenen /phases- und /events-Calls mehr feuert.
+   *  Bleibt der Input leer (Standalone-Embed / Mod-Inline-Edit), greift der
+   *  Lazy-Fetch in load()/startEdit() als Fallback. */
+  @Input() phases: TaxonomyEntry[] = [];
+  @Input() events: TaxonomyEntry[] = [];
   /** Topic-Liste für Anzeige (Breadcrumb) + Herausforderungs-Wechsel (Mod).
    *  Als Signal, damit das Template re-rendert sobald die async-Antwort
    *  da ist — sonst sähen ausgeloggte User den Topic-Crumb nicht (idea kommt
    *  vor topics, ohne signal kein zweiter Render). */
   topics = signal<Topic[]>([]);
+  /** Topic-Liste aus der App-Shell (Bootstrap). Nicht-leerer Input überschreibt
+   *  das Signal und macht den eigenen /topics-Call überflüssig; leerer Input
+   *  (Embed/Mod) → Lazy-Fetch in load() als Fallback. */
+  @Input() set topicList(v: Topic[]) {
+    if (v?.length) this.topics.set(v);
+  }
 
   topicChangeBusy = false;
   topicChangeStatus = '';

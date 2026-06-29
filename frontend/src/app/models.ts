@@ -159,6 +159,27 @@ export interface FeaturedEvent extends TaxonomyEntry {
   idea_count: number;
 }
 
+/** Facetten-Counts (Phase/Veranstaltung/Kategorie + Per-Topic). Rückgabe von
+ *  `/meta` und Teil von `/bootstrap`. */
+export interface MetaFacets {
+  phases: { value: string; count: number }[];
+  events: { value: string; count: number }[];
+  categories: { value: string; count: number }[];
+  topics: Record<string, number>;
+}
+
+/** Gebündelter Erststart-Datensatz (Backend-Endpoint `/bootstrap`): liefert in
+ *  EINER Antwort, was die App-Shell beim Laden braucht — statt ~6 paralleler
+ *  XHRs, die hinter einem HTTP/2-Proxy mit den Bundle-Downloads konkurrieren. */
+export interface BootstrapResponse {
+  topics: Topic[];
+  meta: MetaFacets;
+  phases: TaxonomyEntry[];
+  events: TaxonomyEntry[];
+  featured_events: FeaturedEvent[];
+  settings: AppSettings;
+}
+
 export interface UserProfileMeta {
   display_name: string | null;
   bio: string | null;

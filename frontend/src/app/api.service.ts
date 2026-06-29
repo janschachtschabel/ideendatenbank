@@ -1,7 +1,7 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, finalize, shareReplay } from 'rxjs';
-import { FeaturedEvent, Idea, IdeaList, InboxItem, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
+import { BootstrapResponse, FeaturedEvent, Idea, IdeaList, InboxItem, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
 import { AuthService } from './auth.service';
 
 // Re-export, damit bestehende `import { API_BASE_DEFAULT } from './api.service'`
@@ -79,6 +79,17 @@ export class ApiService {
 
   topics(): Observable<Topic[]> {
     return this.coalesced('topics', () => this.http.get<Topic[]>(`${this.base}/topics`));
+  }
+
+  /** Gebündelter Erststart-Datensatz: topics + meta + phases + events +
+   *  featured + settings in EINER Antwort. Ersetzt den ~6-XHR-Schwall der
+   *  App-Shell beim Laden, der hinter einem HTTP/2-Proxy (eine Verbindung) die
+   *  Bundle-/Font-Downloads und die Init-XHRs gegeneinander ausbremst.
+   *  `/me` bleibt bewusst separat (auth-abhängig, Live-edu-sharing). */
+  bootstrap(): Observable<BootstrapResponse> {
+    return this.coalesced('bootstrap', () =>
+      this.http.get<BootstrapResponse>(`${this.base}/bootstrap`),
+    );
   }
 
   topicDetail(id: string): Observable<{ topic: Topic; parent: Topic | null; children: Topic[] }> {

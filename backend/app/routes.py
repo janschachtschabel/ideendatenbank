@@ -3511,6 +3511,32 @@ def featured_event():
     return out
 
 
+@router.get("/bootstrap", tags=["public"])
+def bootstrap():
+    """Gebündelter Erststart-Datensatz: liefert in EINER Antwort, was die
+    App-Shell beim Laden braucht (topics, meta, phases, events, featured,
+    settings).
+
+    Begründung: Hinter einem HTTP/2-Reverse-Proxy teilt sich der Browser EINE
+    Verbindung für alle Requests. Feuert die Shell ~6 Init-XHRs gleichzeitig,
+    konkurrieren diese mit den Bundle-/Font-Downloads und hungern aus (gemessen
+    5–14 s). Ein einziger gebündelter Call entschärft diese Konkurrenz. Die
+    Bestandteile sind exakt dieselben (wiederverwendete Query-Funktionen), die
+    `meta`-Facetten sind ungefiltert (entspricht `meta({})` der Shell).
+
+    Read-only, kein Auth nötig. `/me` bleibt bewusst SEPARAT (auth-abhängig,
+    Live-edu-sharing-Call) und gehört nicht in diesen cachebaren Bootstrap.
+    """
+    return {
+        "topics": list_topics(),
+        "meta": meta_facets(None, None, None, None),
+        "phases": list_phases(only_active=True),
+        "events": _list_events(include_drafts=False, include_archived=True),
+        "featured_events": featured_event(),
+        "settings": get_settings(),
+    }
+
+
 def _upsert_taxonomy(table: str, body: TaxonomyEntry, user: str | None) -> dict:
     with connect() as con:
         existing = con.execute(f"SELECT slug FROM {table} WHERE slug=?", (body.slug,)).fetchone()

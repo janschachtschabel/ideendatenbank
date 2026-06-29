@@ -1002,39 +1002,35 @@ export class AppShellComponent implements OnInit, OnDestroy {
       });
     }
     this.loadFacets();
-    // Event-Slug → Label aus kuratierter Taxonomie für hübschere Anzeige
-    // (inkl. archivierter — die werden auf der Übersicht ausgegraut gezeigt)
-    this.api.listEvents({ includeInactive: true, includeArchived: true }).subscribe((events) => {
-      this.eventLabels.clear();
-      for (const e of events) this.eventLabels.set(e.slug, e.label);
-      this.eventMeta.set(events);
-    });
-    // Featured-Events für die Startseite separat — bewusst kein Failure-
-    // Mode-Handling, wenn der Endpoint fehlt erscheint kein Slot.
-    this.api.featuredEvents().subscribe({
-      next: (fe) => this.featuredEvents.set(fe || []),
-      error: () => this.featuredEvents.set([]),
-    });
-    // Repo-Basis-URL aus den Backend-Settings (deployment-spezifisch).
-    this.api.getSettings().subscribe({
-      next: (s) => { if (s.edu_repo_base_url) this.repoBaseUrl.set(s.edu_repo_base_url); },
-      error: () => { /* Default bleibt */ },
-    });
-    // Analog Phasen
-    this.api.listPhases().subscribe((phases) => {
-      this.phaseLabels.clear();
-      for (const p of phases) this.phaseLabels.set(p.slug, p.label);
-    });
-    this.api.topics().subscribe((ts) => {
-      this.allTopics.set(ts);
-      this.rootTopics.set(ts.filter((t) => !t.parent_id));
-      // Idee-Zahlen pro Themenbereich über EINEN /meta-Call — früher lief je
-      // Herausforderung eine eigene listIdeas-Abfrage (N+1-Flut beim Aufbau,
-      // ~25 Requests). /meta liefert die exakten Counts pro topic_id; die
-      // Subtree-Summe bilden wir aus dem geladenen Themenbaum nach (identisch
-      // zur Subtree-Semantik von listIdeas({topic_id})).
-      this.api.meta({}).subscribe((m) => {
-        const counts: Record<string, number> = m.topics || {};
+    // Gebündelter Erststart: topics + meta + phases + events + featured +
+    // settings in EINEM Call statt ~6 parallelen XHRs. Hinter einem HTTP/2-
+    // Reverse-Proxy (eine Verbindung) entschärft das die Konkurrenz mit den
+    // Bundle-/Font-Downloads, die die Init-Requests sonst ausbremst (gemessen
+    // 5–14 s). Die filterabhängigen Pillen-Counts lädt loadFacets() oben
+    // separat; /me bleibt auth-abhängig und wird oben separat aufgefrischt.
+    this.api.bootstrap().subscribe({
+      next: (b) => {
+        // Event-Slug → Label aus kuratierter Taxonomie für hübschere Anzeige
+        // (inkl. archivierter — auf der Übersicht ausgegraut gezeigt).
+        this.eventLabels.clear();
+        for (const e of b.events) this.eventLabels.set(e.slug, e.label);
+        this.eventMeta.set(b.events);
+        // Featured-Events für die Startseite (leere Liste = kein Slot).
+        this.featuredEvents.set(b.featured_events || []);
+        // Repo-Basis-URL aus den Backend-Settings (deployment-spezifisch).
+        if (b.settings?.edu_repo_base_url) this.repoBaseUrl.set(b.settings.edu_repo_base_url);
+        // Phasen-Labels.
+        this.phaseLabels.clear();
+        for (const p of b.phases) this.phaseLabels.set(p.slug, p.label);
+        // Themenbaum + Idee-Zahlen pro Themenbereich. Die Counts stammen aus
+        // den ungefilterten /meta-`topics` (vormals ein eigener /meta-Call,
+        // verschachtelt in topics()); die Subtree-Summe bilden wir aus dem
+        // geladenen Themenbaum nach (identisch zur listIdeas({topic_id})-
+        // Subtree-Semantik).
+        const ts = b.topics;
+        this.allTopics.set(ts);
+        this.rootTopics.set(ts.filter((t) => !t.parent_id));
+        const counts: Record<string, number> = b.meta.topics || {};
         this.rootTopics().forEach((root) => {
           const childIds = ts.filter((t) => t.parent_id === root.id).map((t) => t.id);
           if (!childIds.length) return;
@@ -1044,7 +1040,10 @@ export class AppShellComponent implements OnInit, OnDestroy {
           );
         });
         this.rootTopics.set([...this.rootTopics()]);
-      });
+      },
+      // Fail-soft: Bei Fehler bleiben die Default-Signale (leere Listen,
+      // Default-Repo-URL) — die Shell bleibt bedienbar.
+      error: () => { /* Defaults bleiben bestehen */ },
     });
   }
 

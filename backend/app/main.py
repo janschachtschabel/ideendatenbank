@@ -122,8 +122,41 @@ app.include_router(router, prefix="/api/v1")
 # directory exists, mount it so the same FastAPI process serves both the API
 # and the web-component bundle (no CORS headache, one deploy unit).
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist" / "embed" / "browser"
+
+# Statische Assets als Versionsabhängig-cachebar ausliefern. Die Angular-Bundles
+# werden über einen `?v=<timestamp>`-Query-Parameter invalidiert (siehe
+# index.html). Daher dürfen die Dateien selbst `immutable` sein: Der Browser
+# lädt sie nach dem ersten Besuch NICHT mehr neu. Das ist der entscheidende
+# Fix gegen die langsame Navigation hinter einem HTTP/2-Reverse-Proxy (Caddy):
+# ohne Cache revalidiert der Browser bei jeder Navigation die Bundles auf der
+# EINEN HTTP/2-Verbindung und blockiert damit die API-XHRs (gemessen 5–14 s).
+# Mit `immutable` bleibt die Verbindung frei. Wirkt identisch hinter nginx
+# (HTTP/1.1) und Caddy (HTTP/2), da der Header von der App selbst gesetzt wird.
+# index.html bleibt `no-cache` (per ETag revalidiert), damit ein neues Deploy
+# mit neuem `?v=` sofort greift.
+_ASSET_SUFFIXES = (
+    ".js", ".css", ".woff2", ".woff", ".ttf", ".otf",
+    ".svg", ".ico", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".map",
+)
+
+
+class CachedStaticFiles(StaticFiles):
+    """StaticFiles mit Cache-Control: versionierte Assets `immutable`,
+    HTML `no-cache`."""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if path.endswith(_ASSET_SUFFIXES):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            # index.html und SPA-Fallbacks: revalidieren statt blind cachen,
+            # damit neue Deploys (neuer ?v=) sofort sichtbar werden.
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 if _STATIC_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
+    app.mount("/", CachedStaticFiles(directory=_STATIC_DIR, html=True), name="static")
     log.info("Serving static bundle from %s", _STATIC_DIR)
 else:
     log.info("No built bundle at %s — API only (start dev server separately)", _STATIC_DIR)

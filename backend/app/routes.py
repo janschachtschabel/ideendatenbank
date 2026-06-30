@@ -990,7 +990,13 @@ _RANKING_SORTS = {"rating", "comments", "interest", "likes"}
 
 
 @router.get("/ranking", tags=["ranking"])
-async def get_ranking(
+# Bewusst sync `def` statt `async`: diese Funktion macht ausschließlich
+# blockierende DB-/CPU-Arbeit (SELECT * FROM idea + decay_scores + Python-
+# sorted()) und hat KEINE awaits. Als `async def` liefe sie auf dem Event-Loop
+# und würde ihn für ihre Dauer einfrieren → parallele Requests (die Themenseite
+# feuert ~5 gleichzeitig) blieben so lange auf "pending". Als `def` führt
+# Starlette sie im Threadpool aus, der Loop bleibt frei.
+def get_ranking(
     sort: str = Query("rating"),
     event: str | None = None,
     limit: int = Query(20, ge=1, le=50),
@@ -4804,7 +4810,9 @@ async def my_team_requests(authorization: str | None = Header(None)):
 
 
 @router.get("/me/activity", tags=["me"])
-async def my_activity(
+# Bewusst sync `def` (keine awaits, nur blockierende DB-Reads) — wie
+# get_ranking: als `async` würde es den Event-Loop blockieren.
+def my_activity(
     limit: int = Query(50, ge=1, le=200),
     authorization: str | None = Header(None),
 ):

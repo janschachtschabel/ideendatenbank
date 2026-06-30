@@ -634,6 +634,18 @@ async def _run_sync_locked() -> dict:
                    VALUES (?,?,?,?,?)""",
                 (started, _iso_now(), topics_seen, ideas_seen, None),
             )
+
+        # Nach dem Sync-Write die WAL-Datei aktiv truncaten. Der Auto-Checkpoint
+        # (PASSIVE) schreibt zwar zurück, lässt die .db-wal-Datei aber auf ihrer
+        # Größe stehen → über viele Sync-Läufe wächst sie und bremst JEDEN Read
+        # (jeder Query muss zusätzlich die WAL durchsuchen). TRUNCATE setzt sie
+        # auf 0 zurück. Best-effort: hält gerade ein Reader einen Lock, liefert
+        # SQLite "busy" — der nächste Lauf holt es nach.
+        try:
+            with connect() as con:
+                con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception as _ce:
+            log.debug("post-sync wal_checkpoint(TRUNCATE) übersprungen: %s", _ce)
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         log.exception("sync failed")

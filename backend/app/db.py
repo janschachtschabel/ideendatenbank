@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS idea (
 CREATE INDEX IF NOT EXISTS idea_topic_idx ON idea(topic_id);
 CREATE INDEX IF NOT EXISTS idea_modified_idx ON idea(modified_at DESC);
 CREATE INDEX IF NOT EXISTS idea_rating_idx ON idea(rating_avg DESC, rating_count DESC);
+-- /me/ideas + oeffentliches Profil filtern nach owner_username und sortieren
+-- nach modified_at DESC — der zusammengesetzte Index bedient Filter UND
+-- Sortierung in einem Schritt (sonst Full-Scan + Sort pro Aufruf).
+CREATE INDEX IF NOT EXISTS idea_owner_idx ON idea(owner_username, modified_at DESC);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS idea_fts USING fts5(
     id UNINDEXED,
@@ -84,6 +88,12 @@ CREATE TABLE IF NOT EXISTS idea_interaction (
 
 CREATE INDEX IF NOT EXISTS idea_interaction_idea_idx
     ON idea_interaction(idea_id, kind);
+-- /me/follows, /me/interest, /me/activity, /me/notifications suchen nach
+-- user_key (+ kind). Der (idea_id, kind)-Index oben kann das NICHT bedienen
+-- (user_key ist kein Praefix) → eigener Index gegen den Full-Scan pro
+-- „Mein Bereich“-Aufruf.
+CREATE INDEX IF NOT EXISTS idea_interaction_user_idx
+    ON idea_interaction(user_key, kind);
 
 CREATE TABLE IF NOT EXISTS taxonomy_event (
     -- Kuratierte Event-Liste (z.B. "HackathOERn 3", "OER-Camp 2026").
@@ -461,6 +471,19 @@ def connect():
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA synchronous = NORMAL")
     con.execute("PRAGMA busy_timeout = 30000")
+    # Performance-Haertung, alle per-Connection (daher hier, nicht in init_db):
+    #   cache_size (negativ = KiB) ~8 MB → haelt die kleine DB + Indizes heiss und
+    #     spart Disk-Reads, wenn der OS-Page-Cache unter Druck steht.
+    #   temp_store=MEMORY → ORDER BY/GROUP BY ohne passenden Index im RAM statt in
+    #     einer Temp-Datei (z.B. Sortierung nach created/comments).
+    #   mmap_size=128 MB → Reads ohne read()-Syscall/Copy, spuerbar bei grosser WAL.
+    #   journal_size_limit=16 MB → die .db-wal-Datei wird nach einem Checkpoint auf
+    #     <=16 MB gekappt statt unbegrenzt zu wachsen (sonst Read-Bremse, weil jeder
+    #     Query zusaetzlich die WAL durchsuchen muss).
+    con.execute("PRAGMA cache_size = -8000")
+    con.execute("PRAGMA temp_store = MEMORY")
+    con.execute("PRAGMA mmap_size = 134217728")
+    con.execute("PRAGMA journal_size_limit = 16777216")
     try:
         yield con
         con.commit()

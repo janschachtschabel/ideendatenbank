@@ -76,9 +76,7 @@ def test_bootstrap_matches_individual_endpoints(client, seed_idea):
     assert boot["settings"] == client.get("/api/v1/settings").json()
     assert boot["featured_events"] == client.get("/api/v1/events/featured").json()
     # Shell lädt Events als includeInactive+includeArchived (= only_active=false).
-    events_single = client.get(
-        "/api/v1/events?only_active=false&include_archived=true"
-    ).json()
+    events_single = client.get("/api/v1/events?only_active=false&include_archived=true").json()
     assert boot["events"] == events_single
 
 

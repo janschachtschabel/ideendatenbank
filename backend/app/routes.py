@@ -406,15 +406,26 @@ def _attachment_from_node(n: dict) -> dict:
 
 
 def _collect_topic_subtree(con, root_id: str) -> list[str]:
-    """Return [root_id] + all transitive descendants from the topic table."""
-    ids = [root_id]
+    """Return [root_id] + all transitive descendants from the topic table.
+
+    Zyklusfest über ein ``visited``-Set: Zeigt ein ``parent_id`` (z.B. nach
+    einem fehlerhaften Move) auf einen Vorfahren, würde die naive Breitensuche
+    sonst ENDLOS laufen — der Request hinge bis zum Proxy-Timeout (~30s) und
+    ließe den ausführenden Threadpool-Worker für immer drehen, bis nach genug
+    solcher Requests der ganze Pool erschöpft ist. Mit ``visited`` terminiert
+    der Walk garantiert nach höchstens (#Topics) Schritten und liefert jeden
+    erreichbaren Knoten genau einmal.
+    """
+    ids: list[str] = [root_id]
+    visited: set[str] = {root_id}
     frontier = [root_id]
     while frontier:
         placeholders = ",".join("?" * len(frontier))
         rows = con.execute(
             f"SELECT id FROM topic WHERE parent_id IN ({placeholders})", frontier
         ).fetchall()
-        frontier = [r["id"] for r in rows]
+        frontier = [r["id"] for r in rows if r["id"] not in visited]
+        visited.update(frontier)
         ids.extend(frontier)
     return ids
 

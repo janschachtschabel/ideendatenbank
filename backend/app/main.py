@@ -135,8 +135,20 @@ _STATIC_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist" / "embed
 # index.html bleibt `no-cache` (per ETag revalidiert), damit ein neues Deploy
 # mit neuem `?v=` sofort greift.
 _ASSET_SUFFIXES = (
-    ".js", ".css", ".woff2", ".woff", ".ttf", ".otf",
-    ".svg", ".ico", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".map",
+    ".js",
+    ".css",
+    ".woff2",
+    ".woff",
+    ".ttf",
+    ".otf",
+    ".svg",
+    ".ico",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".map",
 )
 
 

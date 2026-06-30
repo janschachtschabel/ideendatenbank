@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
+import os
 import re
 import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -1204,12 +1207,16 @@ def _invalidate_children_cache(idea_id: str) -> None:
 
 @router.get("/ideas/{idea_id}")
 async def get_idea(idea_id: str, authorization: str | None = Header(None)):
-    with connect() as con:
-        row = con.execute("SELECT * FROM idea WHERE id = ?", (idea_id,)).fetchone()
-        interest_count = con.execute(
-            "SELECT COUNT(*) FROM idea_interaction WHERE idea_id=? AND kind='interest'",
-            (idea_id,),
-        ).fetchone()[0]
+    def _read_idea():
+        with connect() as con:
+            row = con.execute("SELECT * FROM idea WHERE id = ?", (idea_id,)).fetchone()
+            interest_count = con.execute(
+                "SELECT COUNT(*) FROM idea_interaction WHERE idea_id=? AND kind='interest'",
+                (idea_id,),
+            ).fetchone()[0]
+        return row, interest_count
+
+    row, interest_count = await asyncio.to_thread(_read_idea)
 
     # Cache-Miss-Fallback: frisch eingereichte Ideen sind noch nicht im Cache.
     # Statt 404 → live aus edu-sharing holen, in den Cache schreiben (refresh
@@ -1218,8 +1225,13 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     if not row:
         ok = await sync_mod.refresh_idea(idea_id, auth_header=authorization)
         if ok:
-            with connect() as con:
-                row = con.execute("SELECT * FROM idea WHERE id = ?", (idea_id,)).fetchone()
+            def _reread_idea():
+                with connect() as con:
+                    return con.execute(
+                        "SELECT * FROM idea WHERE id = ?", (idea_id,)
+                    ).fetchone()
+
+            row = await asyncio.to_thread(_reread_idea)
         if not row:
             raise HTTPException(404, "Idea not found")
 
@@ -1259,11 +1271,14 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         _uk = _user_key_from_auth(authorization)
         if _uk:
             try:
-                with connect() as con:
-                    _vr = con.execute(
-                        "SELECT value FROM vote_event WHERE idea_id=? AND user_key=?",
-                        (row["id"], _uk),
-                    ).fetchone()
+                def _read_vote():
+                    with connect() as con:
+                        return con.execute(
+                            "SELECT value FROM vote_event WHERE idea_id=? AND user_key=?",
+                            (row["id"], _uk),
+                        ).fetchone()
+
+                _vr = await asyncio.to_thread(_read_vote)
                 if _vr and _vr["value"] is not None:
                     base["my_rating"] = float(_vr["value"])
             except Exception:
@@ -1299,8 +1314,11 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
             is_mod_caller = await _is_moderator(authorization)
         except Exception:
             is_mod_caller = False
-    with connect() as con:
-        order = _phase_order(con)
+    def _read_phase_order():
+        with connect() as con:
+            return _phase_order(con)
+
+    order = await asyncio.to_thread(_read_phase_order)
     base["allowed_next_phases"] = (
         _allowed_next_phases(
             current=base.get("phase"),
@@ -1335,11 +1353,14 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
             comments_list = (cm or {}).get("comments") or []
             base["comments"] = comments_list
             try:
-                with connect() as con:
-                    con.execute(
-                        "UPDATE idea SET comments_cache=?, comments_cache_count=? WHERE id=?",
-                        (json.dumps(comments_list), cur_count, row["id"]),
-                    )
+                def _write_comments_cache():
+                    with connect() as con:
+                        con.execute(
+                            "UPDATE idea SET comments_cache=?, comments_cache_count=? WHERE id=?",
+                            (json.dumps(comments_list), cur_count, row["id"]),
+                        )
+
+                await asyncio.to_thread(_write_comments_cache)
             except Exception:
                 pass  # Cache-Write ist best-effort — die Antwort stimmt trotzdem
         except httpx.HTTPStatusError as e:
@@ -1439,11 +1460,14 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
                 a["is_child_object"] = True
                 child_atts.append(a)
             try:
-                with connect() as con:
-                    con.execute(
-                        "UPDATE idea SET children_cache=?, children_cache_at=? WHERE id=?",
-                        (json.dumps(child_atts), datetime.now(UTC).isoformat(), row["id"]),
-                    )
+                def _write_children_cache():
+                    with connect() as con:
+                        con.execute(
+                            "UPDATE idea SET children_cache=?, children_cache_at=? WHERE id=?",
+                            (json.dumps(child_atts), datetime.now(UTC).isoformat(), row["id"]),
+                        )
+
+                await asyncio.to_thread(_write_children_cache)
             except Exception:
                 pass  # Cache-Write best-effort — die Antwort stimmt trotzdem
         except Exception:
@@ -1458,10 +1482,13 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     # (spart den edu-sharing-Call auf den allermeisten Ideen).
     if authorization:
         try:
-            with connect() as con:
-                crow = con.execute(
-                    "SELECT contact FROM idea_contact WHERE idea_id=?", (idea_id,)
-                ).fetchone()
+            def _read_contact():
+                with connect() as con:
+                    return con.execute(
+                        "SELECT contact FROM idea_contact WHERE idea_id=?", (idea_id,)
+                    ).fetchone()
+
+            crow = await asyncio.to_thread(_read_contact)
             if (
                 crow
                 and crow["contact"]
@@ -1498,10 +1525,13 @@ async def rate_idea(
     log.info("rate_idea: user=%s idea=%s rating=%s", user, idea_id, rating)
     if not authorization:
         raise HTTPException(401, "Authorization header required for rating")
-    with connect() as con:
-        row = con.execute(
-            "SELECT main_content_id,id,events FROM idea WHERE id = ?", (idea_id,)
-        ).fetchone()
+    def _read_idea_target():
+        with connect() as con:
+            return con.execute(
+                "SELECT main_content_id,id,events FROM idea WHERE id = ?", (idea_id,)
+            ).fetchone()
+
+    row = await asyncio.to_thread(_read_idea_target)
     if not row:
         raise HTTPException(404, "Idea not found")
     # Bewertungsphase serverseitig durchsetzen (nicht nur UI ausblenden):
@@ -1592,24 +1622,27 @@ async def rate_idea(
     # Nur wenn das Rating tatsächlich serverseitig steht. rating=0 = Reset.
     if persisted or not write_status:
         try:
-            with connect() as con:
-                if rating and rating > 0:
-                    # created_at NICHT überschreiben → Erstabgabe bleibt das
-                    # maßgebliche Stimmenalter. Wertänderung aktualisiert nur
-                    # value + updated_at (Audit).
-                    _ts = datetime.now(UTC).isoformat()
-                    con.execute(
-                        "INSERT INTO vote_event (idea_id,user_key,value,created_at,updated_at) "
-                        "VALUES (?,?,?,?,?) "
-                        "ON CONFLICT(idea_id,user_key) DO UPDATE SET "
-                        "value=excluded.value, updated_at=excluded.updated_at",
-                        (idea_id, user, float(rating), _ts, _ts),
-                    )
-                else:
-                    con.execute(
-                        "DELETE FROM vote_event WHERE idea_id=? AND user_key=?",
-                        (idea_id, user),
-                    )
+            def _write_vote_event():
+                with connect() as con:
+                    if rating and rating > 0:
+                        # created_at NICHT überschreiben → Erstabgabe bleibt das
+                        # maßgebliche Stimmenalter. Wertänderung aktualisiert nur
+                        # value + updated_at (Audit).
+                        _ts = datetime.now(UTC).isoformat()
+                        con.execute(
+                            "INSERT INTO vote_event (idea_id,user_key,value,created_at,updated_at) "
+                            "VALUES (?,?,?,?,?) "
+                            "ON CONFLICT(idea_id,user_key) DO UPDATE SET "
+                            "value=excluded.value, updated_at=excluded.updated_at",
+                            (idea_id, user, float(rating), _ts, _ts),
+                        )
+                    else:
+                        con.execute(
+                            "DELETE FROM vote_event WHERE idea_id=? AND user_key=?",
+                            (idea_id, user),
+                        )
+
+            await asyncio.to_thread(_write_vote_event)
         except Exception as e:
             log.debug("rate_idea: vote_event-Ledger-Update fehlgeschlagen: %s", e)
 
@@ -1644,8 +1677,13 @@ async def unrate_idea(
     bis der Bug behoben ist. Frontend aktualisiert optimistisch."""
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
-    with connect() as con:
-        row = con.execute("SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)).fetchone()
+    def _read_idea_target():
+        with connect() as con:
+            return con.execute(
+                "SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)
+            ).fetchone()
+
+    row = await asyncio.to_thread(_read_idea_target)
     if not row:
         raise HTTPException(404, "Idea not found")
     target = row["main_content_id"] or row["id"]
@@ -1663,11 +1701,14 @@ async def unrate_idea(
     user = _user_key_from_auth(authorization)
     if user:
         try:
-            with connect() as con:
-                con.execute(
-                    "DELETE FROM vote_event WHERE idea_id=? AND user_key=?",
-                    (idea_id, user),
-                )
+            def _delete_vote_event():
+                with connect() as con:
+                    con.execute(
+                        "DELETE FROM vote_event WHERE idea_id=? AND user_key=?",
+                        (idea_id, user),
+                    )
+
+            await asyncio.to_thread(_delete_vote_event)
         except Exception as e:
             log.debug("unrate_idea: vote_event-Ledger-Delete fehlgeschlagen: %s", e)
 
@@ -1691,8 +1732,13 @@ async def comment_idea(
 ):
     if not authorization:
         raise HTTPException(401, "Authorization header required for comments")
-    with connect() as con:
-        row = con.execute("SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)).fetchone()
+    def _read_idea_target():
+        with connect() as con:
+            return con.execute(
+                "SELECT main_content_id,id FROM idea WHERE id = ?", (idea_id,)
+            ).fetchone()
+
+    row = await asyncio.to_thread(_read_idea_target)
     if not row:
         raise HTTPException(404, "Idea not found")
     target = row["main_content_id"] or row["id"]
@@ -1842,12 +1888,15 @@ async def submit_idea(
     contact = (body.contact or "").strip()
     if new_id and contact and body.contact_consent:
         try:
-            with connect() as con:
-                con.execute(
-                    "INSERT INTO idea_contact (idea_id,contact,created_at) VALUES (?,?,?) "
-                    "ON CONFLICT(idea_id) DO UPDATE SET contact=excluded.contact",
-                    (new_id, contact[:200], datetime.now(UTC).isoformat()),
-                )
+            def _write_submit_contact():
+                with connect() as con:
+                    con.execute(
+                        "INSERT INTO idea_contact (idea_id,contact,created_at) VALUES (?,?,?) "
+                        "ON CONFLICT(idea_id) DO UPDATE SET contact=excluded.contact",
+                        (new_id, contact[:200], datetime.now(UTC).isoformat()),
+                    )
+
+            await asyncio.to_thread(_write_submit_contact)
         except Exception as e:
             log.debug("submit_idea: idea_contact speichern fehlgeschlagen: %s", e)
 
@@ -1859,7 +1908,8 @@ async def submit_idea(
         except Exception:
             pass
 
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="idea_submitted",
         authorization=authorization,
         target_type="idea",
@@ -2059,24 +2109,28 @@ async def get_interactions(
     idea_id: str,
     authorization: str | None = Header(None),
 ):
-    with connect() as con:
-        rows = con.execute(
-            "SELECT kind, display_name, user_key, created_at, status, can_edit "
-            "FROM idea_interaction WHERE idea_id = ? ORDER BY created_at DESC",
-            (idea_id,),
-        ).fetchall()
-        # Selbst gesetzte App-Profil-Namen der Teilnehmer (bevorzugt vor dem
-        # beim Beitritt aufgelösten edu-sharing-Namen).
-        keys = list({r["user_key"] for r in rows if r["user_key"]})
-        meta_names: dict[str, str] = {}
-        if keys:
-            ph = ",".join("?" * len(keys))
-            for m in con.execute(
-                f"SELECT username, display_name FROM user_profile_meta "
-                f"WHERE username IN ({ph}) AND display_name IS NOT NULL AND display_name != ''",
-                keys,
-            ).fetchall():
-                meta_names[m["username"]] = m["display_name"]
+    def _read():
+        with connect() as con:
+            rows = con.execute(
+                "SELECT kind, display_name, user_key, created_at, status, can_edit "
+                "FROM idea_interaction WHERE idea_id = ? ORDER BY created_at DESC",
+                (idea_id,),
+            ).fetchall()
+            # Selbst gesetzte App-Profil-Namen der Teilnehmer (bevorzugt vor dem
+            # beim Beitritt aufgelösten edu-sharing-Namen).
+            keys = list({r["user_key"] for r in rows if r["user_key"]})
+            meta_names: dict[str, str] = {}
+            if keys:
+                ph = ",".join("?" * len(keys))
+                for m in con.execute(
+                    f"SELECT username, display_name FROM user_profile_meta "
+                    f"WHERE username IN ({ph}) AND display_name IS NOT NULL AND display_name != ''",
+                    keys,
+                ).fetchall():
+                    meta_names[m["username"]] = m["display_name"]
+        return rows, meta_names
+
+    rows, meta_names = await asyncio.to_thread(_read)
 
     current = _user_key_from_auth(authorization)
     interest = [r for r in rows if r["kind"] == "interest"]
@@ -2103,13 +2157,17 @@ async def get_interactions(
             real = await _resolve_display_name(authorization)
             if real and real != current:
                 current_name = real
-                try:
+
+                def _update_name():
                     with connect() as con:
                         con.execute(
                             "UPDATE idea_interaction SET display_name=? "
                             "WHERE idea_id=? AND user_key=? AND kind='interest'",
                             (real, idea_id, current),
                         )
+
+                try:
+                    await asyncio.to_thread(_update_name)
                 except Exception:
                     pass
 
@@ -2174,16 +2232,21 @@ async def set_idea_contact(
     if not allowed:
         raise HTTPException(403, "Nur Einreichende oder Moderation dürfen den Kontakt ändern.")
     contact = (body.contact or "").strip()
-    with connect() as con:
-        if contact:
-            con.execute(
-                "INSERT INTO idea_contact (idea_id,contact,created_at) VALUES (?,?,?) "
-                "ON CONFLICT(idea_id) DO UPDATE SET contact=excluded.contact",
-                (idea_id, contact[:200], datetime.now(UTC).isoformat()),
-            )
-        else:
-            con.execute("DELETE FROM idea_contact WHERE idea_id=?", (idea_id,))
-    _log_activity(
+
+    def _write_contact():
+        with connect() as con:
+            if contact:
+                con.execute(
+                    "INSERT INTO idea_contact (idea_id,contact,created_at) VALUES (?,?,?) "
+                    "ON CONFLICT(idea_id) DO UPDATE SET contact=excluded.contact",
+                    (idea_id, contact[:200], datetime.now(UTC).isoformat()),
+                )
+            else:
+                con.execute("DELETE FROM idea_contact WHERE idea_id=?", (idea_id,))
+
+    await asyncio.to_thread(_write_contact)
+    await asyncio.to_thread(
+        _log_activity,
         action="idea_contact_changed",
         authorization=authorization,
         is_mod=is_mod,
@@ -2203,32 +2266,43 @@ async def toggle_interest(
     user = await _verify_login(authorization)
     if not user:
         raise HTTPException(401, "Anmeldung erforderlich")
-    with connect() as con:
-        row = con.execute("SELECT id, title FROM idea WHERE id = ?", (idea_id,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Idee nicht gefunden")
-        existing = con.execute(
-            "SELECT 1 FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='interest'",
-            (idea_id, user),
-        ).fetchone()
-        if existing:
-            con.execute(
-                "DELETE FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='interest'",
+    def _remove_existing_interest():
+        with connect() as con:
+            row = con.execute("SELECT id, title FROM idea WHERE id = ?", (idea_id,)).fetchone()
+            if not row:
+                raise HTTPException(404, "Idee nicht gefunden")
+            existing = con.execute(
+                "SELECT 1 FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='interest'",
                 (idea_id, user),
-            )
-            return {"state": "removed"}
+            ).fetchone()
+            if existing:
+                con.execute(
+                    "DELETE FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='interest'",
+                    (idea_id, user),
+                )
+                return row, True
+            return row, False
+
+    row, removed = await asyncio.to_thread(_remove_existing_interest)
+    if removed:
+        return {"state": "removed"}
     # Echten Namen auflösen (außerhalb der Schreib-Transaktion, da Netz-IO),
     # damit die Mitmach-Liste Klarnamen statt Login-Usernamen zeigt.
     display = await _resolve_display_name(authorization) or user
-    with connect() as con:
-        con.execute(
-            "INSERT INTO idea_interaction (idea_id,user_key,kind,display_name,created_at) "
-            "VALUES (?,?, 'interest', ?, datetime('now'))",
-            (idea_id, user, display),
-        )
+
+    def _insert_interest():
+        with connect() as con:
+            con.execute(
+                "INSERT INTO idea_interaction (idea_id,user_key,kind,display_name,created_at) "
+                "VALUES (?,?, 'interest', ?, datetime('now'))",
+                (idea_id, user, display),
+            )
+
+    await asyncio.to_thread(_insert_interest)
     # Anfrage protokollieren → erscheint im Feed/„Was ist neu" der/des
     # Ideengeber:in (fremde Aktion auf eigener Idee).
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="team_join_requested",
         authorization=authorization,
         target_type="idea",
@@ -2248,26 +2322,30 @@ async def toggle_follow(
     user = await _verify_login(authorization)
     if not user:
         raise HTTPException(401, "Anmeldung erforderlich")
-    with connect() as con:
-        row = con.execute("SELECT id FROM idea WHERE id = ?", (idea_id,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Idee nicht gefunden")
-        existing = con.execute(
-            "SELECT 1 FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='follow'",
-            (idea_id, user),
-        ).fetchone()
-        if existing:
-            con.execute(
-                "DELETE FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='follow'",
+    def _toggle_follow():
+        with connect() as con:
+            row = con.execute("SELECT id FROM idea WHERE id = ?", (idea_id,)).fetchone()
+            if not row:
+                raise HTTPException(404, "Idee nicht gefunden")
+            existing = con.execute(
+                "SELECT 1 FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='follow'",
                 (idea_id, user),
+            ).fetchone()
+            if existing:
+                con.execute(
+                    "DELETE FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='follow'",
+                    (idea_id, user),
+                )
+                return "removed"
+            con.execute(
+                "INSERT INTO idea_interaction (idea_id,user_key,kind,display_name,created_at) "
+                "VALUES (?,?, 'follow', ?, datetime('now'))",
+                (idea_id, user, user),
             )
-            return {"state": "removed"}
-        con.execute(
-            "INSERT INTO idea_interaction (idea_id,user_key,kind,display_name,created_at) "
-            "VALUES (?,?, 'follow', ?, datetime('now'))",
-            (idea_id, user, user),
-        )
-    return {"state": "added"}
+            return "added"
+
+    state = await asyncio.to_thread(_toggle_follow)
+    return {"state": state}
 
 
 class TeamMemberPatch(BaseModel):
@@ -2317,20 +2395,23 @@ async def set_team_member(
         params.append(1 if new_can_edit else 0)
     params += [idea_id, user_key]
 
-    with connect() as con:
-        exists = con.execute(
-            "SELECT 1 FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='interest'",
-            (idea_id, user_key),
-        ).fetchone()
-        if not exists:
-            raise HTTPException(404, "Diese Person ist nicht als Mithackende eingetragen.")
-        con.execute(
-            f"UPDATE idea_interaction SET {', '.join(sets)} "
-            "WHERE idea_id=? AND user_key=? AND kind='interest'",
-            params,
-        )
-        _trow = con.execute("SELECT title FROM idea WHERE id=?", (idea_id,)).fetchone()
-        idea_title = _trow["title"] if _trow else None
+    def _update_team_member():
+        with connect() as con:
+            exists = con.execute(
+                "SELECT 1 FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='interest'",
+                (idea_id, user_key),
+            ).fetchone()
+            if not exists:
+                raise HTTPException(404, "Diese Person ist nicht als Mithackende eingetragen.")
+            con.execute(
+                f"UPDATE idea_interaction SET {', '.join(sets)} "
+                "WHERE idea_id=? AND user_key=? AND kind='interest'",
+                params,
+            )
+            _trow = con.execute("SELECT title FROM idea WHERE id=?", (idea_id,)).fetchone()
+            return _trow["title"] if _trow else None
+
+    idea_title = await asyncio.to_thread(_update_team_member)
     # Spezifische Aktion → der/die betroffene Mithackende sieht im Feed/„Was
     # ist neu" konkret, was passiert ist (Aktion stammt vom Owner, nicht von
     # ihr/ihm selbst → wird im eigenen Feed angezeigt).
@@ -2344,7 +2425,8 @@ async def set_team_member(
         action = "team_unapproved"
     else:
         action = "team_member_updated"
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action=action,
         authorization=authorization,
         is_mod=is_mod,
@@ -2370,12 +2452,16 @@ async def remove_team_member(
     allowed, _u, is_mod = await _is_owner_or_mod(idea_id, authorization)
     if not allowed:
         raise HTTPException(403, "Nur Einreicher:in oder Moderation können das Team verwalten.")
-    with connect() as con:
-        con.execute(
-            "DELETE FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='interest'",
-            (idea_id, user_key),
-        )
-    _log_activity(
+    def _remove_team_member():
+        with connect() as con:
+            con.execute(
+                "DELETE FROM idea_interaction WHERE idea_id=? AND user_key=? AND kind='interest'",
+                (idea_id, user_key),
+            )
+
+    await asyncio.to_thread(_remove_team_member)
+    await asyncio.to_thread(
+        _log_activity,
         action="team_member_removed",
         authorization=authorization,
         is_mod=is_mod,
@@ -2434,21 +2520,25 @@ async def list_inbox(
     # werden, raus aus dem Postfach: ihre IDs stehen in idea.original_id.
     # Sonst tauchen alte Ideen-Originale (mit phase:/event:-Marker, weil
     # sie über den Reference-Knoten gepflegt wurden) im Postfach auf.
-    with connect() as con:
-        # original_id -> Liste der Herausforderungen (topic_id), in denen das
-        # Original referenziert ist. Dient (a) dem in_collection-Flag und (b)
-        # der Anzeige der konkreten Einsortierung im Postfach (ein Original kann
-        # in mehreren Herausforderungen liegen).
-        cataloged: dict[str, list[str]] = {}
-        for r in con.execute(
-            "SELECT original_id, topic_id FROM idea WHERE original_id IS NOT NULL"
-        ).fetchall():
-            oid = r["original_id"]
-            if not oid:
-                continue
-            lst = cataloged.setdefault(oid, [])
-            if r["topic_id"] and r["topic_id"] not in lst:
-                lst.append(r["topic_id"])
+    def _read_cataloged_originals():
+        with connect() as con:
+            # original_id -> Liste der Herausforderungen (topic_id), in denen das
+            # Original referenziert ist. Dient (a) dem in_collection-Flag und (b)
+            # der Anzeige der konkreten Einsortierung im Postfach (ein Original kann
+            # in mehreren Herausforderungen liegen).
+            cataloged: dict[str, list[str]] = {}
+            for r in con.execute(
+                "SELECT original_id, topic_id FROM idea WHERE original_id IS NOT NULL"
+            ).fetchall():
+                oid = r["original_id"]
+                if not oid:
+                    continue
+                lst = cataloged.setdefault(oid, [])
+                if r["topic_id"] and r["topic_id"] not in lst:
+                    lst.append(r["topic_id"])
+            return cataloged
+
+    cataloged = await asyncio.to_thread(_read_cataloged_originals)
 
     items = []
     for n in raw_nodes:
@@ -2620,10 +2710,13 @@ async def inbox_item_preview(
     # edu-sharing, daher separater App-DB-Lookup über die Knoten-ID.
     contact = None
     try:
-        with connect() as con:
-            crow = con.execute(
-                "SELECT contact FROM idea_contact WHERE idea_id=?", (node_id,)
-            ).fetchone()
+        def _read_contact():
+            with connect() as con:
+                return con.execute(
+                    "SELECT contact FROM idea_contact WHERE idea_id=?", (node_id,)
+                ).fetchone()
+
+        crow = await asyncio.to_thread(_read_contact)
         if crow and crow["contact"]:
             contact = crow["contact"]
     except Exception:
@@ -2761,10 +2854,13 @@ async def sync_diff(authorization: str | None = Header(None)):
     except httpx.HTTPStatusError as e:
         raise HTTPException(502, f"edu-sharing Fehler: {e.response.status_code}")
 
-    with connect() as con:
-        rows = con.execute(
-            "SELECT id, title, COALESCE(hidden, 0) AS hidden, original_id FROM idea"
-        ).fetchall()
+    def _read_sync_diff_rows():
+        with connect() as con:
+            return con.execute(
+                "SELECT id, title, COALESCE(hidden, 0) AS hidden, original_id FROM idea"
+            ).fetchall()
+
+    rows = await asyncio.to_thread(_read_sync_diff_rows)
     cache = {r["id"]: r["title"] for r in rows}
     hidden_ids = {r["id"] for r in rows if r["hidden"]}
     orig_of = {r["id"]: r["original_id"] for r in rows}
@@ -2826,16 +2922,22 @@ async def sync_diff_cleanup(
         raise HTTPException(502, f"edu-sharing Fehler: {e.response.status_code} — nichts gelöscht")
 
     want = set(body.ids) if body and body.ids else None
-    with connect() as con:
-        rows = con.execute("SELECT id, title FROM idea WHERE COALESCE(hidden, 0) = 0").fetchall()
-        removed = [
-            {"id": r["id"], "title": r["title"]}
-            for r in rows
-            if r["id"] not in live and (want is None or r["id"] in want)
-        ]
-        for item in removed:
-            _purge_idea_cache(con, item["id"])
-    _log_activity(
+
+    def _cleanup_sync_diff_rows():
+        with connect() as con:
+            rows = con.execute("SELECT id, title FROM idea WHERE COALESCE(hidden, 0) = 0").fetchall()
+            removed = [
+                {"id": r["id"], "title": r["title"]}
+                for r in rows
+                if r["id"] not in live and (want is None or r["id"] in want)
+            ]
+            for item in removed:
+                _purge_idea_cache(con, item["id"])
+            return removed
+
+    removed = await asyncio.to_thread(_cleanup_sync_diff_rows)
+    await asyncio.to_thread(
+        _log_activity,
         action="sync_diff_cleanup",
         authorization=authorization,
         is_mod=True,
@@ -2856,7 +2958,8 @@ async def delete_inbox_item(
         result = await edu_sharing.client.delete_node(node_id, auth_header=authorization)
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:180]}")
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="inbox_deleted",
         authorization=authorization,
         is_mod=True,
@@ -2927,10 +3030,14 @@ async def upload_idea_preview(
                 "Kein gültiges Upload-Token — für diese Idee ist zum Setzen eines "
                 "Vorschaubilds eine Anmeldung nötig.",
             )
-        with connect() as con:
-            cached = con.execute(
-                "SELECT 1 FROM idea WHERE id=? OR original_id=?", (idea_id, idea_id)
-            ).fetchone()
+
+        def _is_cached_idea():
+            with connect() as con:
+                return con.execute(
+                    "SELECT 1 FROM idea WHERE id=? OR original_id=?", (idea_id, idea_id)
+                ).fetchone()
+
+        cached = await asyncio.to_thread(_is_cached_idea)
         if cached:
             raise HTTPException(
                 403, "Für bereits einsortierte Ideen ist zum Bearbeiten eine Anmeldung nötig."
@@ -2967,21 +3074,24 @@ async def upload_idea_preview(
     # der Knoten als Reference im Postfach liegt), hängen wir manuell einen
     # Cache-Buster an, damit der Browser das neue Bild lädt.
     try:
-        with connect() as con:
-            row = con.execute(
-                "SELECT preview_url FROM idea WHERE id=?",
-                (idea_id,),
-            ).fetchone()
-            if row and row["preview_url"]:
-                bust = int(datetime.now(UTC).timestamp())
-                sep = "&" if "?" in row["preview_url"] else "?"
-                new_url = f"{row['preview_url']}{sep}cb={bust}"
-                # Cache-Buster nur, wenn nicht bereits via Sync gesetzt
-                if "modified=" not in row["preview_url"]:
-                    con.execute(
-                        "UPDATE idea SET preview_url=? WHERE id=?",
-                        (new_url, idea_id),
-                    )
+        def _write_preview_cache_buster():
+            with connect() as con:
+                row = con.execute(
+                    "SELECT preview_url FROM idea WHERE id=?",
+                    (idea_id,),
+                ).fetchone()
+                if row and row["preview_url"]:
+                    bust = int(datetime.now(UTC).timestamp())
+                    sep = "&" if "?" in row["preview_url"] else "?"
+                    new_url = f"{row['preview_url']}{sep}cb={bust}"
+                    # Cache-Buster nur, wenn nicht bereits via Sync gesetzt
+                    if "modified=" not in row["preview_url"]:
+                        con.execute(
+                            "UPDATE idea SET preview_url=? WHERE id=?",
+                            (new_url, idea_id),
+                        )
+
+        await asyncio.to_thread(_write_preview_cache_buster)
     except Exception as e:
         log.debug("upload_idea_preview: Cache-Buster fehlgeschlagen: %s", e)
     return {"ok": True}
@@ -3073,14 +3183,17 @@ async def _reference_into_collection(
     ref_id = (ref_node.get("ref") or {}).get("id")
     if ref_id:
         try:
-            with connect() as con:
-                await sync_mod._upsert_idea(
-                    con,
-                    ref_node,
-                    kind="io",
-                    topic_id=target_topic_id,
-                    main_content_id=ref_id,
-                )
+            async def _upsert_reference():
+                with connect() as con:
+                    await sync_mod._upsert_idea(
+                        con,
+                        ref_node,
+                        kind="io",
+                        topic_id=target_topic_id,
+                        main_content_id=ref_id,
+                    )
+
+            await asyncio.to_thread(lambda: asyncio.run(_upsert_reference()))
         except Exception as e:
             log.warning("upsert nach addReference für %s: %s", ref_id, e)
     # Original öffentlich lesbar machen, damit die (anonyme) Vorschau/Render
@@ -3144,15 +3257,20 @@ async def change_idea_topic(
     Nur Moderatoren — Herausforderungs-Zuordnung ist redaktioneller Akt.
     """
     await _require_moderator(authorization)
-    with connect() as con:
-        row = con.execute(
-            "SELECT id, original_id, topic_id, title FROM idea WHERE id = ?",
-            (idea_id,),
-        ).fetchone()
-        target = con.execute(
-            "SELECT id, title FROM topic WHERE id = ?",
-            (body.new_topic_id,),
-        ).fetchone()
+
+    def _read_change_topic_state():
+        with connect() as con:
+            row = con.execute(
+                "SELECT id, original_id, topic_id, title FROM idea WHERE id = ?",
+                (idea_id,),
+            ).fetchone()
+            target = con.execute(
+                "SELECT id, title FROM topic WHERE id = ?",
+                (body.new_topic_id,),
+            ).fetchone()
+            return row, target
+
+    row, target = await asyncio.to_thread(_read_change_topic_state)
     if not row:
         raise HTTPException(404, "Idee nicht im Cache — unbekannte ID")
     if not target:
@@ -3195,14 +3313,18 @@ async def change_idea_topic(
                 row["id"],
                 auth_header=authorization,
             )
-            with connect() as con:
-                con.execute("DELETE FROM idea WHERE id = ?", (row["id"],))
-                con.execute("DELETE FROM idea_fts WHERE id = ?", (row["id"],))
+            def _delete_old_reference_cache():
+                with connect() as con:
+                    con.execute("DELETE FROM idea WHERE id = ?", (row["id"],))
+                    con.execute("DELETE FROM idea_fts WHERE id = ?", (row["id"],))
+
+            await asyncio.to_thread(_delete_old_reference_cache)
             deleted_old = True
         except Exception as e:
             log.warning("change-topic: alte Reference %s nicht gelöscht: %s", row["id"], e)
 
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="idea_topic_changed",
         authorization=authorization,
         is_mod=True,
@@ -3234,10 +3356,14 @@ async def bulk_move_to_topic(
     Pro-Item-Fehler werden gesammelt; der Gesamtaufruf bricht nicht ab.
     """
     await _require_moderator(authorization)
-    with connect() as con:
-        t = con.execute(
-            "SELECT id,title FROM topic WHERE id = ?", (body.target_topic_id,)
-        ).fetchone()
+
+    def _read_target_topic():
+        with connect() as con:
+            return con.execute(
+                "SELECT id,title FROM topic WHERE id = ?", (body.target_topic_id,)
+            ).fetchone()
+
+    t = await asyncio.to_thread(_read_target_topic)
     if not t:
         raise HTTPException(404, f"Unknown target topic {body.target_topic_id}")
 
@@ -3259,13 +3385,17 @@ async def bulk_move_to_topic(
             failed.append({"id": nid, "status": 0, "detail": str(e)[:160]})
             continue
         # Titel für Log (aus Cache nach Upsert)
-        with connect() as con:
-            r = con.execute(
-                "SELECT title FROM idea WHERE id=? OR original_id=?",
-                (new_id, nid),
-            ).fetchone()
-            moved_title = r["title"] if r else None
-        _log_activity(
+        def _read_moved_title(current_new_id=new_id, current_nid=nid):
+            with connect() as con:
+                r = con.execute(
+                    "SELECT title FROM idea WHERE id=? OR original_id=?",
+                    (current_new_id, current_nid),
+                ).fetchone()
+                return r["title"] if r else None
+
+        moved_title = await asyncio.to_thread(_read_moved_title)
+        await asyncio.to_thread(
+            _log_activity,
             action="idea_moved",
             authorization=authorization,
             is_mod=True,
@@ -3301,10 +3431,14 @@ async def move_to_topic(
     einen Reference-Knoten dazu (HackathOERn-Standard).
     Der Endpoint heißt aus historischen Gründen weiterhin /move."""
     await _require_moderator(authorization)
-    with connect() as con:
-        t = con.execute(
-            "SELECT id,title FROM topic WHERE id = ?", (body.target_topic_id,)
-        ).fetchone()
+
+    def _read_target_topic():
+        with connect() as con:
+            return con.execute(
+                "SELECT id,title FROM topic WHERE id = ?", (body.target_topic_id,)
+            ).fetchone()
+
+    t = await asyncio.to_thread(_read_target_topic)
     if not t:
         raise HTTPException(404, f"Unknown target topic {body.target_topic_id}")
 
@@ -3321,14 +3455,17 @@ async def move_to_topic(
         )
 
     # Titel für Log
-    moved_title = None
-    with connect() as con:
-        r = con.execute(
-            "SELECT title FROM idea WHERE id=? OR original_id=?",
-            (new_id, body.node_id),
-        ).fetchone()
-        moved_title = r["title"] if r else None
-    _log_activity(
+    def _read_moved_title():
+        with connect() as con:
+            r = con.execute(
+                "SELECT title FROM idea WHERE id=? OR original_id=?",
+                (new_id, body.node_id),
+            ).fetchone()
+            return r["title"] if r else None
+
+    moved_title = await asyncio.to_thread(_read_moved_title)
+    await asyncio.to_thread(
+        _log_activity,
         action="idea_moved",
         authorization=authorization,
         is_mod=True,
@@ -3872,10 +4009,13 @@ async def edit_idea(
             except Exception:
                 pass
 
-    with connect() as con:
-        row = con.execute(
-            "SELECT main_content_id, kind, phase FROM idea WHERE id=?", (idea_id,)
-        ).fetchone()
+    def _read_cached_idea():
+        with connect() as con:
+            return con.execute(
+                "SELECT main_content_id, kind, phase FROM idea WHERE id=?", (idea_id,)
+            ).fetchone()
+
+    row = await asyncio.to_thread(_read_cached_idea)
 
     # Fallback wenn der Cache den Node noch nicht kennt (z.B. unmittelbar
     # nach einem POST /ideas vor dem nächsten Sync): direkt am Node editieren.
@@ -3894,8 +4034,12 @@ async def edit_idea(
     # Mod darf alles. Der Workflow-Check läuft *bevor* ES kontaktiert wird.
     if body.phase is not None and body.phase != current_phase:
         is_mod = await _is_moderator(authorization)
-        with connect() as con:
-            order = _phase_order(con)
+
+        def _read_phase_order():
+            with connect() as con:
+                return _phase_order(con)
+
+        order = await asyncio.to_thread(_read_phase_order)
         ok, reason = _is_allowed_phase_transition(
             current=current_phase,
             target=body.phase,
@@ -4050,7 +4194,8 @@ async def edit_idea(
         await sync_mod.refresh_idea(idea_id, auth_header=authorization)
     except Exception:
         pass
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="idea_edited",
         authorization=authorization,
         target_type="idea",
@@ -4064,7 +4209,8 @@ async def edit_idea(
     )
     # Separater Phase-Wechsel-Eintrag mit Old/New, falls Phase wirklich gewechselt
     if body.phase is not None and body.phase != current_phase:
-        _log_activity(
+        await asyncio.to_thread(
+            _log_activity,
             action="phase_changed",
             authorization=authorization,
             target_type="idea",
@@ -4094,8 +4240,11 @@ async def delete_idea(
         )
 
     # Titel + Original-ID VOR dem Löschen retten (für Log + Original-Cleanup).
-    with connect() as con:
-        pre = con.execute("SELECT title, original_id FROM idea WHERE id = ?", (idea_id,)).fetchone()
+    def _read_delete_preflight():
+        with connect() as con:
+            return con.execute("SELECT title, original_id FROM idea WHERE id = ?", (idea_id,)).fetchone()
+
+    pre = await asyncio.to_thread(_read_delete_preflight)
     deleted_title: str | None = pre["title"] if pre else None
     original_id: str | None = pre["original_id"] if pre else None
 
@@ -4116,11 +4265,14 @@ async def delete_idea(
     # Referenz war (eigenes Original vorhanden) und (b) keine ANDERE Referenz
     # dieses Original noch nutzt (Mehrfach-Referenz-Schutz über die App-DB).
     if original_id and original_id != idea_id:
-        with connect() as con:
-            others = con.execute(
-                "SELECT COUNT(*) AS c FROM idea WHERE original_id = ? AND id != ?",
-                (original_id, idea_id),
-            ).fetchone()["c"]
+        def _count_other_references():
+            with connect() as con:
+                return con.execute(
+                    "SELECT COUNT(*) AS c FROM idea WHERE original_id = ? AND id != ?",
+                    (original_id, idea_id),
+                ).fetchone()["c"]
+
+        others = await asyncio.to_thread(_count_other_references)
         if others == 0:
             try:
                 await edu_sharing.client.delete_node(original_id, auth_header=authorization)
@@ -4128,9 +4280,13 @@ async def delete_idea(
                 log.warning("delete_idea: Original %s nicht gelöscht: %s", original_id, e)
 
     # Cache aufräumen — alle Ideen-Tabellen, siehe _purge_idea_cache.
-    with connect() as con:
-        _purge_idea_cache(con, idea_id)
-    _log_activity(
+    def _purge_deleted_idea():
+        with connect() as con:
+            _purge_idea_cache(con, idea_id)
+
+    await asyncio.to_thread(_purge_deleted_idea)
+    await asyncio.to_thread(
+        _log_activity,
         action="idea_deleted",
         authorization=authorization,
         target_type="idea",
@@ -4214,7 +4370,8 @@ async def rename_attachment(
         if e.response.status_code in (401, 403):
             raise HTTPException(403, "Keine Berechtigung, diesen Anhang umzubenennen.")
         raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="attachment_renamed",
         authorization=authorization,
         target_type="attachment",
@@ -4253,7 +4410,8 @@ async def delete_attachment(
             raise HTTPException(403, "Keine Berechtigung, diesen Anhang zu löschen.")
         if e.response.status_code != 404:
             raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="attachment_deleted",
         authorization=authorization,
         target_type="attachment",
@@ -4319,7 +4477,8 @@ async def replace_attachment_content(
         await sync_mod.refresh_idea(idea_id, auth_header=authorization)
     except Exception:
         pass
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="attachment_replaced",
         authorization=authorization,
         target_type="attachment",
@@ -4352,14 +4511,19 @@ async def report_idea(
     # manipulierbar. None bei anonymer Meldung. Vor connect(), damit der
     # ES-Roundtrip nicht den SQLite-Write-Lock hält.
     reporter = (await _verify_login(authorization)) if authorization else None
-    with connect() as con:
-        con.execute(
-            "INSERT INTO idea_report (idea_id,reason,reporter,created_at) VALUES (?,?,?,?)",
-            (idea_id, body.reason.strip(), reporter, sync_mod._iso_now()),
-        )
-        # Idee-Titel für hübsches Log
-        title_row = con.execute("SELECT title FROM idea WHERE id=?", (idea_id,)).fetchone()
-    _log_activity(
+
+    def _write_report():
+        with connect() as con:
+            con.execute(
+                "INSERT INTO idea_report (idea_id,reason,reporter,created_at) VALUES (?,?,?,?)",
+                (idea_id, body.reason.strip(), reporter, sync_mod._iso_now()),
+            )
+            # Idee-Titel für hübsches Log
+            return con.execute("SELECT title FROM idea WHERE id=?", (idea_id,)).fetchone()
+
+    title_row = await asyncio.to_thread(_write_report)
+    await asyncio.to_thread(
+        _log_activity,
         action="report_submitted",
         authorization=authorization,
         target_type="idea",
@@ -4389,148 +4553,151 @@ async def admin_stats(authorization: str | None = Header(None)):
     """Übersichts-Dashboard für Mods: Totals, Phasen-/Event-Verteilung,
     Aktivitätskurve (Ideen pro Woche), Top-Aktive User, Reports-Stand."""
     await _require_moderator(authorization)
-    with connect() as con:
-        # Totals
-        ideas_total = con.execute("SELECT COUNT(*) FROM idea").fetchone()[0]
-        topics_total = con.execute("SELECT COUNT(*) FROM topic").fetchone()[0]
-        themes_total = con.execute("SELECT COUNT(*) FROM topic WHERE parent_id IS NULL").fetchone()[
-            0
-        ]
-        challenges_total = topics_total - themes_total
 
-        comments_total = con.execute("SELECT COALESCE(SUM(comment_count),0) FROM idea").fetchone()[
-            0
-        ]
-        ratings_total = con.execute("SELECT COALESCE(SUM(rating_count),0) FROM idea").fetchone()[0]
-        interest_total = con.execute(
-            "SELECT COUNT(*) FROM idea_interaction WHERE kind='interest'"
-        ).fetchone()[0]
-        follow_total = con.execute(
-            "SELECT COUNT(*) FROM idea_interaction WHERE kind='follow'"
-        ).fetchone()[0]
-
-        # Phasen-Verteilung
-        phases = [
-            {"phase": r["phase"] or "(offen)", "count": r["c"]}
-            for r in con.execute(
-                "SELECT COALESCE(phase,'') AS phase, COUNT(*) AS c "
-                "FROM idea GROUP BY phase ORDER BY c DESC"
-            ).fetchall()
-        ]
-
-        # Event-Verteilung — events ist JSON, also in Python aggregieren
-        ev_rows = con.execute("SELECT events FROM idea").fetchall()
-        events: dict[str, int] = {}
-        no_event = 0
-        for r in ev_rows:
-            try:
-                evs = json.loads(r["events"] or "[]")
-            except Exception:
-                evs = []
-            if not evs:
-                no_event += 1
-            for e in evs:
-                events[e] = events.get(e, 0) + 1
-        events_dist = sorted(
-            [{"event": k, "count": v} for k, v in events.items()],
-            key=lambda x: -x["count"],
-        )
-        if no_event:
-            events_dist.append({"event": "(keine)", "count": no_event})
-
-        # Aktivität pro Woche — letzte 12 Wochen, basiert auf created_at
-        # ISO-Wochen-Format „YYYY-Www"
-        weekly = con.execute(
-            "SELECT strftime('%Y-W%W', created_at) AS week, COUNT(*) AS c "
-            "FROM idea WHERE created_at IS NOT NULL "
-            "GROUP BY week ORDER BY week DESC LIMIT 12"
-        ).fetchall()
-        weekly_list = list(reversed([{"week": r["week"], "count": r["c"]} for r in weekly]))
-
-        # Top-Aktive User aus activity_log (letzte 30 Tage)
-        cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
-        top_actors = [
-            {"actor": r["actor"], "count": r["c"]}
-            for r in con.execute(
-                "SELECT actor, COUNT(*) AS c FROM activity_log "
-                "WHERE ts >= ? AND actor IS NOT NULL AND actor != 'Gast' "
-                "GROUP BY actor ORDER BY c DESC LIMIT 10",
-                (cutoff,),
-            ).fetchall()
-        ]
-
-        # Reports
-        rep_open = (
-            con.execute("SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NULL").fetchone()[0]
-            if con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
-            ).fetchone()
-            else 0
-        )
-        rep_resolved = (
-            con.execute(
-                "SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NOT NULL"
-            ).fetchone()[0]
-            if con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
-            ).fetchone()
-            else 0
-        )
-
-        # Aktivitäts-Volumen letzte 30 Tage pro Action
-        action_dist = [
-            {"action": r["action"], "count": r["c"]}
-            for r in con.execute(
-                "SELECT action, COUNT(*) AS c FROM activity_log "
-                "WHERE ts >= ? GROUP BY action ORDER BY c DESC",
-                (cutoff,),
-            ).fetchall()
-        ]
-
-        # Aktivste Ideen (Rating + Comments + Interest gewichtet)
-        top_ideas = [
-            dict(r)
-            for r in con.execute(
-                "SELECT i.id, i.title, i.rating_avg, i.rating_count, "
-                "       i.comment_count, "
-                "       (SELECT COUNT(*) FROM idea_interaction "
-                "        WHERE idea_id=i.id AND kind='interest') AS interest_count "
-                "FROM idea i "
-                "ORDER BY (rating_count + comment_count + "
-                "  (SELECT COUNT(*) FROM idea_interaction "
-                "   WHERE idea_id=i.id AND kind='interest')) DESC LIMIT 10"
-            ).fetchall()
-        ]
-
-    # Avg-Rating (gewichtet)
-    avg_rating = 0.0
-    if ratings_total:
+    def _read_admin_stats():
         with connect() as con:
-            r = con.execute(
-                "SELECT SUM(rating_avg * rating_count) / SUM(rating_count) AS a "
-                "FROM idea WHERE rating_count > 0"
-            ).fetchone()
-            avg_rating = float(r["a"] or 0.0)
+            # Totals
+            ideas_total = con.execute("SELECT COUNT(*) FROM idea").fetchone()[0]
+            topics_total = con.execute("SELECT COUNT(*) FROM topic").fetchone()[0]
+            themes_total = con.execute("SELECT COUNT(*) FROM topic WHERE parent_id IS NULL").fetchone()[
+                0
+            ]
+            challenges_total = topics_total - themes_total
 
-    return {
-        "totals": {
-            "ideas": ideas_total,
-            "themes": themes_total,
-            "challenges": challenges_total,
-            "comments": comments_total,
-            "ratings": ratings_total,
-            "interest": interest_total,
-            "follow": follow_total,
-            "avg_rating": round(avg_rating, 2),
-        },
-        "phases": phases,
-        "events": events_dist,
-        "weekly": weekly_list,
-        "top_actors": top_actors,
-        "top_ideas": top_ideas,
-        "reports": {"open": rep_open, "resolved": rep_resolved},
-        "actions_30d": action_dist,
-    }
+            comments_total = con.execute("SELECT COALESCE(SUM(comment_count),0) FROM idea").fetchone()[
+                0
+            ]
+            ratings_total = con.execute("SELECT COALESCE(SUM(rating_count),0) FROM idea").fetchone()[0]
+            interest_total = con.execute(
+                "SELECT COUNT(*) FROM idea_interaction WHERE kind='interest'"
+            ).fetchone()[0]
+            follow_total = con.execute(
+                "SELECT COUNT(*) FROM idea_interaction WHERE kind='follow'"
+            ).fetchone()[0]
+
+            # Phasen-Verteilung
+            phases = [
+                {"phase": r["phase"] or "(offen)", "count": r["c"]}
+                for r in con.execute(
+                    "SELECT COALESCE(phase,'') AS phase, COUNT(*) AS c "
+                    "FROM idea GROUP BY phase ORDER BY c DESC"
+                ).fetchall()
+            ]
+
+            # Event-Verteilung — events ist JSON, also in Python aggregieren
+            ev_rows = con.execute("SELECT events FROM idea").fetchall()
+            events: dict[str, int] = {}
+            no_event = 0
+            for r in ev_rows:
+                try:
+                    evs = json.loads(r["events"] or "[]")
+                except Exception:
+                    evs = []
+                if not evs:
+                    no_event += 1
+                for e in evs:
+                    events[e] = events.get(e, 0) + 1
+            events_dist = sorted(
+                [{"event": k, "count": v} for k, v in events.items()],
+                key=lambda x: -x["count"],
+            )
+            if no_event:
+                events_dist.append({"event": "(keine)", "count": no_event})
+
+            # Aktivität pro Woche — letzte 12 Wochen, basiert auf created_at
+            # ISO-Wochen-Format „YYYY-Www"
+            weekly = con.execute(
+                "SELECT strftime('%Y-W%W', created_at) AS week, COUNT(*) AS c "
+                "FROM idea WHERE created_at IS NOT NULL "
+                "GROUP BY week ORDER BY week DESC LIMIT 12"
+            ).fetchall()
+            weekly_list = list(reversed([{"week": r["week"], "count": r["c"]} for r in weekly]))
+
+            # Top-Aktive User aus activity_log (letzte 30 Tage)
+            cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+            top_actors = [
+                {"actor": r["actor"], "count": r["c"]}
+                for r in con.execute(
+                    "SELECT actor, COUNT(*) AS c FROM activity_log "
+                    "WHERE ts >= ? AND actor IS NOT NULL AND actor != 'Gast' "
+                    "GROUP BY actor ORDER BY c DESC LIMIT 10",
+                    (cutoff,),
+                ).fetchall()
+            ]
+
+            # Reports
+            rep_open = (
+                con.execute("SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NULL").fetchone()[0]
+                if con.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
+                ).fetchone()
+                else 0
+            )
+            rep_resolved = (
+                con.execute(
+                    "SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NOT NULL"
+                ).fetchone()[0]
+                if con.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
+                ).fetchone()
+                else 0
+            )
+
+            # Aktivitäts-Volumen letzte 30 Tage pro Action
+            action_dist = [
+                {"action": r["action"], "count": r["c"]}
+                for r in con.execute(
+                    "SELECT action, COUNT(*) AS c FROM activity_log "
+                    "WHERE ts >= ? GROUP BY action ORDER BY c DESC",
+                    (cutoff,),
+                ).fetchall()
+            ]
+
+            # Aktivste Ideen (Rating + Comments + Interest gewichtet)
+            top_ideas = [
+                dict(r)
+                for r in con.execute(
+                    "SELECT i.id, i.title, i.rating_avg, i.rating_count, "
+                    "       i.comment_count, "
+                    "       (SELECT COUNT(*) FROM idea_interaction "
+                    "        WHERE idea_id=i.id AND kind='interest') AS interest_count "
+                    "FROM idea i "
+                    "ORDER BY (rating_count + comment_count + "
+                    "  (SELECT COUNT(*) FROM idea_interaction "
+                    "   WHERE idea_id=i.id AND kind='interest')) DESC LIMIT 10"
+                ).fetchall()
+            ]
+
+            # Avg-Rating (gewichtet)
+            avg_rating = 0.0
+            if ratings_total:
+                r = con.execute(
+                    "SELECT SUM(rating_avg * rating_count) / SUM(rating_count) AS a "
+                    "FROM idea WHERE rating_count > 0"
+                ).fetchone()
+                avg_rating = float(r["a"] or 0.0)
+
+        return {
+            "totals": {
+                "ideas": ideas_total,
+                "themes": themes_total,
+                "challenges": challenges_total,
+                "comments": comments_total,
+                "ratings": ratings_total,
+                "interest": interest_total,
+                "follow": follow_total,
+                "avg_rating": round(avg_rating, 2),
+            },
+            "phases": phases,
+            "events": events_dist,
+            "weekly": weekly_list,
+            "top_actors": top_actors,
+            "top_ideas": top_ideas,
+            "reports": {"open": rep_open, "resolved": rep_resolved},
+            "actions_30d": action_dist,
+        }
+
+    return await asyncio.to_thread(_read_admin_stats)
 
 
 @router.get("/admin/activity", tags=["moderation"])
@@ -4720,14 +4887,18 @@ async def my_follows(authorization: str | None = Header(None)):
     user = await _verify_login(authorization)
     if not user:
         raise HTTPException(401, "Anmeldung erforderlich")
-    with connect() as con:
-        rows = con.execute(
-            "SELECT i.* FROM idea i "
-            "JOIN idea_interaction x ON x.idea_id = i.id "
-            "WHERE x.user_key = ? AND x.kind = 'follow' "
-            "ORDER BY x.created_at DESC",
-            (user,),
-        ).fetchall()
+
+    def _read():
+        with connect() as con:
+            return con.execute(
+                "SELECT i.* FROM idea i "
+                "JOIN idea_interaction x ON x.idea_id = i.id "
+                "WHERE x.user_key = ? AND x.kind = 'follow' "
+                "ORDER BY x.created_at DESC",
+                (user,),
+            ).fetchall()
+
+    rows = await asyncio.to_thread(_read)
     return {"count": len(rows), "items": [_row_to_idea(r) for r in rows]}
 
 
@@ -4739,14 +4910,18 @@ async def my_interest(authorization: str | None = Header(None)):
     user = await _verify_login(authorization)
     if not user:
         raise HTTPException(401, "Anmeldung erforderlich")
-    with connect() as con:
-        rows = con.execute(
-            "SELECT i.*, x.status AS my_status, x.can_edit AS my_can_edit FROM idea i "
-            "JOIN idea_interaction x ON x.idea_id = i.id "
-            "WHERE x.user_key = ? AND x.kind = 'interest' "
-            "ORDER BY x.created_at DESC",
-            (user,),
-        ).fetchall()
+
+    def _read():
+        with connect() as con:
+            return con.execute(
+                "SELECT i.*, x.status AS my_status, x.can_edit AS my_can_edit FROM idea i "
+                "JOIN idea_interaction x ON x.idea_id = i.id "
+                "WHERE x.user_key = ? AND x.kind = 'interest' "
+                "ORDER BY x.created_at DESC",
+                (user,),
+            ).fetchall()
+
+    rows = await asyncio.to_thread(_read)
     items = []
     for r in rows:
         d = _row_to_idea(r)
@@ -4765,25 +4940,29 @@ async def my_team_requests(authorization: str | None = Header(None)):
     user = await _verify_login(authorization)
     if not user:
         raise HTTPException(401, "Anmeldung erforderlich")
-    with connect() as con:
-        rows = con.execute(
-            "SELECT x.idea_id, x.user_key, x.display_name, x.status, x.can_edit, "
-            "x.created_at, i.title AS idea_title "
-            "FROM idea_interaction x JOIN idea i ON i.id = x.idea_id "
-            "WHERE i.owner_username = ? AND x.kind = 'interest' "
-            "ORDER BY i.title, (x.status = 'approved'), x.created_at",
-            (user,),
-        ).fetchall()
-        names: dict[str, str] = {}
-        keys = list({r["user_key"] for r in rows})
-        if keys:
-            ph = ",".join("?" * len(keys))
-            for m in con.execute(
-                f"SELECT username, display_name FROM user_profile_meta "
-                f"WHERE username IN ({ph}) AND display_name IS NOT NULL AND display_name != ''",
-                keys,
-            ).fetchall():
-                names[m["username"]] = m["display_name"]
+    def _read_team_requests():
+        with connect() as con:
+            rows = con.execute(
+                "SELECT x.idea_id, x.user_key, x.display_name, x.status, x.can_edit, "
+                "x.created_at, i.title AS idea_title "
+                "FROM idea_interaction x JOIN idea i ON i.id = x.idea_id "
+                "WHERE i.owner_username = ? AND x.kind = 'interest' "
+                "ORDER BY i.title, (x.status = 'approved'), x.created_at",
+                (user,),
+            ).fetchall()
+            names: dict[str, str] = {}
+            keys = list({r["user_key"] for r in rows})
+            if keys:
+                ph = ",".join("?" * len(keys))
+                for m in con.execute(
+                    f"SELECT username, display_name FROM user_profile_meta "
+                    f"WHERE username IN ({ph}) AND display_name IS NOT NULL AND display_name != ''",
+                    keys,
+                ).fetchall():
+                    names[m["username"]] = m["display_name"]
+            return rows, names
+
+    rows, names = await asyncio.to_thread(_read_team_requests)
 
     def nm(r) -> str:
         uk = r["user_key"]
@@ -4893,10 +5072,14 @@ async def upload_attachment(
                 "Kein gültiges Upload-Token — für diese Idee ist zum Anhängen "
                 "eine Anmeldung nötig.",
             )
-        with connect() as con:
-            cached = con.execute(
-                "SELECT 1 FROM idea WHERE id=? OR original_id=?", (idea_id, idea_id)
-            ).fetchone()
+
+        def _is_cached_idea():
+            with connect() as con:
+                return con.execute(
+                    "SELECT 1 FROM idea WHERE id=? OR original_id=?", (idea_id, idea_id)
+                ).fetchone()
+
+        cached = await asyncio.to_thread(_is_cached_idea)
         if cached:
             raise HTTPException(
                 403, "Für bereits einsortierte Ideen ist zum Anhängen eine Anmeldung nötig."
@@ -4972,7 +5155,8 @@ async def upload_attachment(
         await sync_mod.refresh_idea(idea_id, auth_header=authorization)
     except Exception:
         pass
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="attachment_uploaded",
         authorization=authorization,
         target_type="attachment",
@@ -5250,11 +5434,14 @@ async def delete_comment(
     author_match = is_mod
     if not is_mod and idea_id:
         try:
-            with connect() as con:
-                row = con.execute(
-                    "SELECT main_content_id,id FROM idea WHERE id=?",
-                    (idea_id,),
-                ).fetchone()
+            def _read_idea_target():
+                with connect() as con:
+                    return con.execute(
+                        "SELECT main_content_id,id FROM idea WHERE id=?",
+                        (idea_id,),
+                    ).fetchone()
+
+            row = await asyncio.to_thread(_read_idea_target)
             if row:
                 target = row["main_content_id"] or row["id"]
                 cm = await edu_sharing.client.comments(target, auth_header=authorization)
@@ -5282,7 +5469,8 @@ async def delete_comment(
             await sync_mod.refresh_idea(idea_id, auth_header=authorization)
         except Exception:
             pass
-    _log_activity(
+    await asyncio.to_thread(
+        _log_activity,
         action="comment_deleted",
         authorization=authorization,
         is_mod=is_mod,
@@ -5554,20 +5742,24 @@ async def update_my_profile_meta(
     role = _norm(body.role)
     now = datetime.now(UTC).isoformat()
 
-    with connect() as con:
-        con.execute(
-            "INSERT INTO user_profile_meta "
-            "(username, display_name, bio, website, role, updated_at) "
-            "VALUES (?,?,?,?,?,?) "
-            "ON CONFLICT(username) DO UPDATE SET "
-            "  display_name=excluded.display_name, "
-            "  bio=excluded.bio, "
-            "  website=excluded.website, "
-            "  role=excluded.role, "
-            "  updated_at=excluded.updated_at",
-            (me, display, bio, safe_url, role, now),
-        )
-    _log_activity(
+    def _write_profile_meta():
+        with connect() as con:
+            con.execute(
+                "INSERT INTO user_profile_meta "
+                "(username, display_name, bio, website, role, updated_at) "
+                "VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(username) DO UPDATE SET "
+                "  display_name=excluded.display_name, "
+                "  bio=excluded.bio, "
+                "  website=excluded.website, "
+                "  role=excluded.role, "
+                "  updated_at=excluded.updated_at",
+                (me, display, bio, safe_url, role, now),
+            )
+
+    await asyncio.to_thread(_write_profile_meta)
+    await asyncio.to_thread(
+        _log_activity,
         action="profile_meta_updated",
         authorization=authorization,
         is_mod=False,
@@ -5764,11 +5956,15 @@ async def mark_notifications_seen(authorization: str | None = Header(None)):
     if not me:
         raise HTTPException(401, "Anmeldung ungültig")
     now = sync_mod._iso_now()
-    with connect() as con:
-        con.execute(
-            "INSERT OR REPLACE INTO user_feed_seen (user_key, last_seen) VALUES (?, ?)",
-            (me, now),
-        )
+
+    def _write_seen_marker():
+        with connect() as con:
+            con.execute(
+                "INSERT OR REPLACE INTO user_feed_seen (user_key, last_seen) VALUES (?, ?)",
+                (me, now),
+            )
+
+    await asyncio.to_thread(_write_seen_marker)
     return {"ok": True, "last_seen": now}
 
 
@@ -5897,15 +6093,67 @@ def ready():
 @router.get("/status")
 def status():
     """Kennzahlen für Monitoring/Menschen — NICHT als k8s-Probe verwenden
-    (macht DB-Reads/COUNTs, kann unter Last/Sync langsamer sein)."""
+    (macht DB-Reads/COUNTs, kann unter Last/Sync langsamer sein).
+
+    Der `diagnostics`-Block dient dem Vergleich ZWEIER Deployments mit
+    identischem Code+Daten: zeigt, ob die Performance-PRAGMAs/Indizes auf
+    DIESEM Prozess aktiv sind (sonst alter/nicht-neugestarteter Stand), wie
+    groß die WAL-Datei real ist (Bloat-Bremse) und wie schnell ein
+    repräsentativer Read tatsächlich läuft. So lässt sich ein „ein Server
+    langsam"-Problem ohne Server-Konsole eingrenzen."""
     with connect() as con:
         counts = con.execute(
             "SELECT (SELECT COUNT(*) FROM topic) topics, (SELECT COUNT(*) FROM idea) ideas"
         ).fetchone()
         last = con.execute("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+
+        # --- Diagnose: realer Read + effektive PRAGMAs + Index-Präsenz ----
+        t0 = time.perf_counter()
+        con.execute("SELECT * FROM idea WHERE COALESCE(hidden,0)=0").fetchall()
+        sample_query_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+        pragmas: dict[str, object] = {}
+        for p in (
+            "journal_mode",
+            "synchronous",
+            "cache_size",
+            "mmap_size",
+            "page_size",
+            "page_count",
+            "journal_size_limit",
+            "busy_timeout",
+            "temp_store",
+        ):
+            try:
+                row = con.execute(f"PRAGMA {p}").fetchone()
+                pragmas[p] = row[0] if row else None
+            except Exception:
+                pragmas[p] = None
+
+        idx_names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+
+    # WAL-/DB-Dateigrößen (best-effort; aussagekräftig für den Bloat-Verdacht)
+    db_bytes: dict[str, int | None] = {}
+    _db_path = os.fspath(settings.sqlite_path)
+    for suffix, label in (("", "db"), ("-wal", "wal"), ("-shm", "shm")):
+        try:
+            db_bytes[label] = os.path.getsize(_db_path + suffix)
+        except OSError:
+            db_bytes[label] = None
+
     return {
         "ok": True,
         "topics": counts["topics"],
         "ideas": counts["ideas"],
         "last_sync": dict(last) if last else None,
+        "diagnostics": {
+            "server_time": datetime.now(UTC).isoformat(),
+            "sample_query_ms": sample_query_ms,
+            "db_bytes": db_bytes,
+            "pragmas": pragmas,
+            "expected_indexes_present": {
+                "idea_owner_idx": "idea_owner_idx" in idx_names,
+                "idea_interaction_user_idx": "idea_interaction_user_idx" in idx_names,
+            },
+        },
     }

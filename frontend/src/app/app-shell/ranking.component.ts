@@ -13,7 +13,7 @@ import {
   untracked,
 } from '@angular/core';
 import { ApiService } from '../api.service';
-import { Idea, VotingMode } from '../models';
+import { Idea, RankingRiser, VotingMode } from '../models';
 import { VotingService } from '../voting.service';
 import { ShareDialogComponent } from './share-dialog.component';
 
@@ -46,20 +46,6 @@ interface RankItem {
       display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
       margin-bottom: 18px;
     }
-    .seg {
-      display: inline-flex; gap: 0;
-      border: 1px solid var(--wlo-border, #d8dde6); border-radius: 8px;
-      overflow: hidden; background: var(--wlo-surface, #fff);
-      button {
-        background: var(--wlo-surface, #fff); border: none; padding: 8px 14px;
-        font-size: .92rem; cursor: pointer; color: var(--wlo-text, #1a2334);
-        border-right: 1px solid var(--wlo-border, #d8dde6);
-        display: inline-flex; align-items: center; gap: 6px;
-        &:last-child { border-right: none; }
-        &.on { background: var(--wlo-primary, #1d3a6e); color: #fff; }
-        &:hover:not(.on) { background: var(--wlo-bg, #f4f6f9); }
-      }
-    }
     .ico { width: 14px; height: 14px; flex-shrink: 0; vertical-align: -2px; }
     .ico-inline { display: inline-block; vertical-align: -1px; margin-right: 2px; }
     .meta {
@@ -91,13 +77,6 @@ interface RankItem {
     }
     .top-chart-card p {
       margin: 0 0 12px; font-size: .85rem; color: var(--wlo-muted);
-    }
-    .legend {
-      display: flex; flex-wrap: wrap; gap: 10px 16px;
-      margin-top: 10px; font-size: .82rem; color: var(--wlo-text);
-      .dot { display: inline-block; width: 10px; height: 10px;
-             border-radius: 50%; margin-right: 6px;
-             vertical-align: middle; }
     }
 
     /* Top-3 horizontale Balkengrafik — Balkenfarbe = Marken-Blau des Themes,
@@ -324,6 +303,9 @@ interface RankItem {
         (letzter: {{ formatDate(data()!.snapshot_at!) }}, {{ snapshotCount() }} gespeichert)
       } @else { noch keine gespeichert. }
     </div>
+    <!-- Backdrop schließt das Filter-Menü per Maus; Tastatur über die Pillen
+         (Toggle) bzw. Tab. Fokussierbarer Fullscreen-Backdrop = Anti-Pattern. -->
+    <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
     @if (menuOpen()) { <div class="fmenu-backdrop" (click)="menuOpen.set(null)"></div> }
     <div class="controls">
       <!-- MD3-Filterpille: Sortierung -->
@@ -441,7 +423,8 @@ interface RankItem {
         </p>
         <div class="bars">
           @for (b of topBars(); track b.id) {
-            <div class="bar-row" (click)="selectBar(b)">
+            <div class="bar-row" role="button" tabindex="0"
+                 (click)="selectBar(b)" (keyup.enter)="selectBar(b)">
               <div class="bar-label">
                 <span class="b-rank">#{{ b.rank }}</span>
                 <span class="b-title" [title]="b.title">{{ b.title }}</span>
@@ -475,7 +458,8 @@ interface RankItem {
         <p>Ideen mit der größten Rangverbesserung — jüngster Snapshot vs. Stand vor 7 Tagen.</p>
         <div class="risers-list">
           @for (r of risers(); track r.idea_id) {
-            <div class="riser-row" (click)="selectRiser(r)">
+            <div class="riser-row" role="button" tabindex="0"
+                 (click)="selectRiser(r)" (keyup.enter)="selectRiser(r)">
               <div class="riser-rank">#{{ r.rank }}</div>
               <div class="riser-title">
                 {{ r.title || '(unbekannt)' }}
@@ -509,8 +493,11 @@ interface RankItem {
         @for (item of data()!.items; track item.idea?.id) {
           <div class="rank-row">
             <div class="rank-num">#{{ item.rank }}</div>
-            <div class="rank-title" [title]="item.idea?.title"
-                 (click)="select(item)">
+            <!-- Der Titel ist die tastaturbediente „Idee öffnen"-Aktion der Zeile;
+                 Score/Delta/Sparkline unten sind nur zusätzliche Maus-Klickflächen. -->
+            <div class="rank-title" role="button" tabindex="0"
+                 [title]="item.idea?.title"
+                 (click)="select(item)" (keyup.enter)="select(item)">
               {{ item.idea?.title || '(Idee gelöscht)' }}
               <span class="meta-line">
                 @if (item.idea?.owner_display_name) { von {{ item.idea?.owner_display_name }} · }
@@ -529,6 +516,7 @@ interface RankItem {
             </div>
 
             <!-- Inline-Schnellvoting direkt im Balken -->
+            <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
             <div class="rank-vote" (click)="$event.stopPropagation()">
               @if (mode() === 'thumbs') {
                 <button type="button" class="thumb-btn"
@@ -552,10 +540,14 @@ interface RankItem {
               }
             </div>
 
+            <!-- Redundante Maus-Klickfläche (Tastatur: Titel-Button oben). -->
+            <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
             <div class="rank-score" (click)="select(item)"
                  [title]="(decayAvailable() && basis()==='decay') ? 'Aktueller Score mit Stimmen-Verfall' : (decayAvailable() ? 'Gesamtstimmen ohne Verfall' : '')">
               {{ rowScore(item) }}<span class="unit">{{ scoreUnit() }}</span>
             </div>
+            <!-- Redundante Maus-Klickfläche (Tastatur: Titel-Button oben). -->
+            <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
             <div (click)="select(item)">
               <span class="delta"
                     [class.up]="(item.delta || 0) > 0"
@@ -568,6 +560,8 @@ interface RankItem {
                 @else { — }
               </span>
             </div>
+            <!-- Redundante Maus-Klickfläche (Tastatur: Titel-Button oben). -->
+            <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
             <svg class="spark" width="80" height="28" [attr.viewBox]="'0 0 80 28'"
                  (click)="select(item)">
               @if (sparklinePoints(item); as pts) {
@@ -677,7 +671,7 @@ export class RankingComponent implements OnChanges {
   sortKey = signal<SortKey>('rating');
   eventFilter = signal<string | null>(null);
   loading = signal(false);
-  risers = signal<any[]>([]);
+  risers = signal<RankingRiser[]>([]);
   /** Offenes Filter-Dropdown (MD3-Pille) — 'sort' | 'event' | 'basis' | null. */
   menuOpen = signal<'sort' | 'event' | 'basis' | null>(null);
   /** Score-Basis: 'decay' = Aktuell (mit Verfall, Default), 'absolute' =
@@ -693,12 +687,8 @@ export class RankingComponent implements OnChanges {
     items: RankItem[];
   } | null>(null);
 
-  readonly chartW = 600;
-  readonly chartH = 160;
-
   // Top-N für Gesamt-Chart — auf 3 begrenzt für Übersichtlichkeit.
   private readonly TOP_FOR_CHART = 3;
-  private readonly PALETTE = ['#1d3a6e', '#d97706', '#0b7a4f', '#9333ea', '#dc2626'];
 
   // Inline-Voting-State pro Idee-ID
   voteValue: Record<string, number> = {};
@@ -836,7 +826,7 @@ export class RankingComponent implements OnChanges {
       limit: 50,
       basis: this.basis(),
     }).subscribe({
-      next: (r) => { this.data.set(r as any); this.loading.set(false); },
+      next: (r) => { this.data.set(r); this.loading.set(false); },
       error: () => { if (!silent) this.data.set(null); this.loading.set(false); },
     });
     // Top-Steiger separat laden — passt zu Sort + Event-Filter.
@@ -851,7 +841,7 @@ export class RankingComponent implements OnChanges {
     });
   }
 
-  selectRiser(r: any) {
+  selectRiser(r: RankingRiser) {
     if (r.idea_id) {
       const fakeIdea = { id: r.idea_id, title: r.title } as Idea;
       this.ideaSelected.emit(fakeIdea);
@@ -988,72 +978,9 @@ export class RankingComponent implements OnChanges {
     return '#5f6471';
   }
 
-  // ---- Großer Chart: Rang-Verlauf der aktuellen Top-N ----
+  // ---- Snapshot-Zähler (Info-Zeile unter dem Seitentitel) ----
   snapshotCount(): number {
     // Live-Marker nicht als „Snapshot" zählen.
     return (this.data()?.snapshots || []).filter((s) => s !== 'live').length;
-  }
-
-  chartViewBox(): string {
-    return `0 0 ${this.chartW} ${this.chartH}`;
-  }
-
-  chartGuides() {
-    // 4 horizontale Linien (Y-Achsen-Hilfen)
-    const out = [];
-    for (let i = 0; i < 5; i++) {
-      out.push({ y: (i * this.chartH) / 4 });
-    }
-    return out;
-  }
-
-  chartSeries() {
-    const d = this.data();
-    if (!d || !d.snapshots.length) return [];
-    const snaps = d.snapshots; // alt → neu
-    const top = (d.items || []).slice(0, this.TOP_FOR_CHART);
-
-    const w = this.chartW;
-    const h = this.chartH;
-    const pad = 8;
-
-    // Y skaliert über alle vorkommenden Ränge in den Top-N-Verläufen
-    const allRanks: number[] = [];
-    top.forEach((t) => (t.history || []).forEach((p) => allRanks.push(p.rank)));
-    if (!allRanks.length) return [];
-    const minR = Math.min(...allRanks);
-    const maxR = Math.max(...allRanks);
-    const rangeR = maxR - minR || 1;
-
-    // X über die Snapshot-Zeitachse — gleichabständig.
-    const xFor = (idx: number, total: number) =>
-      total === 1 ? w / 2 : pad + (idx * (w - 2 * pad)) / (total - 1);
-    // Y: Rang 1 = oben, hoher Rang = unten
-    const yFor = (rank: number) =>
-      pad + ((rank - minR) / rangeR) * (h - 2 * pad);
-
-    return top.map((t, i) => {
-      // Map history zu allen Snapshots → falls Idee in einem Snapshot
-      // nicht gerankt war, Lücke entstehen lassen.
-      const map = new Map<string, number>();
-      (t.history || []).forEach((p) => map.set(p.at, p.rank));
-      const points: string[] = [];
-      const dots: { x: number; y: number }[] = [];
-      snaps.forEach((s, j) => {
-        const r = map.get(s);
-        if (r === undefined) return;
-        const x = xFor(j, snaps.length);
-        const y = yFor(r);
-        points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
-        dots.push({ x, y });
-      });
-      return {
-        id: t.idea?.id || String(i),
-        label: `#${t.rank} ${t.idea?.title?.slice(0, 32) || '(unbekannt)'}`,
-        color: this.PALETTE[i % this.PALETTE.length],
-        points: points.join(' '),
-        dots,
-      };
-    }).filter((s) => s.points.length > 0);
   }
 }

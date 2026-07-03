@@ -76,6 +76,9 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
           <button class="cta" (click)="goSubmit(); mobileNavOpen=false">Idee einreichen</button>
 
           @if (api.hasCredentials()) {
+            <!-- Wrapper stoppt nur das Click-Bubbling (Outside-Close), ist selbst
+                 nicht bedienbar — die Aktionen sind die <button>s darin. -->
+            <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
             <div class="user-menu" (click)="$event.stopPropagation()">
               <button class="user"
                       [class.active]="view()==='profile' || view()==='moderation'"
@@ -128,6 +131,8 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
 
           <!-- Theme-Switcher rechts vom Anmelde/User-Button. Drei Farbquadrate
                vertikal gestapelt, Höhe matcht "+ Idee einreichen". -->
+          <!-- Wrapper stoppt nur das Click-Bubbling; Bedienung über die <button>s. -->
+          <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
           <div class="theme-switch" (click)="$event.stopPropagation()">
             <button class="theme-toggle"
                     (click)="themeMenuOpen = !themeMenuOpen"
@@ -331,7 +336,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                   </span>
                   <div class="body">
                     <h3>{{ t.title }}</h3>
-                    <span class="count">{{ ideaCountByTopic[t.id] ?? 0 }} {{ ideaCountByTopic[t.id] === 1 ? 'Idee' : 'Ideen' }}</span>
+                    <span class="count">{{ countFor(t.id) }} {{ countFor(t.id) === 1 ? 'Idee' : 'Ideen' }}</span>
                   </div>
                   <span class="arrow">→</span>
                 </button>
@@ -376,6 +381,9 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                      [(ngModel)]="searchQ" (input)="onSearchInput()" />
               <!-- Sortierung als Filterpille + Richtungs-Toggle -->
               <div class="sort-group">
+                <!-- Backdrop schließt das Filter-Menü per Maus; Tastatur schließt
+                     durch erneutes Aktivieren der Pille bzw. Tab/Escape. -->
+                <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
                 @if (filterMenuOpen==='sort') { <div class="fmenu-backdrop" (click)="filterMenuOpen=null"></div> }
                 <div class="fpill-wrap">
                   <button class="fpill" (click)="toggleFilterMenu('sort')" aria-label="Sortierung">
@@ -414,6 +422,9 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                  Treffer liefert. Die „Herausforderung:"-Pille erscheint
                  zusätzlich nur, wenn ein Themenbereich gewählt ist (sonst
                  gibt's keine Unter-Sammlungen zum Anzeigen). -->
+            <!-- Backdrop schließt die Filter-Pillen per Maus; Tastatur über die
+                 Pillen selbst (Toggle) bzw. Tab. -->
+            <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
             @if (filterMenuOpen) { <div class="fmenu-backdrop" (click)="filterMenuOpen=null"></div> }
             <div class="filter-pills">
               <!-- Phase -->
@@ -546,8 +557,8 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
               <div class="topics-hero">
                 <h2>{{ topicDrillRoot()!.title }}</h2>
                 <p>
-                  {{ ideaCountByTopic[topicDrillRoot()!.id] ?? 0 }}
-                  {{ ideaCountByTopic[topicDrillRoot()!.id] === 1 ? 'Idee' : 'Ideen' }}
+                  {{ countFor(topicDrillRoot()!.id) }}
+                  {{ countFor(topicDrillRoot()!.id) === 1 ? 'Idee' : 'Ideen' }}
                   in {{ childrenOf(topicDrillRoot()!.id).length }}
                   {{ childrenOf(topicDrillRoot()!.id).length === 1 ? 'Herausforderung' : 'Herausforderungen' }}.
                   Wähle oben eine Herausforderung, um die Liste einzugrenzen.
@@ -558,7 +569,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                 <div class="topic-pills">
                   <button class="facet-chip" [class.on]="!topicDrillChild()"
                           (click)="topicDrillChild.set(null)">
-                    Alle <small>({{ ideaCountByTopic[topicDrillRoot()!.id] ?? 0 }})</small>
+                    Alle <small>({{ countFor(topicDrillRoot()!.id) }})</small>
                   </button>
                   @for (ch of childrenOf(topicDrillRoot()!.id); track ch.id) {
                     <button class="facet-chip"
@@ -600,8 +611,8 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
                     <div class="body">
                       <h3>{{ root.title }}</h3>
                       <span class="count">
-                        {{ ideaCountByTopic[root.id] ?? 0 }}
-                        {{ ideaCountByTopic[root.id] === 1 ? 'Idee' : 'Ideen' }}
+                        {{ countFor(root.id) }}
+                        {{ countFor(root.id) === 1 ? 'Idee' : 'Ideen' }}
                       </span>
                     </div>
                     <span class="arrow">→</span>
@@ -808,8 +819,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
           <ideendb-moderation
             [apiBase]="apiBase"
             [currentUser]="api.currentUser() || ''"
-            [repoBaseUrl]="repoBaseUrl()"
-            (ideaSelected)="openIdea($any($event))">
+            [repoBaseUrl]="repoBaseUrl()">
           </ideendb-moderation>
         }
 
@@ -949,6 +959,13 @@ export class AppShellComponent implements OnInit, OnDestroy {
   topicChildren = signal<Topic[]>([]);
   ideaCountByTopic: Record<string, number> = {};
   subtopicCounts: Record<string, number> = {};
+  /** Ideen-Anzahl eines Topics — 0 für (noch) unbekannte IDs. Die Map wird
+   *  async befüllt; der Record-Typ verspricht number, zur Laufzeit können
+   *  Keys aber fehlen. Der Fallback lebt deshalb hier statt als ?? in den
+   *  Templates (dort meldete NG8102 ihn fälschlich als überflüssig). */
+  countFor(topicId: string): number {
+    return this.ideaCountByTopic[topicId] ?? 0;
+  }
 
   searchQ = '';
   sort: 'modified' | 'created' | 'rating' | 'comments' | 'title' = 'modified';
@@ -990,7 +1007,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
     if (this.initialView === 'detail' && this.initialIdeaId) {
       setTimeout(() => {
         this.api.getIdea(this.initialIdeaId!).subscribe({
-          next: (i) => this.openIdea(i as any),
+          next: (i) => this.openIdea(i),
           error: () => this.view.set('home'),
         });
       }, 0);
@@ -1068,7 +1085,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
       if (view === 'detail' && ideaParam) {
         setTimeout(() => {
           this.api.getIdea(ideaParam).subscribe({
-            next: (i) => this.openIdea(i as any),
+            next: (i) => this.openIdea(i as Idea),
             error: () => this.view.set('home'),
           });
         }, 0);
@@ -1366,7 +1383,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
         : none;
     }
     // L1-Themenbereich → zeigen, aber ohne Vorauswahl
-    return (this.ideaCountByTopic[topicId] ?? 0) === 0
+    return this.countFor(topicId) === 0
       ? { show: true, id: null, title: null }
       : none;
   }

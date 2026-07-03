@@ -89,6 +89,8 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
     ## @param ingress.annotations.nginx.ingress.kubernetes.io/proxy-send-timeout Set proxy-send-timeout on nginx ingress
     nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+    ## @param ingress.annotations.nginx.ingress.kubernetes.io/proxy-buffering Disable nginx response buffering — stream upstream responses directly to the client. Prevents large bundles from blocking API requests on the same HTTP/2 connection (uvicorn single-worker).
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
 
   ## @param ingress.hosts Set ingress hosts
   hosts:

@@ -34,3 +34,19 @@ def test_status_reports_counts_for_empty_db(client):
     assert body["topics"] == 0
     assert body["ideas"] == 0
     assert body["last_sync"] is None
+
+
+def test_status_hides_diagnostics_from_anonymous(client):
+    """Audit-Befund: PRAGMA-Werte, Dateigrößen und Index-Namen sind Interna —
+    anonym gibt es nur die groben Zähler (reicht für Uptime-Pings)."""
+    body = client.get("/api/v1/status").json()
+    assert "diagnostics" not in body
+
+
+def test_status_shows_diagnostics_for_moderator(client, mod_headers):
+    body = client.get("/api/v1/status", headers=mod_headers).json()
+    diag = body["diagnostics"]
+    assert "pragmas" in diag and "db_bytes" in diag
+    assert diag["expected_indexes_present"]["idea_owner_idx"] is True
+    # Kein Backup angelegt → Feld existiert, ist aber leer.
+    assert diag["last_backup"] is None

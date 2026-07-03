@@ -1,7 +1,7 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, finalize, shareReplay } from 'rxjs';
-import { BootstrapResponse, FeaturedEvent, Idea, IdeaList, InboxItem, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
+import { ActivityEvent, AdminStats, BackupInfo, BootstrapResponse, FeaturedEvent, Idea, IdeaList, InboxItem, PublicUserProfile, RankingRiser, RestoreResult, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
 import { AuthService } from './auth.service';
 
 // Re-export, damit bestehende `import { API_BASE_DEFAULT } from './api.service'`
@@ -117,7 +117,7 @@ export class ApiService {
     if (opts.event) params = params.set('event', opts.event);
     if (opts.q && opts.q.trim()) params = params.set('q', opts.q.trim());
     return this.coalesced(`meta?${params.toString()}`, () =>
-      this.http.get<any>(`${this.base}/meta`, { params }),
+      this.http.get<{ phases: { value: string; count: number }[]; events: { value: string; count: number }[]; categories: { value: string; count: number }[]; topics: Record<string, number>; }>(`${this.base}/meta`, { params }),
     );
   }
 
@@ -136,14 +136,14 @@ export class ApiService {
     contact?: string | null;
     contact_consent?: boolean;
   }): Observable<{ ok: boolean; moderation: string; node_id: string; upload_token?: string | null; message: string }> {
-    return this.http.post<any>(`${this.base}/ideas`, payload);
+    return this.http.post<{ ok: boolean; moderation: string; node_id: string; upload_token?: string | null; message: string }>(`${this.base}/ideas`, payload);
   }
 
   /** Holt eine frische Mathe-Captcha-Aufgabe für anonyme Submits.
    * Token + erwartete Antwort liegen serverseitig; das Frontend gibt
    * nur `question` (Klartext) aus und sendet `token + answer` zurück. */
   getCaptcha(): Observable<{ token: string; question: string; ttl_seconds: number }> {
-    return this.http.get<any>(`${this.base}/captcha`);
+    return this.http.get<{ token: string; question: string; ttl_seconds: number }>(`${this.base}/captcha`);
   }
 
   getInteractions(ideaId: string): Observable<{
@@ -156,7 +156,7 @@ export class ApiService {
     };
     follow: { count: number; mine: boolean };
   }> {
-    return this.http.get<any>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/interactions`);
+    return this.http.get<{ interest: { count: number; users: { name: string; user_key: string; status: string; approved: boolean; can_edit: boolean }[]; mine: boolean; mine_status: string | null; can_manage: boolean; }; follow: { count: number; mine: boolean }; }>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/interactions`);
   }
 
   /** Owner/Mod: Mithackende:n annehmen (status) und/oder Bearbeitungsrecht
@@ -164,7 +164,7 @@ export class ApiService {
   setTeamMember(ideaId: string, userKey: string,
                 patch: { status?: 'pending' | 'approved'; can_edit?: boolean }):
       Observable<{ ok: boolean }> {
-    return this.http.put<any>(
+    return this.http.put<{ ok: boolean }>(
       `${this.base}/ideas/${encodeURIComponent(ideaId)}/team/${encodeURIComponent(userKey)}`,
       patch,
     );
@@ -172,36 +172,36 @@ export class ApiService {
 
   /** Owner/Mod: Mithackende:n ganz aus dem Team entfernen. */
   removeTeamMember(ideaId: string, userKey: string): Observable<{ ok: boolean }> {
-    return this.http.delete<any>(
+    return this.http.delete<{ ok: boolean }>(
       `${this.base}/ideas/${encodeURIComponent(ideaId)}/team/${encodeURIComponent(userKey)}`,
     );
   }
 
   toggleInterest(ideaId: string): Observable<{ state: 'added' | 'removed' }> {
-    return this.http.post<any>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/interest`, null);
+    return this.http.post<{ state: 'added' | 'removed' }>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/interest`, null);
   }
 
   toggleFollow(ideaId: string): Observable<{ state: 'added' | 'removed' }> {
-    return this.http.post<any>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/follow`, null);
+    return this.http.post<{ state: 'added' | 'removed' }>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/follow`, null);
   }
 
   inbox(filter: 'uncategorized' | 'all' | 'categorized' = 'uncategorized'):
     Observable<{ count: number; items: InboxItem[]; filter: string }> {
     // Mod-only: der authInterceptor hängt den Auth-Header an, _require_moderator gated.
-    return this.http.get<any>(`${this.base}/inbox`, { params: { filter } });
+    return this.http.get<{ count: number; items: InboxItem[]; filter: string }>(`${this.base}/inbox`, { params: { filter } });
   }
 
   /** Vollständige Review-Vorschau einer Inbox-Einreichung (Mod). Liest direkt
    *  aus edu-sharing und funktioniert daher auch für noch nicht einsortierte
    *  Knoten, die `getIdea` mangels Cache-Eintrag mit 404 quittiert. */
   inboxItemPreview(nodeId: string): Observable<any> {
-    return this.http.get<any>(`${this.base}/inbox/${encodeURIComponent(nodeId)}/preview`);
+    return this.http.get(`${this.base}/inbox/${encodeURIComponent(nodeId)}/preview`);
   }
 
   /** Macht das Original einer Idee öffentlich lesbar — repariert die anonyme
    *  Vorschau/Render nach dem Einsortieren (Mod). */
   publishIdea(ideaId: string): Observable<{ ok: boolean; original_id: string; was_public: boolean }> {
-    return this.http.post<any>(
+    return this.http.post<{ ok: boolean; original_id: string; was_public: boolean }>(
       `${this.base}/moderation/ideas/${encodeURIComponent(ideaId)}/publish`,
       null,
     );
@@ -214,24 +214,24 @@ export class ApiService {
     hidden_stale_count?: number;
     live_count: number; cache_count: number; in_sync: boolean;
   }> {
-    return this.http.get<any>(`${this.base}/moderation/sync-diff`);
+    return this.http.get<{ missing: { id: string; title: string; challenge: string }[]; stale: { id: string; title: string; hidden?: boolean; node_status?: string; source_id?: string }[]; hidden_stale_count?: number; live_count: number; cache_count: number; in_sync: boolean; }>(`${this.base}/moderation/sync-diff`);
   }
 
   /** Karteileichen (verwaiste Cache-Ideen) aus dem App-Cache entfernen (Mod).
    *  `ids` optional → nur diese entfernen; ohne → alle echten Karteileichen. */
   cleanupSyncDiff(ids?: string[]): Observable<{ removed: number; items: { id: string; title: string }[] }> {
-    return this.http.post<any>(
+    return this.http.post<{ removed: number; items: { id: string; title: string }[] }>(
       `${this.base}/moderation/sync-diff/cleanup`,
       ids?.length ? { ids } : null,
     );
   }
 
   deleteInboxItem(id: string): Observable<unknown> {
-    return this.http.delete(`${this.base}/inbox/${encodeURIComponent(id)}`);
+    return this.http.delete<unknown>(`${this.base}/inbox/${encodeURIComponent(id)}`);
   }
 
   triggerSync(): Observable<unknown> {
-    return this.http.post(`${this.base}/admin/sync`, null);
+    return this.http.post<unknown>(`${this.base}/admin/sync`, null);
   }
 
   // ---- Moderatoren-Anzeige (read-only; verwaltet wird in edu-sharing) ----
@@ -243,7 +243,7 @@ export class ApiService {
     members: { username: string; first_name?: string; last_name?: string;
                email?: string; source: string }[];
   }> {
-    return this.http.get<any>(`${this.base}/admin/moderators`);
+    return this.http.get<{ groups: string[]; group_status: { group: string; display_name?: string | null; ok: boolean; error?: string | null; count: number }[]; count: number; managed_externally: boolean; members: { username: string; first_name?: string; last_name?: string; email?: string; source: string }[]; }>(`${this.base}/admin/moderators`);
   }
 
   // ---- Taxonomie: Events + Phasen ----
@@ -275,7 +275,7 @@ export class ApiService {
   }
 
   upsertEvent(entry: TaxonomyEntry): Observable<unknown> {
-    return this.http.put(`${this.base}/admin/events/${encodeURIComponent(entry.slug)}`, entry);
+    return this.http.put<unknown>(`${this.base}/admin/events/${encodeURIComponent(entry.slug)}`, entry);
   }
   deleteEvent(slug: string): Observable<TaxDeleteResult> {
     return this.http.delete<TaxDeleteResult>(`${this.base}/admin/events/${encodeURIComponent(slug)}`);
@@ -283,7 +283,7 @@ export class ApiService {
 
   /** Nutzungszahlen je Phase/Veranstaltung (für Lösch-Warnung + Anzeige). */
   taxonomyUsage(): Observable<{ phases: Record<string, number>; events: Record<string, number> }> {
-    return this.http.get<any>(`${this.base}/admin/taxonomy-usage`);
+    return this.http.get<{ phases: Record<string, number>; events: Record<string, number> }>(`${this.base}/admin/taxonomy-usage`);
   }
 
   // ---- Profil-Meta (App-seitige Felder pro User) ----
@@ -291,11 +291,11 @@ export class ApiService {
     return this.http.get<UserProfileMeta>(`${this.base}/me/profile-meta`);
   }
   updateMyProfileMeta(body: Partial<UserProfileMeta>): Observable<unknown> {
-    return this.http.put(`${this.base}/me/profile-meta`, body);
+    return this.http.put<unknown>(`${this.base}/me/profile-meta`, body);
   }
 
   upsertPhase(entry: TaxonomyEntry): Observable<unknown> {
-    return this.http.put(`${this.base}/admin/phases/${encodeURIComponent(entry.slug)}`, entry);
+    return this.http.put<unknown>(`${this.base}/admin/phases/${encodeURIComponent(entry.slug)}`, entry);
   }
   deletePhase(slug: string): Observable<TaxDeleteResult> {
     return this.http.delete<TaxDeleteResult>(`${this.base}/admin/phases/${encodeURIComponent(slug)}`);
@@ -303,13 +303,13 @@ export class ApiService {
 
   // ---- "Mein Bereich" ----
   myIdeas(): Observable<{ count: number; items: Idea[] }> {
-    return this.http.get<any>(`${this.base}/me/ideas`);
+    return this.http.get<{ count: number; items: Idea[] }>(`${this.base}/me/ideas`);
   }
   myFollows(): Observable<{ count: number; items: Idea[] }> {
-    return this.http.get<any>(`${this.base}/me/follows`);
+    return this.http.get<{ count: number; items: Idea[] }>(`${this.base}/me/follows`);
   }
   myInterest(): Observable<{ count: number; items: Idea[] }> {
-    return this.http.get<any>(`${this.base}/me/interest`);
+    return this.http.get<{ count: number; items: Idea[] }>(`${this.base}/me/interest`);
   }
   /** Mithack-Anfragen + Team auf den eigenen Ideen (für „Mein Bereich"). */
   myTeamRequests(): Observable<{
@@ -317,72 +317,49 @@ export class ApiService {
     items: { idea_id: string; idea_title: string; user_key: string; name: string;
              status: string; approved: boolean; can_edit: boolean; created_at: string }[];
   }> {
-    return this.http.get<any>(`${this.base}/me/team-requests`);
+    return this.http.get<{ count: number; pending: number; items: { idea_id: string; idea_title: string; user_key: string; name: string; status: string; approved: boolean; can_edit: boolean; created_at: string }[]; }>(`${this.base}/me/team-requests`);
   }
   // ---- Backup / Restore ----
   listBackups(): Observable<{
-    backups: {
-      filename: string; size: number; created_at: string;
-      metadata: any;
-    }[];
+    backups: BackupInfo[];
     keep: number; interval_hours: number; enabled: boolean;
   }> {
-    return this.http.get<any>(`${this.base}/admin/backups`);
+    return this.http.get<{ backups: BackupInfo[]; keep: number; interval_hours: number; enabled: boolean }>(`${this.base}/admin/backups`);
   }
   createBackup(): Observable<{ ok: boolean; filename: string; size: number }> {
-    return this.http.post<any>(`${this.base}/admin/backup`, null);
+    return this.http.post<{ ok: boolean; filename: string; size: number }>(`${this.base}/admin/backup`, null);
   }
   deleteBackup(filename: string): Observable<{ ok: boolean }> {
-    return this.http.delete<any>(`${this.base}/admin/backups/${encodeURIComponent(filename)}`);
+    return this.http.delete<{ ok: boolean }>(`${this.base}/admin/backups/${encodeURIComponent(filename)}`);
   }
   /** Backup-Download-URL — direkt im Browser via <a href> öffnen, mit Auth-Header.
    *  Hinweis: weil Auth-Header bei direkten <a>-Klicks nicht funktioniert, holen
    *  wir die Datei via blob, erzeugen eine Object-URL und triggern download. */
   downloadBackup(filename: string): Observable<Blob> {
+    // Kein Typargument: die blob-Überladung von HttpClient.get liefert nativ
+    // Observable<Blob>; ein Generic würde die json-Überladung erzwingen.
     return this.http.get(`${this.base}/admin/backups/${encodeURIComponent(filename)}`, {
       responseType: 'blob',
     });
   }
-  restoreBackup(file: File): Observable<{
-    ok: boolean; restored_metadata: any; size: number;
-  }> {
+  restoreBackup(file: File): Observable<RestoreResult> {
     const fd = new FormData();
     fd.append('file', file, file.name);
-    return this.http.post<any>(`${this.base}/admin/backups/restore`, fd);
+    return this.http.post<RestoreResult>(`${this.base}/admin/backups/restore`, fd);
   }
 
-  adminStats(): Observable<{
-    totals: {
-      ideas: number; themes: number; challenges: number;
-      comments: number; ratings: number;
-      interest: number; follow: number; avg_rating: number;
-    };
-    phases: { phase: string; count: number }[];
-    events: { event: string; count: number }[];
-    weekly: { week: string; count: number }[];
-    top_actors: { actor: string; count: number }[];
-    top_ideas: { id: string; title: string; rating_avg: number;
-                 rating_count: number; comment_count: number;
-                 interest_count: number }[];
-    reports: { open: number; resolved: number };
-    actions_30d: { action: string; count: number }[];
-  }> {
-    return this.http.get<any>(`${this.base}/admin/stats`);
+  adminStats(): Observable<AdminStats> {
+    return this.http.get<AdminStats>(`${this.base}/admin/stats`);
   }
 
-  myActivity(): Observable<{
-    count: number;
-    items: { id: number; ts: string; actor: string | null; is_mod: number;
-             action: string; target_type: string | null; target_id: string | null;
-             target_label: string | null; detail: any }[];
-  }> {
-    return this.http.get<any>(`${this.base}/me/activity`);
+  myActivity(): Observable<{ count: number; items: ActivityEvent[] }> {
+    return this.http.get<{ count: number; items: ActivityEvent[] }>(`${this.base}/me/activity`);
   }
 
   uploadIdeaContent(ideaId: string, file: File): Observable<{ ok: boolean; size: number; name: string }> {
     const fd = new FormData();
     fd.append('file', file, file.name);
-    return this.http.post<any>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/content`, fd);
+    return this.http.post<{ ok: boolean; size: number; name: string }>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/content`, fd);
   }
 
   uploadIdeaPreview(ideaId: string, image: File, uploadToken?: string | null): Observable<{ ok: boolean }> {
@@ -390,7 +367,7 @@ export class ApiService {
     fd.append('file', image, image.name);
     // Anonyme Einreicher weisen sich über das beim Submit erhaltene Token aus.
     if (uploadToken) fd.append('upload_token', uploadToken);
-    return this.http.post<any>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/preview`, fd);
+    return this.http.post<{ ok: boolean }>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/preview`, fd);
   }
 
   /**
@@ -405,7 +382,7 @@ export class ApiService {
     fd.append('file', file, file.name);
     // Anonyme Einreicher weisen sich über das beim Submit erhaltene Token aus.
     if (uploadToken) fd.append('upload_token', uploadToken);
-    return this.http.post<any>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/attachments/upload`, fd);
+    return this.http.post<{ ok: boolean; node_id: string; name: string; size: number; }>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/attachments/upload`, fd);
   }
 
   // ---- Idee bearbeiten ----
@@ -419,11 +396,11 @@ export class ApiService {
     event?: string;
     events?: string[];
   }): Observable<{ ok: boolean; node_id: string }> {
-    return this.http.patch<any>(`${this.base}/ideas/${encodeURIComponent(id)}`, patch);
+    return this.http.patch<{ ok: boolean; node_id: string }>(`${this.base}/ideas/${encodeURIComponent(id)}`, patch);
   }
 
   moveInboxItem(nodeId: string, targetTopicId: string): Observable<{ ok: boolean; moved_to: string }> {
-    return this.http.post<any>(
+    return this.http.post<{ ok: boolean; moved_to: string }>(
       `${this.base}/moderation/move`,
       { node_id: nodeId, target_topic_id: targetTopicId },
     );
@@ -458,17 +435,17 @@ export class ApiService {
   }
 
   deleteIdea(id: string): Observable<{ ok: boolean }> {
-    return this.http.delete<any>(`${this.base}/ideas/${encodeURIComponent(id)}`);
+    return this.http.delete<{ ok: boolean }>(`${this.base}/ideas/${encodeURIComponent(id)}`);
   }
 
   deleteAttachment(ideaId: string, attachmentId: string): Observable<{ ok: boolean }> {
-    return this.http.delete<any>(
+    return this.http.delete<{ ok: boolean }>(
       `${this.base}/ideas/${encodeURIComponent(ideaId)}/attachments/${encodeURIComponent(attachmentId)}`,
     );
   }
 
   reportIdea(id: string, reason: string): Observable<{ ok: boolean }> {
-    return this.http.post<any>(`${this.base}/ideas/${encodeURIComponent(id)}/report`, { reason });
+    return this.http.post<{ ok: boolean }>(`${this.base}/ideas/${encodeURIComponent(id)}/report`, { reason });
   }
 
   listReports(): Observable<{
@@ -476,33 +453,33 @@ export class ApiService {
     items: { id: number; idea_id: string; reason: string;
              reporter: string | null; created_at: string; title: string | null }[];
   }> {
-    return this.http.get<any>(`${this.base}/admin/reports`);
+    return this.http.get<{ count: number; items: { id: number; idea_id: string; reason: string; reporter: string | null; created_at: string; title: string | null }[]; }>(`${this.base}/admin/reports`);
   }
   resolveReport(id: number): Observable<{ ok: boolean }> {
-    return this.http.post<any>(`${this.base}/admin/reports/${id}/resolve`, null);
+    return this.http.post<{ ok: boolean }>(`${this.base}/admin/reports/${id}/resolve`, null);
   }
 
   // ---- Topic-CRUD (Mod-only) ----
   createTopic(payload: { parent_id?: string | null; title: string;
                           description?: string | null; color?: string | null }):
       Observable<{ ok: boolean; id: string }> {
-    return this.http.post<any>(`${this.base}/admin/topics`, payload);
+    return this.http.post<{ ok: boolean; id: string }>(`${this.base}/admin/topics`, payload);
   }
   editTopic(id: string, patch: { title?: string; description?: string;
                                   color?: string }): Observable<{ ok: boolean }> {
-    return this.http.patch<any>(`${this.base}/admin/topics/${encodeURIComponent(id)}`, patch);
+    return this.http.patch<{ ok: boolean }>(`${this.base}/admin/topics/${encodeURIComponent(id)}`, patch);
   }
   deleteTopic(id: string): Observable<{ ok: boolean }> {
-    return this.http.delete<any>(`${this.base}/admin/topics/${encodeURIComponent(id)}`);
+    return this.http.delete<{ ok: boolean }>(`${this.base}/admin/topics/${encodeURIComponent(id)}`);
   }
   sortTopics(items: { id: string; sort_order: number }[]):
       Observable<{ ok: boolean; updated: number }> {
-    return this.http.put<any>(`${this.base}/admin/topics/sort`, items);
+    return this.http.put<{ ok: boolean; updated: number }>(`${this.base}/admin/topics/sort`, items);
   }
   uploadTopicPreview(id: string, image: File): Observable<{ ok: boolean }> {
     const fd = new FormData();
     fd.append('file', image, image.name);
-    return this.http.post<any>(`${this.base}/admin/topics/${encodeURIComponent(id)}/preview`, fd);
+    return this.http.post<{ ok: boolean }>(`${this.base}/admin/topics/${encodeURIComponent(id)}/preview`, fd);
   }
 
   bulkMove(nodeIds: string[], targetTopicId: string): Observable<{
@@ -510,14 +487,14 @@ export class ApiService {
     succeeded: string[]; failed: { id: string; status: number; detail: string }[];
     succeeded_count: number; failed_count: number;
   }> {
-    return this.http.post<any>(`${this.base}/moderation/bulk_move`,
+    return this.http.post<{ ok: boolean; moved_to: string; succeeded: string[]; failed: { id: string; status: number; detail: string }[]; succeeded_count: number; failed_count: number; }>(`${this.base}/moderation/bulk_move`,
       { node_ids: nodeIds, target_topic_id: targetTopicId },
     );
   }
 
   renameAttachment(ideaId: string, attachmentId: string, name: string):
       Observable<{ ok: boolean; name: string }> {
-    return this.http.patch<any>(
+    return this.http.patch<{ ok: boolean; name: string }>(
       `${this.base}/ideas/${encodeURIComponent(ideaId)}/attachments/${encodeURIComponent(attachmentId)}`,
       { name },
     );
@@ -528,7 +505,7 @@ export class ApiService {
       Observable<{ ok: boolean; name: string; size: number }> {
     const fd = new FormData();
     fd.append('file', file, file.name);
-    return this.http.put<any>(
+    return this.http.put<{ ok: boolean; name: string; size: number }>(
       `${this.base}/ideas/${encodeURIComponent(ideaId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
       fd,
     );
@@ -540,17 +517,13 @@ export class ApiService {
   } = {}): Observable<{
     total: number; limit: number; offset: number;
     actions: string[];
-    items: {
-      id: number; ts: string; actor: string | null; is_mod: number;
-      action: string; target_type: string | null; target_id: string | null;
-      target_label: string | null; detail: any;
-    }[];
+    items: ActivityEvent[];
   }> {
     let params = new HttpParams();
     for (const [k, v] of Object.entries(opts)) {
       if (v !== undefined && v !== null && v !== '') params = params.set(k, String(v));
     }
-    return this.http.get<any>(`${this.base}/admin/activity`, { params });
+    return this.http.get<{ total: number; limit: number; offset: number; actions: string[]; items: ActivityEvent[] }>(`${this.base}/admin/activity`, { params });
   }
 
   ranking(opts: { sort?: 'rating' | 'comments' | 'interest' | 'likes';
@@ -578,23 +551,25 @@ export class ApiService {
     if (opts.event) params = params.set('event', opts.event);
     if (opts.limit) params = params.set('limit', String(opts.limit));
     if (opts.basis) params = params.set('basis', opts.basis);
-    return this.http.get<any>(`${this.base}/ranking`, { params });
+    return this.http.get<{ sort: string; event: string | null; snapshot_at?: string; previous_snapshot_at?: string; snapshots: string[]; items: { rank: number; prev_rank: number | null; delta: number | null; score: number; score_decay?: number; score_absolute?: number; idea: Idea | null; history: { at: string; score: number; rank: number }[]; }[]; }>(`${this.base}/ranking`, { params });
   }
 
-  rateIdea(id: string, rating: number, text = ''): Observable<unknown> {
+  rateIdea(id: string, rating: number, text = ''):
+      Observable<{ ok: boolean; rating: { avg: number; count: number; mine: number | null } }> {
     const params = new HttpParams().set('rating', rating).set('text', text);
-    return this.http.post(`${this.base}/ideas/${encodeURIComponent(id)}/rating`, null, { params });
+    return this.http.post<{ ok: boolean; rating: { avg: number; count: number; mine: number | null } }>(
+      `${this.base}/ideas/${encodeURIComponent(id)}/rating`, null, { params });
   }
 
   /** Eigene Bewertung/Like zurücknehmen (Daumen-Modus). Backend toleriert
    * den edu-sharing-500-Bug und liefert trotzdem 200. */
   unrateIdea(id: string): Observable<unknown> {
-    return this.http.delete(`${this.base}/ideas/${encodeURIComponent(id)}/rating`);
+    return this.http.delete<unknown>(`${this.base}/ideas/${encodeURIComponent(id)}/rating`);
   }
 
   /** Kontakt einer Idee setzen/ändern (leer = löschen). Nur Owner/Mod. */
   setIdeaContact(id: string, contact: string | null): Observable<{ ok: boolean; contact: string | null }> {
-    return this.http.put<any>(`${this.base}/ideas/${encodeURIComponent(id)}/contact`, { contact });
+    return this.http.put<{ ok: boolean; contact: string | null }>(`${this.base}/ideas/${encodeURIComponent(id)}/contact`, { contact });
   }
 
   // ---- App-Settings (Voting-Modus) ----
@@ -604,17 +579,17 @@ export class ApiService {
     );
   }
   updateSettings(body: Partial<import('./models').AppSettings>): Observable<unknown> {
-    return this.http.put(`${this.base}/admin/settings`, body);
+    return this.http.put<unknown>(`${this.base}/admin/settings`, body);
   }
 
   commentIdea(id: string, comment: string, replyTo?: string): Observable<unknown> {
     let params = new HttpParams().set('comment', comment);
     if (replyTo) params = params.set('reply_to', replyTo);
-    return this.http.post(`${this.base}/ideas/${encodeURIComponent(id)}/comments`, null, { params });
+    return this.http.post<unknown>(`${this.base}/ideas/${encodeURIComponent(id)}/comments`, null, { params });
   }
 
   refreshIdea(ideaId: string): Observable<{ ok: boolean }> {
-    return this.http.post<any>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/refresh`, null);
+    return this.http.post<{ ok: boolean }>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/refresh`, null);
   }
 
   /** Wechselt die Herausforderung einer Idee (Reference umhängen).
@@ -623,7 +598,7 @@ export class ApiService {
     ok: boolean; moved_to?: string; result_id?: string; old_ref_deleted?: boolean;
     no_op?: boolean; message?: string;
   }> {
-    return this.http.post<any>(
+    return this.http.post<{ ok: boolean; moved_to?: string; result_id?: string; old_ref_deleted?: boolean; no_op?: boolean; message?: string; }>(
       `${this.base}/moderation/ideas/${encodeURIComponent(ideaId)}/change-topic`,
       { new_topic_id: newTopicId },
     );
@@ -632,9 +607,10 @@ export class ApiService {
   /** Pflicht-Metadaten (Lizenz/Sprache/...) für die WLO-Freischaltung
    *  bei bestehenden Ideen (Bulk) nachpflegen. Mod-only. */
   backfillPublicationMetaBulk(limit = 200): Observable<{
-    ok: boolean; processed: number; updated: number; errors: any[];
+    ok: boolean; processed: number; updated: number;
+    errors: { id: string; title: string; error: string }[];
   }> {
-    return this.http.post<any>(
+    return this.http.post<{ ok: boolean; processed: number; updated: number; errors: { id: string; title: string; error: string }[] }>(
       `${this.base}/admin/ideas/backfill-publication-meta?limit=${limit}`,
       {},
     );
@@ -643,35 +619,30 @@ export class ApiService {
   deleteComment(commentId: string, ideaId?: string): Observable<unknown> {
     let params = new HttpParams();
     if (ideaId) params = params.set('idea_id', ideaId);
-    return this.http.delete(`${this.base}/comments/${encodeURIComponent(commentId)}`, { params });
+    return this.http.delete<unknown>(`${this.base}/comments/${encodeURIComponent(commentId)}`, { params });
   }
 
   ideaReportStatus(ideaId: string): Observable<{
     reported: boolean; created_at?: string; resolved_at?: string | null;
     status?: 'open' | 'resolved';
   }> {
-    return this.http.get<any>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/report-status`);
+    return this.http.get<{ reported: boolean; created_at?: string; resolved_at?: string | null; status?: 'open' | 'resolved'; }>(`${this.base}/ideas/${encodeURIComponent(ideaId)}/report-status`);
   }
 
   rankingRisers(opts: { sort?: 'rating' | 'comments' | 'interest' | 'likes';
                          event?: string | null; days?: number; limit?: number; }): Observable<{
-    count: number; items: any[]; latest?: string; previous?: string | null;
+    count: number; items: RankingRiser[]; latest?: string; previous?: string | null;
   }> {
     let params = new HttpParams();
     if (opts.sort) params = params.set('sort', opts.sort);
     if (opts.event) params = params.set('event', opts.event);
     if (opts.days) params = params.set('days', String(opts.days));
     if (opts.limit) params = params.set('limit', String(opts.limit));
-    return this.http.get<any>(`${this.base}/ranking/risers`, { params });
+    return this.http.get<{ count: number; items: RankingRiser[]; latest?: string; previous?: string | null }>(`${this.base}/ranking/risers`, { params });
   }
 
-  publicUserProfile(username: string): Observable<{
-    username: string;
-    stats: { ideas: number; comments: number; ratings: number; avg_rating: number };
-    last_activity?: string;
-    ideas: Idea[];
-  }> {
-    return this.http.get<any>(`${this.base}/users/${encodeURIComponent(username)}`);
+  publicUserProfile(username: string): Observable<PublicUserProfile> {
+    return this.http.get<PublicUserProfile>(`${this.base}/users/${encodeURIComponent(username)}`);
   }
 
   // ---- Hidden-Verwaltung (Mod) ----
@@ -679,18 +650,18 @@ export class ApiService {
     id: string; title: string; owner_username?: string;
     hidden_reason?: string; modified_at?: string;
   }[] }> {
-    return this.http.get<any>(`${this.base}/admin/hidden-ideas`);
+    return this.http.get<{ count: number; items: { id: string; title: string; owner_username?: string; hidden_reason?: string; modified_at?: string; }[] }>(`${this.base}/admin/hidden-ideas`);
   }
 
   hideIdea(ideaId: string, reason?: string): Observable<{ ok: boolean }> {
-    return this.http.post<any>(
+    return this.http.post<{ ok: boolean }>(
       `${this.base}/admin/ideas/${encodeURIComponent(ideaId)}/hide`,
       reason ? { reason } : {},
     );
   }
 
   unhideIdea(ideaId: string): Observable<{ ok: boolean }> {
-    return this.http.post<any>(`${this.base}/admin/ideas/${encodeURIComponent(ideaId)}/unhide`, {});
+    return this.http.post<{ ok: boolean }>(`${this.base}/admin/ideas/${encodeURIComponent(ideaId)}/unhide`, {});
   }
 
   /** Alle Ideen inkl. versteckte (Mod) — für die Sichtbarkeits-Verwaltung. */
@@ -699,15 +670,15 @@ export class ApiService {
     hidden: number; hidden_reason?: string; modified_at?: string;
   }[] }> {
     const params = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
-    return this.http.get<any>(`${this.base}/admin/all-ideas${params}`);
+    return this.http.get<{ count: number; items: { id: string; title: string; owner_username?: string; hidden: number; hidden_reason?: string; modified_at?: string; }[] }>(`${this.base}/admin/all-ideas${params}`);
   }
 
   // ---- Notifications ----
   unseenNotifications(): Observable<{ count: number; last_seen?: string }> {
-    return this.http.get<any>(`${this.base}/me/notifications/unseen`);
+    return this.http.get<{ count: number; last_seen?: string }>(`${this.base}/me/notifications/unseen`);
   }
 
   markNotificationsSeen(): Observable<{ ok: boolean; last_seen: string }> {
-    return this.http.post<any>(`${this.base}/me/notifications/seen`, null);
+    return this.http.post<{ ok: boolean; last_seen: string }>(`${this.base}/me/notifications/seen`, null);
   }
 }

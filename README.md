@@ -258,7 +258,7 @@ Kürzeste Zusammenfassung:
 | `EDU_REPO_API` | optional | API-Basis; leer = automatisch aus `EDU_REPO_BASE_URL` abgeleitet (`<base>/edu-sharing/rest`) |
 | `MODERATION_FALLBACK_GROUPS` | optional | edu-sharing-Gruppen mit Mod-Rechten (einzige Mod-Quelle) |
 | `BACKUP_*` / `BACKUP_AUTO_RESTORE_MARKER` | optional | Auto-Backup-Intervall, Retention, Auto-Restore-Marker |
-| `SYNC_INTERVAL_SECONDS` / `UPLOAD_*_MAX_BYTES` | optional | sinnvolle Defaults vorhanden |
+| `SYNC_NIGHTLY_HOUR` / `UPLOAD_*_MAX_BYTES` / `THREADPOOL_*` | optional | Sync läuft nur nachts + manuell; Thread-Pools explizit dimensioniert (s. config.py); sinnvolle Defaults vorhanden |
 | `B_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | optional | reserviert für künftige LLM-Funktionen |
 
 > Das **Bewertungssystem** (Sterne vs. Daumen hoch) ist **keine** Env-Variable,
@@ -324,7 +324,10 @@ Verfügbare Image-Tags:
 | Datei | Inhalt |
 |---|---|
 | `main.py` | FastAPI-App + Lifespan (Auto-Restore vor `init_db`, Sync-Loop, Auto-Backup) |
-| `routes.py` | alle API-Endpoints (Ideen, Topics, Ranking, Moderation, Backup, Users, Notifications, Captcha) |
+| `routes.py` | Read-/Query-Kern (Ideen-Liste/-Detail, Meta-Facetten, Users, Bootstrap) + mountet alle Domänen-Router |
+| `routes_<domäne>.py` | ein Router pro Domäne: `submit`, `idea_edit`, `attachments`, `feedback` (Rating/Kommentare), `participation` (Team/Interesse/Folgen), `ranking` (Top-Liste/Risers), `reports`, `settings`, `taxonomy` (Phasen/Events), `topics`, `moderation` (hide/move/publish), `inbox` (+sync-diff), `mod_dashboard` (Meldungen/Stats/Aktivität), `me`, `admin` (Sync/Backup), `captcha`, `ops` (health/status) |
+| `routes_common.py` | geteilte Route-Helfer (Idea-Serialisierung, Mod-Gate, Upload-Token, Settings, Aktivitäts-Log) |
+| `auth.py` | Auth-Prädikate (`verify_login`, `is_moderator`, `is_owner_or_mod`, `can_edit_idea`) + Mod-Status-Cache |
 | `db.py` | SQLite-Schema + idempotente Migrationen |
 | `sync.py` | edu-sharing-Sync, Single-Node-Refresh, Trend-Snapshots, Geisterzeilen-Cleanup |
 | `backup.py` | Backup/Restore-Logik + Auto-Restore beim Erststart |

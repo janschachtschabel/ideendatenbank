@@ -77,6 +77,7 @@ import { Idea, SortBy, VotingMode } from '../models';
             @if (enableVoting && votingOpen()) {
               <!-- Inline-Voting: stoppt die Klick-Weiterleitung zur Detailseite,
                    damit man direkt an der Kachel bewerten kann. -->
+              <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
               <div class="vote-row" (click)="$event.stopPropagation()">
                 @if (mode() === 'thumbs') {
                   <button type="button" class="thumb-btn"

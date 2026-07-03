@@ -173,7 +173,9 @@ def _comment_count_from_node(node: dict) -> int:
         return 0
 
 
-async def _upsert_topic(con, node: dict, parent_id: str | None) -> None:
+def _upsert_topic(con, node: dict, parent_id: str | None) -> None:
+    # Bewusst SYNCHRON: läuft immer unter einer offenen SQLite-Connection —
+    # als `def` ist ein Netz-await unter dem Lock strukturell unmöglich.
     ref = (node.get("ref") or {}).get("id")
     if not ref:
         return
@@ -212,7 +214,7 @@ async def _upsert_topic(con, node: dict, parent_id: str | None) -> None:
     )
 
 
-async def _upsert_idea(
+def _upsert_idea(
     con,
     node: dict,
     *,
@@ -221,7 +223,14 @@ async def _upsert_idea(
     main_content_id: str | None,
 ) -> None:
     """Schreibt eine Idee in den Cache. `kind` ist immer 'io' im neuen Modell;
-    der Parameter bleibt aus historischen Gründen optional, default 'io'."""
+    der Parameter bleibt aus historischen Gründen optional, default 'io'.
+
+    Bewusst SYNCHRON (kein `async`): alle Aufrufer (run_sync Phase 2,
+    refresh_idea, _reference_into_collection) halten hier eine offene SQLite-
+    Connection. Ein edu-sharing-Roundtrip an dieser Stelle würde den DB-Lock
+    über bis zu 30 s Netz-I/O halten (busy_timeout-Kaskade → App-weite Hänger).
+    Als `def` ist das per Sprache ausgeschlossen — Rating/commentCount kommen
+    ausschließlich aus dem übergebenen `node`."""
     ref = (node.get("ref") or {}).get("id")
     if not ref:
         return
@@ -229,22 +238,21 @@ async def _upsert_idea(
     kws = _keywords(props)
     phase, events, categories, other = _classify_keywords(kws)
 
-    # Rating + commentCount live on the main ccm:io; fetch once and reuse.
-    rating_avg = 0.0
-    rating_count = 0
-    rating_sum = 0.0
-    comment_count = 0
+    # Rating + commentCount kommen direkt vom übergebenen Knoten. Der frühere
+    # Live-Nachlade-Zweig für kind='collection'-Ideen (main_content_id != ref →
+    # node_metadata-Await) ist im heutigen Modell tot (jede Idee ist ein ccm:io,
+    # alle Aufrufer übergeben main_content_id == ref) und wurde entfernt, damit
+    # diese Funktion synchron sein kann (s. Docstring). Falls die Bedingung doch
+    # je auftritt: laut warnen und mit den Knoten-Daten weiterarbeiten.
     if main_content_id and main_content_id != ref:
-        try:
-            io_meta = await edu_sharing.client.node_metadata(main_content_id)
-            io_node = io_meta.get("node") or {}
-            rating_avg, rating_count, rating_sum = _rating(io_node)
-            comment_count = _comment_count_from_node(io_node)
-        except Exception as e:
-            log.warning("metadata fetch failed for %s: %s", main_content_id, e)
-    else:
-        rating_avg, rating_count, rating_sum = _rating(node)
-        comment_count = _comment_count_from_node(node)
+        log.warning(
+            "_upsert_idea: main_content_id %s != ref %s — Live-Nachladen unter "
+            "offener DB-Connection ist verboten; nutze Knoten-Daten",
+            main_content_id,
+            ref,
+        )
+    rating_avg, rating_count, rating_sum = _rating(node)
+    comment_count = _comment_count_from_node(node)
 
     title = node.get("title") or _first(props, "cm:name") or "(ohne Titel)"
     description = (
@@ -416,17 +424,22 @@ async def refresh_idea(idea_id: str, *, auth_header: str | None = None) -> bool:
     # Sekunden lang exklusiven Lock hält.
     import sqlite3
 
+    def _write_refreshed_row():
+        with connect() as con:
+            _upsert_idea(
+                con,
+                node,
+                kind="io",
+                topic_id=parent_id,
+                main_content_id=idea_id,
+            )
+
     last_err: Exception | None = None
     for attempt in range(3):
         try:
-            with connect() as con:
-                await _upsert_idea(
-                    con,
-                    node,
-                    kind="io",
-                    topic_id=parent_id,
-                    main_content_id=idea_id,
-                )
+            # Threadpool: SQLite-Write nach User-Aktionen (Rating/Edit/Upload)
+            # darf den Event-Loop nicht blockieren, falls der Lock gerade busy ist.
+            await asyncio.to_thread(_write_refreshed_row)
             return True
         except sqlite3.OperationalError as e:
             if "locked" not in str(e).lower():
@@ -439,6 +452,30 @@ async def refresh_idea(idea_id: str, *, auth_header: str | None = None) -> bool:
             return False
     log.warning("refresh_idea: nach 3 Retries gescheitert für %s: %s", idea_id, last_err)
     return False
+
+
+def seconds_until_hour(now: datetime, hour: int) -> float:
+    """Seconds from ``now`` until the next occurrence of ``hour``:00 UTC.
+
+    If ``hour``:00 already passed today (or is exactly ``now``), returns the
+    duration until ``hour``:00 tomorrow — so the nightly scheduler never
+    double-fires when it wakes up right on the hour.
+    """
+    target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+def cache_is_empty() -> bool:
+    """True when the idea cache holds no rows.
+
+    Used once at startup to detect a fresh volume (no persisted DB and no backup
+    restored) and trigger a one-off initial sync — otherwise the app would stay
+    empty until the nightly run.
+    """
+    with connect() as con:
+        return con.execute("SELECT COUNT(*) FROM idea").fetchone()[0] == 0
 
 
 async def run_sync(*, wait: bool = True) -> dict:
@@ -576,85 +613,95 @@ async def _run_sync_locked() -> dict:
                         attach_writes.append((sub_id, attach_of))
 
         # ---- PHASE 2: NUR SCHREIBEN (synchron, kurzer Lock, KEIN await) ------
-        # Jetzt EINE Connection öffnen und alles am Stück schreiben. In diesem
-        # Block gibt es KEIN `await` auf Netzwerk-I/O → der SQLite-Write-Lock
-        # wird nur für die millisekunden-schnellen Schreibvorgänge gehalten,
-        # nicht über die edu-sharing-Roundtrips. (`_upsert_topic`/`_upsert_idea`
-        # sind zwar `async`, suspendieren auf diesem Pfad aber nicht:
-        # main_content_id == ref → kein node_metadata-Await; sie laufen rein
-        # synchron durch.) Ein einziger Commit am Blockende reicht.
-        with connect() as con:
-            for node, parent_id in topic_writes:
-                await _upsert_topic(con, node, parent_id=parent_id)
-                topics_seen += 1
-            for ref_node, chid in idea_writes:
-                ref_id = (ref_node.get("ref") or {}).get("id")
-                try:
-                    await _upsert_idea(
-                        con,
-                        ref_node,
-                        kind="io",
-                        topic_id=chid,
-                        main_content_id=ref_id,
+        # EINE Connection öffnen und alles am Stück schreiben. Der Block ist rein
+        # synchron (`_upsert_topic`/`_upsert_idea` sind bewusst SYNCHRONE
+        # Funktionen — ein Netz-await unter dem Lock ist strukturell unmöglich)
+        # und läuft im Threadpool: so bleibt der Event-Loop auch während des
+        # Write-Bursts frei für parallele Requests. Ein Commit am Blockende.
+        def _phase2_write():
+            nonlocal topics_seen, ideas_seen
+            with connect() as con:
+                for node, parent_id in topic_writes:
+                    _upsert_topic(con, node, parent_id=parent_id)
+                    topics_seen += 1
+                for ref_node, chid in idea_writes:
+                    ref_id = (ref_node.get("ref") or {}).get("id")
+                    try:
+                        _upsert_idea(
+                            con,
+                            ref_node,
+                            kind="io",
+                            topic_id=chid,
+                            main_content_id=ref_id,
+                        )
+                        ideas_seen += 1
+                    except Exception as e:
+                        log.warning("sync upsert ref %s failed: %s", ref_id, e)
+                        skipped.append(f"idea-ref:{ref_id}")
+                for sub_id, attach_of in attach_writes:
+                    con.execute(
+                        "UPDATE idea SET attachment_folder_id=? WHERE id=?",
+                        (sub_id, attach_of),
                     )
-                    ideas_seen += 1
-                except Exception as e:
-                    log.warning("sync upsert ref %s failed: %s", ref_id, e)
-                    skipped.append(f"idea-ref:{ref_id}")
-            for sub_id, attach_of in attach_writes:
+
+                # Trend-Snapshot: aktuellen Stand der Top-Listen je Event/Sort
+                # persistieren. Throttled auf SNAPSHOT_MIN_INTERVAL, damit das
+                # 30er-Limit der ranking_snapshot-Tabelle nicht in 2.5h voll ist.
+                if _should_capture_snapshot(con):
+                    _capture_ranking_snapshot(con, _iso_now())
+
+                # Geisterzeilen aufräumen: Inbox-Originale (deren id auch als
+                # original_id eines Reference-Eintrags vorkommt) gehören NICHT
+                # in den Public-Cache — der Reference-Eintrag repräsentiert sie
+                # in den Challenges. So bleibt die Idee-Liste pro Sync sauber,
+                # auch wenn ein Knoten umgehängt wurde.
                 con.execute(
-                    "UPDATE idea SET attachment_folder_id=? WHERE id=?",
-                    (sub_id, attach_of),
+                    """DELETE FROM idea WHERE id IN (
+                           SELECT original_id FROM idea
+                           WHERE original_id IS NOT NULL
+                       )"""
+                )
+                con.execute("DELETE FROM idea_fts WHERE id NOT IN (SELECT id FROM idea)")
+
+                # Activity-Log gleich mit ausdünnen — billig und passt zum Sync-Tick.
+                _prune_activity_log(con)
+
+                con.execute(
+                    """INSERT INTO sync_log (started_at,finished_at,topics_seen,ideas_seen,error)
+                       VALUES (?,?,?,?,?)""",
+                    (started, _iso_now(), topics_seen, ideas_seen, None),
                 )
 
-            # Trend-Snapshot: aktuellen Stand der Top-Listen je Event/Sort
-            # persistieren. Throttled auf SNAPSHOT_MIN_INTERVAL, damit das
-            # 30er-Limit der ranking_snapshot-Tabelle nicht in 2.5h voll ist.
-            if _should_capture_snapshot(con):
-                _capture_ranking_snapshot(con, _iso_now())
-
-            # Geisterzeilen aufräumen: Inbox-Originale (deren id auch als
-            # original_id eines Reference-Eintrags vorkommt) gehören NICHT
-            # in den Public-Cache — der Reference-Eintrag repräsentiert sie
-            # in den Challenges. So bleibt die Idee-Liste pro Sync sauber,
-            # auch wenn ein Knoten umgehängt wurde.
-            con.execute(
-                """DELETE FROM idea WHERE id IN (
-                       SELECT original_id FROM idea
-                       WHERE original_id IS NOT NULL
-                   )"""
-            )
-            con.execute("DELETE FROM idea_fts WHERE id NOT IN (SELECT id FROM idea)")
-
-            # Activity-Log gleich mit ausdünnen — billig und passt zum Sync-Tick.
-            _prune_activity_log(con)
-
-            con.execute(
-                """INSERT INTO sync_log (started_at,finished_at,topics_seen,ideas_seen,error)
-                   VALUES (?,?,?,?,?)""",
-                (started, _iso_now(), topics_seen, ideas_seen, None),
-            )
+        await asyncio.to_thread(_phase2_write)
 
         # Nach dem Sync-Write die WAL-Datei aktiv truncaten. Der Auto-Checkpoint
         # (PASSIVE) schreibt zwar zurück, lässt die .db-wal-Datei aber auf ihrer
         # Größe stehen → über viele Sync-Läufe wächst sie und bremst JEDEN Read
         # (jeder Query muss zusätzlich die WAL durchsuchen). TRUNCATE setzt sie
         # auf 0 zurück. Best-effort: hält gerade ein Reader einen Lock, liefert
-        # SQLite "busy" — der nächste Lauf holt es nach.
-        try:
+        # SQLite "busy" — der nächste Lauf holt es nach. Threadpool: TRUNCATE
+        # wartet ggf. auf aktive Reader und darf den Loop dabei nicht anhalten.
+        def _truncate_wal():
             with connect() as con:
                 con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+        try:
+            await asyncio.to_thread(_truncate_wal)
         except Exception as _ce:
             log.debug("post-sync wal_checkpoint(TRUNCATE) übersprungen: %s", _ce)
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         log.exception("sync failed")
-        with connect() as con:
-            con.execute(
-                """INSERT INTO sync_log (started_at,finished_at,topics_seen,ideas_seen,error)
-                   VALUES (?,?,?,?,?)""",
-                (started, _iso_now(), topics_seen, ideas_seen, err),
-            )
+
+        def _log_sync_error():
+            with connect() as con:
+                con.execute(
+                    """INSERT INTO sync_log (started_at,finished_at,topics_seen,ideas_seen,error)
+                       VALUES (?,?,?,?,?)""",
+                    (started, _iso_now(), topics_seen, ideas_seen, err),
+                )
+
+        await asyncio.to_thread(_log_sync_error)
 
     return {
         "started_at": started,

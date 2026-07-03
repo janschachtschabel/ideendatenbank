@@ -7,7 +7,7 @@ sich daher, um den ES-Write isoliert zu prüfen.
 
 from __future__ import annotations
 
-from app import routes
+from app import routes_common
 from app.db import connect
 
 
@@ -40,7 +40,7 @@ def test_unrate_deletes_rating(client, fake_es, user_headers, seed_idea):
 
 
 def test_rate_blocked_when_rating_globally_disabled(client, fake_es, user_headers, seed_idea):
-    routes._set_setting("rating_enabled", "0")
+    routes_common._set_setting("rating_enabled", "0")
     seed_idea("i1")
     r = client.post("/api/v1/ideas/i1/rating", params={"rating": 4}, headers=user_headers)
     assert r.status_code == 409

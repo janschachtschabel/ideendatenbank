@@ -54,7 +54,11 @@ asyncio-Task genügt), kein Redis (In-Memory-Rate-Limit reicht für Single-Insta
 | Datei | Inhalt |
 |---|---|
 | `main.py` | FastAPI-App + Lifespan (Auto-Restore, Sync-Loop, Backup-Loop), mountet das Frontend-Bundle |
-| `routes.py` | Alle Endpoints (Ideen, Topics, Ranking, Moderation, Backup, Users, Notifications, Captcha) + Auth-Gates |
+| `routes.py` | Read-/Query-Kern (Ideen-Liste/-Detail, Meta-Facetten, Users, Bootstrap) + Aggregation aller Domänen-Router |
+| `routes_<domäne>.py` | ein Router pro Domäne, per `include_router` gemountet (Pfade unverändert): `submit`, `idea_edit` (PATCH/DELETE/refresh/backfill), `attachments` (content/preview/Anhänge), `feedback` (Rating/Kommentare), `participation` (contact/interest/follow/team), `ranking` (Top-Liste mit Verfalls-Score + Risers), `reports`, `settings`, `taxonomy` (Phasen/Events), `topics` (Admin-CRUD), `moderation` (hide/unhide/move/publish), `inbox` (Postfach + sync-diff), `mod_dashboard` (Meldungen/Statistik/Aktivität/Moderatoren), `me`, `admin` (Sync-Trigger/Backup), `captcha`, `ops` (health/ready/status) |
+| `routes_common.py` | geteilte Route-Helfer ohne Decorator (Idea-Serialisierung, `_require_moderator`, Upload-Token, Settings-Zugriff, Aktivitäts-Log) — importiert nie ein Route-Modul (zyklenfrei) |
+| `auth.py` | Auth-Prädikate (`verify_login`, `is_moderator`, `is_owner_or_mod`, `can_edit_idea`) + gedeckelter Mod-Status-Cache |
+| `caches.py` | Eviction-Helfer für gedeckelte TTL-Caches |
 | `db.py` | SQLite-Schema, `connect()` mit PRAGMAs, idempotente Migrationen |
 | `sync.py` | edu-sharing-Voll-Sync, `refresh_idea` (Single-Node-Refresh), Verfalls-Score, Trend-Snapshots, Geisterzeilen-Cleanup |
 | `edu_sharing.py` | Dünner REST-Client (`EduSharingClient`) |
@@ -102,7 +106,9 @@ einem `try/except` aus, sodass alte DBs beim Deploy automatisch mitziehen.
 
 ### Sync-Worker (Periodischer Voll-Sync)
 
-Ein asyncio-Task läuft alle `SYNC_INTERVAL_SECONDS` (Default 900 s = 15 min),
+Ein asyncio-Task läuft einmal pro Nacht zur UTC-Stunde `SYNC_NIGHTLY_HOUR`
+(Default 1) — bewusst NICHT beim App-Start (Ausnahme: leerer Cache = frisches
+Volume → einmaliger Initial-Sync), zusätzlich manuell über `POST /admin/sync`;
 serialisiert über einen `asyncio.Lock` (kein Doppellauf). Der Walk geht
 Root-Sammlung → Themenbereiche → Herausforderungen → **Reference-Knoten** und
 schreibt jede Idee per `_upsert_idea` (`INSERT … ON CONFLICT DO UPDATE`) in den
@@ -222,8 +228,13 @@ beliebigen Fremdseiten. Einbettung + alle Attribute:
 | Pfad | Inhalt |
 |---|---|
 | `app-shell/app-shell.component.ts` | Shell: Routing über `view`-Signal, Topbar, Themen-Drilldown, Filter, Theme-Switch |
-| `app-shell/idea-detail.component.ts` | Detailseite: Kommentare, Bewertung, Anhänge, Sidebar, Bearbeiten |
-| `app-shell/moderation.component.ts` | Mod-Bereich (gruppierte Pill-/Dropdown-Navigation) |
+| `app-shell/idea-detail.component.ts` | Detailseite: Anhänge, Team-Sidebar, Bearbeiten |
+| `app-shell/comment-thread.component.ts` · `vote-box.component.ts` · `report-problem-modal.component.ts` | Detailseite: Kommentar-Thread · Bewertungs-Karte (Sterne/Daumen) · Problem-melden-Dialog |
+| `app-shell/moderation.component.ts` | Mod-Bereich: Shell (Pill-/Dropdown-Navigation, Zähler-Badges, globaler Bewertungsmodus) — die Tabs sind eigene Kinder ↓ |
+| `app-shell/inbox-list.component.ts` · `sync-diff.component.ts` | Mod: Postfach-Triage (Bulk-Move, Lazy-Vorschau; eigene Topic-Maps) · Sync-Differenz (Karteileichen bereinigen/wieder einsortieren) |
+| `app-shell/stats-dashboard.component.ts` · `reports-list.component.ts` · `activity-log.component.ts` | Mod: Statistik · Meldungen · Aktivitäts-Log (TSV-Export) |
+| `app-shell/topic-editor.component.ts` · `taxonomy-editor.component.ts` | Mod: Themenbereiche · Veranstaltungen/Phasen (inkl. Event-Share-Dialog) |
+| `app-shell/content-manager.component.ts` · `mods-list.component.ts` · `backup-management.component.ts` | Mod: Inhalte verwalten (verstecken/löschen/reparieren) · Moderatoren (read-only) · Backups |
 | `app-shell/profile.component.ts` | „Mein Bereich" (Feed, eigene Ideen, Mithacken, Folgen, Profil) |
 | `app-shell/public-profile.component.ts` | öffentliches Profil |
 | `app-shell/ranking.component.ts` | Trend-Rangliste + Top-Steiger |

@@ -44,10 +44,17 @@ class Settings(BaseSettings):
 
     # SQLite
     sqlite_path: Path = Path("./data/ideendb.sqlite")
-    # 15 Min statt 5: reduziert die edu-sharing-Sync-Last. Schreibvorgänge lösen
-    # ohnehin refresh_idea (Einzelknoten) aus → Frische bleibt. Per
-    # SYNC_INTERVAL_SECONDS pro Umgebung überschreibbar.
+    # DEPRECATED: Der Sync läuft nicht mehr im Intervall, sondern einmal nachts
+    # (siehe `sync_nightly_hour`). Feld bleibt nur für Backward-Compat bereits
+    # gesetzter SYNC_INTERVAL_SECONDS-Env-Werte; es wird NICHT mehr ausgewertet.
     sync_interval_seconds: int = 900
+    # Uhrzeit (UTC-Stunde 0–23) des nächtlichen Voll-Syncs. Der Sync läuft
+    # bewusst NICHT beim App-Start (konkurriert sonst mit den ersten Requests)
+    # und nicht im Minutentakt: die SQLite-Cache-Datei überlebt Restarts auf dem
+    # Volume, und Schreibvorgänge lösen refresh_idea (Einzelknoten) aus. Ausnahme:
+    # ist der Cache beim Start LEER (frisches Volume ohne Backup), läuft einmalig
+    # ein Initial-Sync. Manueller Voll-Sync jederzeit über POST /admin/sync.
+    sync_nightly_hour: int = 1
 
     # Rating-Verfall (exponentiell mit Mindestgewicht). Ältere Stimmen verlieren
     # mit der Zeit an Gewicht (w(t) = max(floor, 0.5^(t/halflife))), damit die
@@ -97,6 +104,18 @@ class Settings(BaseSettings):
     b_api_key: str | None = Field(default=None, alias="B_API_KEY")
     llm_base_url: str = "https://b-api.prod.openeduhub.net/api/v1/llm/openai"
     llm_model: str = "gpt-4.1-mini"
+
+    # Thread-Pools explizit dimensionieren (statt CPU-abhängiger Defaults):
+    # - `threadpool_db_workers`: asyncio-Default-Executor, über den ALLE
+    #   `asyncio.to_thread`-DB-Zugriffe laufen. Python-Default ist
+    #   min(32, CPU+4) — auf kleinen Containern (1–2 vCPU) nur 5–6 Threads;
+    #   bei Event-Verkehrsspitzen stauen sich dort sonst die async DB-Pfade,
+    #   während sync-Routen (eigener Pool) flott bleiben → schwer
+    #   diagnostizierbare Teil-Verlangsamung.
+    # - `threadpool_sync_routes`: anyio-Limiter, der alle sync-`def`-Routen
+    #   (Listen/Meta/Ranking/Bootstrap) trägt. Bibliotheks-Default: 40.
+    threadpool_db_workers: int = 32
+    threadpool_sync_routes: int = 64
 
     # Moderation — Mitglieder einer dieser edu-sharing-Gruppen haben Zugriff
     # auf Taxonomie-Verwaltung, Inbox-Postfach, Verschieben, fremde Ideen

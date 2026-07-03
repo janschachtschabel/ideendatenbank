@@ -12,7 +12,7 @@ import re
 import pytest
 from fastapi import HTTPException
 
-from app import routes
+from app import routes_captcha
 
 
 def _solve(question: str) -> int:
@@ -35,15 +35,15 @@ def test_valid_captcha_is_accepted_and_single_use(client):
     body = client.get("/api/v1/captcha").json()
     answer = _solve(body["question"])
     # Gültig → keine Exception.
-    routes._captcha_verify(body["token"], str(answer))
+    routes_captcha._captcha_verify(body["token"], str(answer))
     # Single-Use: dasselbe Token ein zweites Mal → abgelehnt.
     with pytest.raises(HTTPException):
-        routes._captcha_verify(body["token"], str(answer))
+        routes_captcha._captcha_verify(body["token"], str(answer))
 
 
 def test_unknown_captcha_token_is_rejected(client):
     with pytest.raises(HTTPException):
-        routes._captcha_verify("bogus-token", "0")
+        routes_captcha._captcha_verify("bogus-token", "0")
 
 
 def test_anonymous_submit_without_captcha_is_rejected(client, fake_es):

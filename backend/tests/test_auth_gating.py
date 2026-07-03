@@ -6,7 +6,11 @@ edu-sharing-Gruppenmitgliedschaft (hier über FakeES.mods gesteuert).
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+
+from app import auth
 
 # Repräsentative Mod-only-Routen ohne Pflicht-Parameter, sodass der Auth-Check
 # (nicht die Request-Validierung) das Ergebnis bestimmt.
@@ -14,6 +18,18 @@ MOD_ONLY = [
     ("GET", "/api/v1/inbox"),
     ("GET", "/api/v1/moderation/sync-diff"),
     ("POST", "/api/v1/moderation/sync-diff/cleanup"),
+    # Audit-Nachtrag: body-lose Mod-Routen der bislang ungetesteten Gruppen
+    # (Backup, Sync, Taxonomie, Topics). Routen MIT Pflicht-Body gehören nicht
+    # in diese Parametrisierung (FastAPI validiert den Body VOR dem Auth-Check
+    # im Handler → 422 statt 401); deren Auth-Denial testen die jeweiligen
+    # Testdateien mit gültigem Body.
+    ("POST", "/api/v1/admin/backup"),
+    ("GET", "/api/v1/admin/backups"),
+    ("POST", "/api/v1/admin/sync"),
+    ("GET", "/api/v1/admin/taxonomy-usage"),
+    ("DELETE", "/api/v1/admin/events/some-event"),
+    ("DELETE", "/api/v1/admin/phases/some-phase"),
+    ("DELETE", "/api/v1/admin/topics/some-topic"),
 ]
 
 
@@ -89,6 +105,48 @@ def test_app_db_write_rejected_when_es_refuses_credentials(client, fake_es):
         headers={"Authorization": "Basic " + _b64("user:wrong")},
     )
     assert r.status_code == 401
+
+
+# --- Owner-Gating: fail-closed by default (Impersonation-Schutz) -------------
+# Direkte Unit-Tests der Auth-Prädikate: der Owner-/Mitwirkenden-Treffer beruht
+# auf dem NUR dekodierten Basic-Usernamen und darf ohne zugesicherte
+# Passwort-Verifikation (`verified=True`) NICHT greifen — sonst wäre eine Idee
+# per bloßem Username (falsches Passwort) editier-/löschbar.
+
+
+def test_is_owner_or_mod_fail_closed_without_verified(seed_idea):
+    seed_idea("i1", owner_username="alice")
+    header = "Basic " + _b64("alice:pw")
+    # Default (verified=False): Owner-Pfad gesperrt → nur (False, user, False).
+    allowed, user, is_mod = asyncio.run(auth.is_owner_or_mod("i1", header))
+    assert allowed is False
+    assert is_mod is False
+    assert user == "alice"
+    # Explizit verifiziert (Aufrufer hat das Passwort geprüft): Owner kommt durch.
+    allowed_v, _u, is_mod_v = asyncio.run(auth.is_owner_or_mod("i1", header, verified=True))
+    assert allowed_v is True
+    assert is_mod_v is False
+
+
+def test_can_edit_idea_collaborator_fail_closed(seed_idea, seed_interaction):
+    """Auch der Mitwirkenden-Treffer (idea_interaction) ist fail-closed."""
+    seed_idea("i1", owner_username="owner")
+    seed_interaction("i1", "helper", status="approved", can_edit=1)
+    header = "Basic " + _b64("helper:pw")
+    assert asyncio.run(auth.can_edit_idea("i1", header))[0] is False
+    assert asyncio.run(auth.can_edit_idea("i1", header, verified=True))[0] is True
+
+
+def test_is_owner_or_mod_grants_moderator_regardless_of_verified(seed_idea, fake_es):
+    """Moderatoren (my_memberships-verifiziert) kommen unabhängig von `verified`
+    durch — der fail-closed-Default betrifft nur den Owner-/Mitwirkenden-Pfad."""
+    seed_idea("i1", owner_username="someone-else")
+    fake_es.mods.add("mod")
+    header = "Basic " + _b64("mod:pw")
+    allowed, user, is_mod = asyncio.run(auth.is_owner_or_mod("i1", header))
+    assert allowed is True
+    assert is_mod is True
+    assert user == "mod"
 
 
 def _b64(raw: str) -> str:

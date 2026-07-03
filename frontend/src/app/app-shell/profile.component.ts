@@ -6,6 +6,16 @@ import { Idea, UserProfileMeta, PROFILE_ROLE_GROUPS } from '../models';
 import { VotingService } from '../voting.service';
 import { ShareDialogComponent } from './share-dialog.component';
 
+/** Ein Eintrag des „Was ist neu"-Feeds (GET /me/notifications). Schmaler als
+ *  ActivityEvent (kein is_mod). `detail` ist konstruktiv beliebiges JSON je
+ *  Aktion — daher bewusst `any` (defensive Auswertung in openTarget). */
+interface FeedEvent {
+  id: number; ts: string; actor: string | null; action: string;
+  target_type: string | null; target_id: string | null; target_label: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  detail: any;
+}
+
 type Tab = 'feed' | 'mine' | 'follows' | 'interest' | 'requests' | 'settings';
 
 interface TeamRequest {
@@ -267,7 +277,8 @@ interface TeamRequest {
           } @else {
             <div class="feed">
               @for (e of feed(); track e.id) {
-                <div class="feed-row" (click)="openTarget(e)">
+                <div class="feed-row" role="button" tabindex="0"
+                     (click)="openTarget(e)" (keyup.enter)="openTarget(e)">
                   <span class="feed-time">{{ formatTime(e.ts) }}</span>
                   <span class="feed-icon">
                     @switch (e.action) {
@@ -349,7 +360,8 @@ interface TeamRequest {
           } @else {
             <div class="grid">
               @for (i of mine(); track i.id) {
-                <article class="tile" (click)="ideaSelected.emit(i)">
+                <article class="tile" role="button" tabindex="0"
+                         (click)="ideaSelected.emit(i)" (keyup.enter)="ideaSelected.emit(i)">
                   @if (i.phase) { <span class="badge">{{ i.phase }}</span> }
                   @if (pendingForIdea(i.id); as n) {
                     <button class="mine-req" title="Offene Mithack-Anfragen freigeben/ablehnen"
@@ -378,7 +390,8 @@ interface TeamRequest {
           } @else {
             <div class="grid">
               @for (i of follows(); track i.id) {
-                <article class="tile" (click)="ideaSelected.emit(i)">
+                <article class="tile" role="button" tabindex="0"
+                         (click)="ideaSelected.emit(i)" (keyup.enter)="ideaSelected.emit(i)">
                   @if (i.phase) { <span class="badge">{{ i.phase }}</span> }
                   <h3>{{ i.title }}</h3>
                   <div class="meta">
@@ -401,7 +414,8 @@ interface TeamRequest {
           } @else {
             <div class="grid">
               @for (i of interest(); track i.id) {
-                <article class="tile" (click)="ideaSelected.emit(i)">
+                <article class="tile" role="button" tabindex="0"
+                         (click)="ideaSelected.emit(i)" (keyup.enter)="ideaSelected.emit(i)">
                   <div class="team-status">
                     @if (i.my_status === 'approved') {
                       <span class="badge team-ok">✓ Angenommen</span>
@@ -436,7 +450,8 @@ interface TeamRequest {
             </p>
             @for (g of requestsByIdea(); track g.idea_id) {
               <section class="req-group">
-                <h3 class="req-idea" (click)="openIdeaById(g.idea_id)">
+                <h3 class="req-idea" role="button" tabindex="0"
+                    (click)="openIdeaById(g.idea_id)" (keyup.enter)="openIdeaById(g.idea_id)">
                   {{ g.idea_title }}
                 </h3>
                 <ul class="req-list">
@@ -585,11 +600,7 @@ export class ProfileComponent implements OnInit {
     });
     return list;
   }
-  feed = signal<{
-    id: number; ts: string; actor: string | null; action: string;
-    target_type: string | null;
-    target_id: string | null; target_label: string | null; detail: any;
-  }[]>([]);
+  feed = signal<FeedEvent[]>([]);
 
   // ----- Profil-Felder (settings-Tab) -----
   meta: UserProfileMeta = {
@@ -676,7 +687,8 @@ export class ProfileComponent implements OnInit {
 
   /** Öffnet eine Idee nur anhand der ID (Shell lädt die Detailseite). */
   openIdeaById(id: string) {
-    this.ideaSelected.emit({ id } as any);
+    // B-lite-Stub: nur die id — die Detailseite lädt den Rest selbst nach.
+    this.ideaSelected.emit({ id } as Idea);
   }
 
   reloadAll() {
@@ -745,7 +757,7 @@ export class ProfileComponent implements OnInit {
     };
     return m[action] || action;
   }
-  openTarget(e: any) {
+  openTarget(e: FeedEvent) {
     if (!e?.target_id) return;
     const ttype = e.target_type;
     let ideaId: string = e.target_id;
@@ -755,6 +767,7 @@ export class ProfileComponent implements OnInit {
     } else if (ttype !== 'idea' && ttype !== 'attachment') {
       return;
     }
-    this.ideaSelected.emit({ id: ideaId } as any);
+    // B-lite-Stub: nur die id — die Detailseite lädt den Rest selbst nach.
+    this.ideaSelected.emit({ id: ideaId } as Idea);
   }
 }

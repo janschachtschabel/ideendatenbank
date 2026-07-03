@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 data/
+# Lokale, NICHT versionierte Deploy-/Prod-Artefakte (enthalten Klartext-Secrets
+# wie den WLO-Service-Account). Bewusst vom Upload ausgeschlossen.
+not-deploy/
 node_modules/
 dist/
 .angular/

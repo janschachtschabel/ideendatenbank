@@ -1,8 +1,7 @@
 import { createApplication } from '@angular/platform-browser';
 import { createCustomElement } from '@angular/elements';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { importProvidersFrom, provideZoneChangeDetection } from '@angular/core';
-import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
+import { provideZoneChangeDetection } from '@angular/core';
 
 import { AppShellComponent } from './app/app-shell/app-shell.component';
 import { TileGridComponent } from './app/tile-grid/tile-grid.component';
@@ -20,7 +19,9 @@ createApplication({
     // großen Default-CD-Komponenten (app-shell, idea-detail, tile-grid).
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideHttpClient(withInterceptors([authInterceptor])),
-    importProvidersFrom(BrowserAnimationsModule),
+    // Bewusst KEIN Animations-Provider: die App nutzt keine Angular-Animationen
+    // (keine [@trigger]-Bindings) — Effekte laufen rein über CSS-Transitions.
+    // Material/CDK/Animations wurden als ungenutzte Pakete entfernt (Audit).
   ],
 }).then((appRef) => {
   const inj = appRef.injector;

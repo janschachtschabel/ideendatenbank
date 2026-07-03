@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
+import anyio.to_thread
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -24,23 +27,78 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ideendb")
 
 
+def _configure_thread_pools() -> None:
+    """Beide Thread-Pools explizit dimensionieren (siehe config.py):
+
+    - asyncio-Default-Executor (trägt alle ``asyncio.to_thread``-DB-Zugriffe):
+      der Python-Default ``min(32, CPU+4)`` ist auf kleinen Containern nur
+      5–6 Threads — bei Event-Spitzen würden async DB-Pfade dort queuen.
+    - anyio-Limiter (trägt alle sync-``def``-Routen): Default 40.
+
+    Muss im LAUFENDEN Event-Loop aufgerufen werden (→ Lifespan). Kein explizites
+    Shutdown nötig: asyncio schließt den Default-Executor beim Loop-Ende selbst
+    (uvicorn läuft über ``asyncio.run``)."""
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(
+        ThreadPoolExecutor(
+            max_workers=max(4, settings.threadpool_db_workers),
+            thread_name_prefix="db",
+        )
+    )
+    anyio.to_thread.current_default_thread_limiter().total_tokens = max(
+        4, settings.threadpool_sync_routes
+    )
+
+
 async def _sync_loop() -> None:
+    """Full repository sync once per night at ``settings.sync_nightly_hour`` (UTC).
+
+    Deliberately does NOT sync at startup: the SQLite cache persists on the data
+    volume across restarts, and writes trigger ``refresh_idea`` for freshness. A
+    fresh/empty cache is handled separately by ``_startup_sync_if_empty``. Manual
+    full sync stays available via ``POST /admin/sync``.
+    """
     while True:
+        await asyncio.sleep(
+            sync_mod.seconds_until_hour(datetime.now(UTC), settings.sync_nightly_hour)
+        )
         try:
             result = await sync_mod.run_sync()
             log.info(
-                "sync: topics=%s ideas=%s error=%s",
+                "nightly sync: topics=%s ideas=%s error=%s",
                 result["topics_seen"],
                 result["ideas_seen"],
                 result["error"],
             )
         except Exception:
-            log.exception("sync loop error")
-        await asyncio.sleep(settings.sync_interval_seconds)
+            log.exception("nightly sync loop error")
+
+
+async def _startup_sync_if_empty() -> None:
+    """Fresh-deploy safety net: if the cache is empty (no persisted DB and no
+    backup restored), run ONE sync shortly after start so the app isn't empty
+    until the nightly run. The short delay keeps it off the critical path of the
+    first user requests.
+    """
+    if not sync_mod.cache_is_empty():
+        return
+    await asyncio.sleep(20)
+    try:
+        log.info("startup: idea cache empty — running one-off initial sync")
+        result = await sync_mod.run_sync()
+        log.info(
+            "initial sync: topics=%s ideas=%s error=%s",
+            result["topics_seen"],
+            result["ideas_seen"],
+            result["error"],
+        )
+    except Exception:
+        log.exception("initial sync failed")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _configure_thread_pools()
     # Auto-Restore beim Erststart: wenn keine DB vorhanden ist und ein
     # Backup-ZIP im Backup-Ordner liegt, ziehen wir das jüngste vor der
     # Schema-Migration. So kommt eine frisch deployte App nicht „leer"
@@ -68,11 +126,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("ensure_vote_seed beim Start fehlgeschlagen")
     sync_task = asyncio.create_task(_sync_loop())
+    startup_sync_task = asyncio.create_task(_startup_sync_if_empty())
     backup_task = asyncio.create_task(backup_mod.auto_backup_loop())
     try:
         yield
     finally:
         sync_task.cancel()
+        startup_sync_task.cancel()
         backup_task.cancel()
         await edu_sharing.client.close()
 
@@ -113,6 +173,24 @@ app.add_middleware(
         "X-Requested-With",
     ],
 )
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    """Grund-Härtung auf ALLEN Antworten (API + statisches Bundle):
+    - `nosniff`: verhindert MIME-Sniffing (z.B. einen hochgeladenen Text als
+      HTML/JS interpretieren zu lassen).
+    - `Referrer-Policy`: keine vollständigen URLs (mit Query) an Fremd-Origins
+      leaken.
+    Bewusst OHNE `X-Frame-Options`/CSP-`frame-ancestors`: die App wird absichtlich
+    als Web-Component in Partnerseiten (WLO) eingebettet — ein Frame-Verbot würde
+    genau diesen Embed brechen. Eine vollständige CSP ist wegen des Embed-Szenarios
+    noch offen (braucht Browser-Test gegen die Host-Seiten) und daher hier bewusst
+    nicht gesetzt."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
 
 app.include_router(router, prefix="/api/v1")
 

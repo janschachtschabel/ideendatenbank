@@ -1,4 +1,5 @@
 
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
@@ -15,7 +16,7 @@ import { TaxonomyEntry, Topic } from '../models';
     .card { background: var(--wlo-surface, #fff); border: 1px solid var(--wlo-border); border-radius: 12px; padding: 28px; }
     h1 { margin: 0 0 8px; color: var(--wlo-primary); }
     p.intro { color: var(--wlo-muted); margin: 0 0 24px; }
-    label { display: block; font-weight: 600; margin-bottom: 4px; color: var(--wlo-text); font-size: .9rem; }
+    label, .group-label { display: block; font-weight: 600; margin-bottom: 4px; color: var(--wlo-text); font-size: .9rem; }
     input, textarea, select { width: 100%; border: 1px solid var(--wlo-border); border-radius: 8px;
                               padding: 10px 12px; box-sizing: border-box; font: inherit; margin-bottom: 18px; background: var(--wlo-surface, #fff); }
     textarea { min-height: 150px; resize: vertical; }
@@ -178,19 +179,19 @@ import { TaxonomyEntry, Topic } from '../models';
           </ul>
         </details>
 
-        <label>Titel *</label>
-        <input [(ngModel)]="title" placeholder="Kurzer, einprägsamer Name der Idee" required maxlength="150" />
+        <label for="sb-title">Titel *</label>
+        <input id="sb-title" [(ngModel)]="title" placeholder="Kurzer, einprägsamer Name der Idee" required maxlength="150" />
 
-        <label>Themenbereich / Herausforderung</label>
-        <select [(ngModel)]="topicId">
+        <label for="sb-topic">Themenbereich / Herausforderung</label>
+        <select id="sb-topic" [(ngModel)]="topicId">
           <option value="">— bitte wählen —</option>
           @for (t of challenges; track t.id) {
             <option [value]="t.id">{{ topicPathFor(t) }}</option>
           }
         </select>
 
-        <label>Beschreibung</label>
-        <textarea [(ngModel)]="description" [placeholder]="placeholderText"></textarea>
+        <label for="sb-desc">Beschreibung</label>
+        <textarea id="sb-desc" [(ngModel)]="description" [placeholder]="placeholderText"></textarea>
         <small class="field-hint">
           Tipp: Du kannst hier auch weiterführende <strong>Links/URLs</strong>
           einfügen (z.B. zu Demos, Dokumenten oder Quellen) — zusätzlich zum
@@ -199,8 +200,8 @@ import { TaxonomyEntry, Topic } from '../models';
 
         <div class="row">
           <div>
-            <label>Vorschaubild <small style="font-weight:400; opacity:.6">(optional, max. 10 MB)</small></label>
-            <input type="file" accept="image/*" (change)="onPreviewPick($event)" />
+            <label for="sb-preview">Vorschaubild <small style="font-weight:400; opacity:.6">(optional, max. 10 MB)</small></label>
+            <input id="sb-preview" type="file" accept="image/*" (change)="onPreviewPick($event)" />
             @if (previewFile) {
               <small style="color: var(--wlo-muted); display:block; margin-top:-6px">
                 {{ previewFile.name }} · {{ formatSize(previewFile.size) }}
@@ -209,10 +210,10 @@ import { TaxonomyEntry, Topic } from '../models';
             }
           </div>
           <div>
-            <label>Datei-Anhänge
+            <label for="sb-files">Datei-Anhänge
               <small style="font-weight:400; opacity:.6">(optional, bis zu {{ maxAttachments }}, je max. 50 MB)</small>
             </label>
-            <input type="file" multiple (change)="onFilePick($event)"
+            <input id="sb-files" type="file" multiple (change)="onFilePick($event)"
                    [disabled]="contentFiles.length >= maxAttachments" />
             @for (f of contentFiles; track f.name + f.size; let i = $index) {
               <small style="color: var(--wlo-muted); display:block; margin-top:-2px">
@@ -236,8 +237,8 @@ import { TaxonomyEntry, Topic } from '../models';
 
         <div class="row">
           <div>
-            <label>Phase</label>
-            <select [(ngModel)]="phase">
+            <label for="sb-phase">Phase</label>
+            <select id="sb-phase" [(ngModel)]="phase">
               <option value="">— offen —</option>
               @for (p of phases; track p.slug) {
                 <option [value]="p.slug">{{ p.label }}</option>
@@ -245,8 +246,8 @@ import { TaxonomyEntry, Topic } from '../models';
             </select>
           </div>
           <div>
-            <label>Veranstaltung <span class="req">*</span></label>
-            <div class="event-chips">
+            <div class="group-label" id="sb-event-label">Veranstaltung <span class="req">*</span></div>
+            <div class="event-chips" role="group" aria-labelledby="sb-event-label">
               <label class="event-chip none" [class.on]="noEvent">
                 <input type="radio" name="event-choice"
                        [checked]="noEvent"
@@ -281,20 +282,20 @@ import { TaxonomyEntry, Topic } from '../models';
 
         <div class="row">
           <div>
-            <label>Dein Name / Kontext</label>
-            <input [(ngModel)]="author" placeholder="z.B. Teilnehmer:in OER-Camp 2025" />
+            <label for="sb-author">Dein Name / Kontext</label>
+            <input id="sb-author" [(ngModel)]="author" placeholder="z.B. Teilnehmer:in OER-Camp 2025" />
           </div>
           <div>
-            <label>Link (GitHub, Prototyp, …)</label>
-            <input [(ngModel)]="projectUrl" type="url" placeholder="https://…" />
+            <label for="sb-url">Link (GitHub, Prototyp, …)</label>
+            <input id="sb-url" [(ngModel)]="projectUrl" type="url" placeholder="https://…" />
           </div>
         </div>
 
-        <label>Schlagwörter (Komma-getrennt)</label>
-        <input [(ngModel)]="keywords" placeholder="z.B. Metadaten, KI, Barrierefreiheit" />
+        <label for="sb-keywords">Schlagwörter (Komma-getrennt)</label>
+        <input id="sb-keywords" [(ngModel)]="keywords" placeholder="z.B. Metadaten, KI, Barrierefreiheit" />
 
-        <label>Kontakt für Rückfragen <small style="font-weight:400; opacity:.6">(optional)</small></label>
-        <input [(ngModel)]="contact" type="text" maxlength="200"
+        <label for="sb-contact">Kontakt für Rückfragen <small style="font-weight:400; opacity:.6">(optional)</small></label>
+        <input id="sb-contact" [(ngModel)]="contact" type="text" maxlength="200"
                placeholder="E-Mail oder Link — z.B. name@uni.de" />
         <small class="field-hint">
           Gedacht für <strong>Rückfragen &amp; Mithackende</strong>. Wird nur
@@ -588,12 +589,15 @@ export class SubmitIdeaComponent implements OnInit {
                 this.api.uploadIdeaPreview(nodeId, this.previewFile, uploadToken),
               );
             }
-          } catch (e: any) {
-            // Idee ist trotzdem da — Upload-Fehler nicht als kompletten Misserfolg werten
+          } catch (e) {
+            // Idee ist trotzdem da — Upload-Fehler nicht als kompletten Misserfolg werten.
+            // Der Fehler stammt aus firstValueFrom(HttpClient) → HttpErrorResponse;
+            // message deckt den (theoretischen) Nicht-HTTP-Fall ab.
+            const err = e as HttpErrorResponse & { message?: string };
             this.uploadStatus = '';
             this.busy = false;
             this.error = `Idee wurde angelegt, aber Datei-Upload fehlgeschlagen: ${
-              e?.error?.detail || e?.message || 'unbekannter Fehler'
+              err?.error?.detail || err?.message || 'unbekannter Fehler'
             }. Du kannst sie später über „Bearbeiten" nachreichen.`;
             this.successMessage = r.message;
             this.resetForm();

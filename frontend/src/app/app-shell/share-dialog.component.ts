@@ -2,6 +2,7 @@
 import {
   Component,
   EventEmitter,
+  HostListener,
   Input,
   Output,
   signal,
@@ -71,7 +72,7 @@ export interface ShareTarget {
     .target { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--wlo-border); }
     .target.first { padding-top: 0; margin-top: 0; border-top: none; }
     .target-intro { margin: 2px 0 6px; font-size: .82rem; color: var(--wlo-muted); }
-    label {
+    label, .field-label {
       display: block; margin: 12px 0 4px;
       font-size: .82rem; font-weight: 600; color: var(--wlo-text);
       text-transform: uppercase; letter-spacing: .04em;
@@ -140,6 +141,10 @@ export interface ShareTarget {
   `],
   template: `
     @if (open) {
+      <!-- Backdrop-Klick schließt (Maus); Tastatur schließt über Escape
+           (HostListener) + Schließen-Button. Ein fokussierbarer Fullscreen-
+           Backdrop wäre das a11y-Anti-Pattern. -->
+      <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
       <div class="backdrop" (click)="onBackdrop($event)">
         <div class="card" role="dialog" aria-modal="true">
           <div class="card-head">
@@ -154,10 +159,10 @@ export interface ShareTarget {
             @if (targets?.length) {
               @for (t of targets; track t.label; let i = $index) {
                 <div class="target" [class.first]="i === 0">
-                  <label>{{ t.label }}</label>
+                  <label [attr.for]="'sd-target-' + i">{{ t.label }}</label>
                   @if (t.intro) { <p class="target-intro">{{ t.intro }}</p> }
                   <div class="link-row">
-                    <input #ti type="text" [value]="t.url" readonly (click)="ti.select()" />
+                    <input #ti [attr.id]="'sd-target-' + i" type="text" [value]="t.url" readonly (click)="ti.select()" />
                     <button class="copy" [class.ok]="copiedIdx() === i" (click)="copyTarget(t.url, i)">
                       {{ copiedIdx() === i ? '✓ Kopiert' : '📋 Kopieren' }}
                     </button>
@@ -172,16 +177,16 @@ export interface ShareTarget {
                 </div>
               }
             } @else {
-              <label>Direkt-Link</label>
+              <label for="sd-link">Direkt-Link</label>
               <div class="link-row">
-                <input #linkInput type="text" [value]="url" readonly
+                <input #linkInput id="sd-link" type="text" [value]="url" readonly
                        (click)="linkInput.select()" />
                 <button class="copy" [class.ok]="copied()" (click)="copy()">
                   {{ copied() ? '✓ Kopiert' : '📋 Kopieren' }}
                 </button>
               </div>
 
-              <label>QR-Code</label>
+              <div class="field-label">QR-Code</div>
               <div class="qr-row">
                 <img [src]="qrUrl(240)" alt="QR-Code" width="180" height="180" />
                 <div class="qr-actions">
@@ -197,7 +202,7 @@ export interface ShareTarget {
 
             @if (embedSnippet) {
               <div class="embed">
-                <label>Embed-Snippet (Web Component)</label>
+                <div class="field-label">Embed-Snippet (Web Component)</div>
                 <pre>{{ embedSnippet }}</pre>
                 <button class="copy-embed" [class.ok]="embedCopied()" (click)="copyEmbed()">
                   {{ embedCopied() ? '✓ Kopiert' : '📋 Embed-Code kopieren' }}
@@ -306,5 +311,11 @@ export class ShareDialogComponent {
     if ((ev.target as HTMLElement).classList.contains('backdrop')) {
       this.close();
     }
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape() {
+    // ESC schließt das Modal (a11y) — nur wenn geöffnet.
+    if (this.open) this.close();
   }
 }

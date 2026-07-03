@@ -38,6 +38,20 @@ log = logging.getLogger(__name__)
 BACKUP_NAME_PREFIX = "ideendb-backup-"
 BACKUP_NAME_RE = re.compile(r"^ideendb-backup-(\d{8})-(\d{4})\.zip$")
 
+# Feste Whitelist der Tabellen für die metadata.json-Zähler. Die Namen werden
+# (bewusst — SQLite kann Identifier nicht parametrisieren) per f-String in SQL
+# interpoliert. NIEMALS aus Request-/Nutzereingaben speisen; neue Tabellen nur
+# hier ergänzen.
+_METADATA_TABLES = (
+    "idea",
+    "topic",
+    "activity_log",
+    "ranking_snapshot",
+    "idea_interaction",
+    "taxonomy_phase",
+    "taxonomy_event",
+)
+
 
 def _backup_dir() -> Path:
     p = Path(settings.backup_dir)
@@ -58,23 +72,24 @@ def _gather_metadata() -> dict:
     gebraucht, sind aber nicht zwingend (Restore klappt auch ohne)."""
     stats: dict = {"created_at": _iso_now()}
     try:
-        with sqlite3.connect(settings.sqlite_path) as con:
+        # ACHTUNG: `with sqlite3.connect(...)` schließt die Connection NICHT
+        # (der sqlite3-Context-Manager committet nur) → explizit schließen.
+        # Ein offener Handle hielt die DB-Datei auf Windows gesperrt und ließ
+        # den Restore-Dateitausch mit „database disk image is malformed"
+        # scheitern; auf Linux war es „nur" ein Connection-Leak pro Backup.
+        con = sqlite3.connect(settings.sqlite_path)
+        try:
             con.row_factory = sqlite3.Row
             cur = con.cursor()
-            for tbl in (
-                "idea",
-                "topic",
-                "activity_log",
-                "ranking_snapshot",
-                "idea_interaction",
-                "taxonomy_phase",
-                "taxonomy_event",
-            ):
+            for tbl in _METADATA_TABLES:
                 try:
+                    # tbl stammt aus der Konstanten-Whitelist oben — kein User-Input.
                     n = cur.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
                     stats[f"{tbl}_count"] = n
                 except sqlite3.OperationalError:
                     stats[f"{tbl}_count"] = 0
+        finally:
+            con.close()
     except Exception as e:
         log.warning("metadata gather failed: %s", e)
     return stats
@@ -82,11 +97,18 @@ def _gather_metadata() -> dict:
 
 def _vacuum_into(target: Path) -> None:
     """SQLite-konsistente Online-Kopie via VACUUM INTO. Funktioniert auch
-    während Reads/Writes laufen — keine Locks nötig."""
+    während Reads/Writes laufen — keine Locks nötig.
+
+    Explizites close() statt `with`: der sqlite3-Context-Manager schließt
+    nicht (nur Commit) — der geleakte Handle blockierte auf Windows den
+    Restore-Dateitausch (s. _gather_metadata)."""
     if target.exists():
         target.unlink()
-    with sqlite3.connect(settings.sqlite_path) as con:
+    con = sqlite3.connect(settings.sqlite_path)
+    try:
         con.execute("VACUUM INTO ?", (str(target),))
+    finally:
+        con.close()
 
 
 def create_backup() -> Path:

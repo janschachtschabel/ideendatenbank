@@ -79,7 +79,9 @@ APP_PORT=8000
 
 # ──────────────── Daten / Sync ────────────────
 SQLITE_PATH=/data/ideendb.sqlite
-SYNC_INTERVAL_SECONDS=900
+# Nächtlicher Voll-Sync (UTC-Stunde). NUR nachts + manuell (POST /admin/sync),
+# nicht beim App-Start — die SQLite-Datei überlebt Restarts auf dem Volume.
+SYNC_NIGHTLY_HOUR=1
 
 # ──────────────── Backup ────────────────
 BACKUP_ENABLED=true

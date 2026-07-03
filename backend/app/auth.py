@@ -17,12 +17,14 @@ edu-sharing weitergereicht wird — die Aufrufer bleiben unberührt. Siehe
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import logging
 import time
 
 from . import edu_sharing
+from .caches import evict_expired_and_cap
 from .config import settings
 from .db import connect
 
@@ -52,6 +54,8 @@ def decode_basic_user(authorization: str | None) -> str | None:
 # Credentials brennen sich nicht als „kein Mod" ein.
 _MOD_CACHE: dict[str, tuple[bool, float]] = {}
 _MOD_CACHE_TTL = 60.0
+# Obergrenze gegen unbegrenztes Wachstum bei vielen distinkten Auth-Headern.
+_MOD_CACHE_MAX = 4096
 
 
 def _auth_cache_key(authorization: str) -> str:
@@ -86,6 +90,7 @@ async def is_moderator(authorization: str | None) -> bool:
         return False
     result = any(g in groups for g in settings.fallback_mod_groups)
     _MOD_CACHE[key] = (result, now + _MOD_CACHE_TTL)
+    evict_expired_and_cap(_MOD_CACHE, now, _MOD_CACHE_MAX)
     return result
 
 
@@ -113,7 +118,9 @@ async def verify_login(authorization: str | None) -> str | None:
     return user
 
 
-async def is_owner_or_mod(idea_id: str, authorization: str | None) -> tuple[bool, str | None, bool]:
+async def is_owner_or_mod(
+    idea_id: str, authorization: str | None, *, verified: bool = False
+) -> tuple[bool, str | None, bool]:
     """Owner-Gating für Idee-Editieren / -Löschen.
 
     edu-sharing's accessEffective ist hier *nicht* ausreichend: alle
@@ -126,6 +133,15 @@ async def is_owner_or_mod(idea_id: str, authorization: str | None) -> tuple[bool
       3. sonst → nein
 
     Return: (allowed, username, is_mod). username ist None bei fehlender Auth.
+
+    ``verified`` (keyword-only): der Aufrufer sichert zu, dass das Passwort
+    geprüft ist — entweder vorab per ``verify_login`` ODER durch einen
+    nachgelagerten edu-sharing-Write mit derselben Auth (der das Passwort selbst
+    prüft). NUR dann wird der Owner-Treffer über den bloß dekodierten Basic-
+    Usernamen akzeptiert. Default ``False`` = fail-closed: ohne diese Zusicherung
+    gilt ausschließlich der passwort-verifizierte Mod-Status. Ein vergessenes
+    ``verified=True`` sperrt den Owner aus (sichtbarer Bug) statt Impersonation
+    per bloßem Username zu erlauben (stiller Auth-Bypass).
     """
     if not authorization:
         return False, None, False
@@ -136,18 +152,27 @@ async def is_owner_or_mod(idea_id: str, authorization: str | None) -> tuple[bool
     if is_mod:
         return True, user, True
 
-    # 1. Cache-Check (billig). ACHTUNG-Invariante: `user` ist hier nur aus dem
-    #    Basic-Header dekodiert, NICHT passwort-verifiziert. Dieser Owner-Treffer
-    #    ist nur sicher, weil alle privilegierten Owner-Routen vorher
-    #    `verify_login` aufrufen (Passwort-Prüfung gegen edu-sharing). Neue
-    #    Owner-gatete Routen MÜSSEN diese Vorbedingung einhalten — sonst
-    #    Impersonation per bloßem Username.
-    try:
+    # Fail-closed: der Owner-Treffer unten beruht auf dem NUR dekodierten (nicht
+    # passwort-geprüften) `user`. Ihn nur zulassen, wenn der Aufrufer die
+    # Passwort-Prüfung zusichert (`verified=True`, s. Docstring). Sonst gilt hier
+    # ausschließlich der oben passwort-verifizierte Mod-Status.
+    if not verified:
+        return False, user, False
+
+    # 1. Cache-Check (billig): Owner == eingeloggter (nun verifizierter) User.
+    #    Im Threadpool statt direkt auf dem Event-Loop: dieser Lookup liegt auf
+    #    JEDEM Edit-/Delete-/Attachment-Pfad — bliebe er auf dem Loop, würde eine
+    #    Lock-Wartezeit (busy_timeout bis 30 s) ALLE Requests einfrieren statt
+    #    nur diesen einen.
+    def _read_owner():
         with connect() as con:
-            row = con.execute(
+            return con.execute(
                 "SELECT owner_username FROM idea WHERE id=?",
                 (idea_id,),
             ).fetchone()
+
+    try:
+        row = await asyncio.to_thread(_read_owner)
         if row and row["owner_username"] and row["owner_username"] == user:
             return True, user, False
     except Exception:
@@ -183,7 +208,9 @@ async def is_owner_or_mod(idea_id: str, authorization: str | None) -> tuple[bool
     return False, user, False
 
 
-async def can_edit_idea(idea_id: str, authorization: str | None) -> tuple[bool, str | None, bool]:
+async def can_edit_idea(
+    idea_id: str, authorization: str | None, *, verified: bool = False
+) -> tuple[bool, str | None, bool]:
     """Erweitert `is_owner_or_mod` um angenommene Mithackende mit
     Bearbeitungsrecht: idea_interaction (kind='interest', status='approved',
     can_edit=1). Diese „Mitwirkenden" dürfen Beschreibung/Anhänge bearbeiten —
@@ -191,19 +218,34 @@ async def can_edit_idea(idea_id: str, authorization: str | None) -> tuple[bool, 
 
     Return: (allowed, username, is_owner_or_mod). is_owner_or_mod=False heißt:
     nur als Mitwirkende:r berechtigt (für Endpoints, die mehr verlangen).
+
+    ``verified``: wie bei ``is_owner_or_mod`` — der Owner- UND der Mitwirkenden-
+    Treffer vertrauen dem dekodierten Usernamen und werden daher nur bei
+    zugesicherter Passwort-Prüfung akzeptiert (fail-closed by default).
     """
-    allowed, user, is_mod = await is_owner_or_mod(idea_id, authorization)
+    allowed, user, is_mod = await is_owner_or_mod(idea_id, authorization, verified=verified)
     if allowed:
         return True, user, True
     if not user:
         return False, user, False
-    try:
+    # Der Mitwirkenden-Treffer vergleicht ebenfalls den nur dekodierten Username
+    # mit idea_interaction.user_key → dieselbe fail-closed-Regel wie beim Owner-
+    # Pfad: ohne zugesicherte Verifikation kein Zugriff.
+    if not verified:
+        return False, user, False
+
+    # Threadpool statt Event-Loop — gleiche Begründung wie der Owner-Lookup in
+    # is_owner_or_mod (Hot-Path; Lock-Wartezeit darf nicht den Loop blockieren).
+    def _read_collaborator():
         with connect() as con:
-            row = con.execute(
+            return con.execute(
                 "SELECT can_edit, status FROM idea_interaction "
                 "WHERE idea_id=? AND user_key=? AND kind='interest'",
                 (idea_id, user),
             ).fetchone()
+
+    try:
+        row = await asyncio.to_thread(_read_collaborator)
         if row and row["status"] == "approved" and row["can_edit"]:
             return True, user, False
     except Exception as e:

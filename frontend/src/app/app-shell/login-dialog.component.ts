@@ -1,6 +1,6 @@
 
 import { FormsModule } from '@angular/forms';
-import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, Output, inject } from '@angular/core';
 import { ApiService } from '../api.service';
 
 /** Fallback, falls keine Repo-Basis-URL übergeben wird. */
@@ -90,14 +90,21 @@ type Mode = 'login' | 'register';
     }
 
     .register-back { text-align: center; margin-top: 16px; font-size: .85rem; }
-    .register-back a {
+    .register-back .linklike {
+      background: none; border: none; padding: 0; font: inherit;
       color: var(--wlo-primary); cursor: pointer; font-weight: 600;
       &:hover { text-decoration: underline; }
     }
   `],
   template: `
+    <!-- Backdrop-Klick schließt (Maus-Bequemlichkeit); Tastatur schließt über
+         Escape (HostListener) + Abbrechen-Button. Einen Fullscreen-Backdrop
+         fokussierbar zu machen wäre das eigentliche a11y-Anti-Pattern. -->
+    <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
     <div class="backdrop" (click)="close($event)">
-      <div class="box" (click)="$event.stopPropagation()">
+      <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -->
+      <div class="box" role="dialog" aria-modal="true" aria-label="Anmeldung"
+           (click)="$event.stopPropagation()">
         <div class="tabs">
           <button [class.active]="mode==='login'" (click)="switchTo('login')">Anmelden</button>
           <button [class.active]="mode==='register'" (click)="switchTo('register')">Registrieren</button>
@@ -108,10 +115,10 @@ type Mode = 'login' | 'register';
             <h2>Anmelden</h2>
             <p class="intro">Mit deinem WirLernenOnline / edu-sharing-Konto.</p>
             @if (error) { <div class="error">{{ error }}</div> }
-            <label>Benutzername</label>
-            <input [(ngModel)]="user" placeholder="z.B. mmustermann" autocomplete="username" />
-            <label>Passwort</label>
-            <input [(ngModel)]="pass" placeholder="••••••••" type="password"
+            <label for="lg-user">Benutzername</label>
+            <input id="lg-user" [(ngModel)]="user" placeholder="z.B. mmustermann" autocomplete="username" />
+            <label for="lg-pass">Passwort</label>
+            <input id="lg-pass" [(ngModel)]="pass" placeholder="••••••••" type="password"
                    autocomplete="current-password" (keyup.enter)="login()" />
             <div class="actions">
               <button class="btn secondary" (click)="closed.emit()">Abbrechen</button>
@@ -158,7 +165,7 @@ type Mode = 'login' | 'register';
             </p>
 
             <div class="register-back">
-              <a (click)="switchTo('login')">← Zurück zum Anmelden</a>
+              <button type="button" class="linklike" (click)="switchTo('login')">← Zurück zum Anmelden</button>
             </div>
           }
         }
@@ -207,5 +214,11 @@ export class LoginDialogComponent {
 
   close(e: MouseEvent) {
     if (e.target === e.currentTarget) this.closed.emit();
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape() {
+    // ESC schließt den Dialog (Tastatur-Bedienbarkeit / a11y).
+    this.closed.emit();
   }
 }

@@ -218,8 +218,8 @@ nicht. Genau deshalb bewahrt der Sync die App-Spalten (`hidden`, `color`,
 Der Voll-Sync läuft den Sammlungs-Baum per Alfresco-Calls ab und ist dort die
 Hauptlast auf edu-sharing. Maßnahmen (Stand 2026-06-23):
 
-- **Intervall 15 min** (vorher 5; `SYNC_INTERVAL_SECONDS`) — Refresh-on-Write
-  hält den Cache trotzdem aktuell.
+- **Nur nächtlich + manuell** (`SYNC_NIGHTLY_HOUR`, Default 1 UTC; kein Sync beim
+  App-Start außer bei leerem Cache) — Refresh-on-Write hält den Cache untertags aktuell.
 - **Schlanker `propertyFilter`** statt `-all-`: pro Call nur die ~9 tatsächlich
   genutzten Properties (kleinere Antworten).
 - **Legacy-Anhang-Ordner-Scan** (`collection_subcollections` je Challenge — die

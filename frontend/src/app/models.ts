@@ -5,6 +5,9 @@ export interface Topic {
   description: string | null;
   preview_url?: string | null;
   color?: string | null;
+  /** Anzeige-Reihenfolge (Backend-Feld auf `topic`); optional, da nicht jede
+   *  API-Antwort es mitliefert — Aufrufer fallen dann auf einen Default zurück. */
+  sort_order?: number;
   created_at: string | null;
   modified_at: string | null;
 }
@@ -49,6 +52,10 @@ export interface Idea {
   /** Grund, falls nicht bewertbar: 'global' (Master aus) | 'phase' (Event-
    *  Bewertungsphase noch nicht offen). */
   rating_closed_reason?: 'global' | 'phase';
+  /** Eigene Bewertung des angemeldeten Users (nur bei Auth-Request gesetzt).
+   *  Kam schon immer vom Backend, wurde aber bisher untypisiert (`any`)
+   *  gelesen — beim Vote-Box-Split typisiert. */
+  my_rating?: number;
   interest_count?: number;
   /** Eigener Team-Status auf dieser Idee (nur in „Mein Bereich → Mithacken"
    *  befüllt): 'pending' | 'approved' + Bearbeitungsrecht. */
@@ -119,6 +126,87 @@ export interface IdeaList {
 }
 
 export type SortBy = 'modified' | 'created' | 'rating' | 'comments' | 'title';
+
+/** Ein Eintrag der Top-Steiger-Liste (GET /ranking/risers). */
+export interface RankingRiser {
+  idea_id: string;
+  title: string;
+  rank: number;
+  prev_rank: number;
+  delta: number;
+  owner_display_name?: string | null;
+}
+
+/** Eine Zeile des Aktivitäts-Logs (GET /admin/activity bzw. /me/activity).
+ *  `detail` ist KONSTRUKTIV beliebiges JSON — jede Aktion legt dort eigene
+ *  Felder ab (to_topic_title, size, anonymous, reason_excerpt, …); die
+ *  Renderer werten defensiv aus. Daher bewusst `any` (einzige Stelle). */
+export interface ActivityEvent {
+  id: number;
+  ts: string;
+  actor: string | null;
+  is_mod: number;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  target_label: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  detail: any;
+}
+
+/** Ein Backup-Listeneintrag (GET /admin/backups). `metadata` ist der freie
+ *  metadata.json-Inhalt aus dem ZIP (Zähler je Tabelle + created_at, je nach
+ *  Backup-Alter unterschiedlich) — bewusst untypisiert. */
+export interface BackupInfo {
+  filename: string;
+  size: number;
+  created_at: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  metadata: any;
+}
+
+/** Antwort von POST /admin/backups/restore. */
+export interface RestoreResult {
+  ok: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  restored_metadata: any;
+  size: number;
+}
+
+/** Öffentliches Nutzerprofil (GET /users/{name}). Das `profile`-Feld fehlte
+ *  in der früheren api-Signatur komplett — fiel nie auf, weil der Konsument
+ *  ein `any`-Signal war (beim Typisieren vom Compiler aufgedeckt). */
+export interface PublicUserProfile {
+  username: string;
+  /** Profil-Meta aus der App-DB (user_profile_meta); Felder null, wenn nie gepflegt. */
+  profile: {
+    display_name: string | null;
+    bio: string | null;
+    website: string | null;
+    role: string | null;
+  };
+  stats: { ideas: number; comments: number; ratings: number; avg_rating: number };
+  last_activity?: string;
+  ideas: Idea[];
+}
+
+/** Statistik-Dashboard-Daten (GET /admin/stats). */
+export interface AdminStats {
+  totals: {
+    ideas: number; themes: number; challenges: number; comments: number;
+    ratings: number; interest: number; follow: number; avg_rating: number;
+  };
+  phases: { phase: string; count: number }[];
+  events: { event: string; count: number }[];
+  weekly: { week: string; count: number }[];
+  top_actors: { actor: string; count: number }[];
+  top_ideas: {
+    id: string; title: string; rating_avg: number; rating_count: number;
+    comment_count: number; interest_count: number;
+  }[];
+  reports: { open: number; resolved: number };
+  actions_30d: { action: string; count: number }[];
+}
 
 export interface TaxonomyEntry {
   slug: string;

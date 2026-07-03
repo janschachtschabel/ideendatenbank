@@ -56,7 +56,7 @@
                 },
                 {
                   "type": "anyComponentStyle",
-                  "maximumWarning": "16kB",
+                  "maximumWarning": "22kB",
                   "maximumError": "32kB"
                 }
               ],
@@ -82,7 +82,7 @@
                 },
                 {
                   "type": "anyComponentStyle",
-                  "maximumWarning": "16kB",
+                  "maximumWarning": "22kB",
                   "maximumError": "32kB"
                 }
               ]

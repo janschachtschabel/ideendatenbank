@@ -11,7 +11,7 @@ import {
   signal,
 } from '@angular/core';
 import { ApiService } from '../api.service';
-import { Idea, PROFILE_ROLE_LABELS } from '../models';
+import { Idea, PROFILE_ROLE_LABELS, PublicUserProfile } from '../models';
 import { VotingService } from '../voting.service';
 import { ShareDialogComponent } from './share-dialog.component';
 
@@ -216,7 +216,8 @@ import { ShareDialogComponent } from './share-dialog.component';
         <h2 class="section-title">Ideen von {{ p.username }}</h2>
         <div class="idea-grid">
           @for (i of p.ideas; track i.id) {
-            <div class="idea-tile" (click)="ideaSelected.emit(i)">
+            <div class="idea-tile" role="button" tabindex="0"
+                 (click)="ideaSelected.emit(i)" (keyup.enter)="ideaSelected.emit(i)">
               @if (i.preview_url) {
                 <img class="tile-thumb" [src]="i.preview_url" [alt]="i.title" loading="lazy" />
               } @else {
@@ -288,7 +289,7 @@ export class PublicProfileComponent implements OnChanges {
   @Input() apiBase = '';
   @Output() ideaSelected = new EventEmitter<Idea>();
 
-  profile = signal<any | null>(null);
+  profile = signal<PublicUserProfile | null>(null);
   error = signal<string>('');
   shareOpen = false;
 

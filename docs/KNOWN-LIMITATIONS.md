@@ -51,6 +51,7 @@ ohne Funktionsgewinn).
 
 Das eigentliche Ziel — **eine Quelle der Wahrheit für die Auth-Logik** — ist
 stattdessen durch das Modul `backend/app/auth.py` erreicht (die Prädikate sind
-zentralisiert; `routes.py` re-importiert sie unter ihren bisherigen Namen).
-`_require_moderator` bleibt in `routes.py`, weil es HTTP-Status (401/403) und
-Audit-Logging bündelt — beides Route-Belange.
+zentralisiert; die Route-Module importieren sie unter ihren bisherigen Namen).
+`_require_moderator` wohnt in `routes_common.py`, weil es HTTP-Status (401/403)
+und Audit-Logging bündelt — beides Route-Belange, aber von allen Route-Modulen
+geteilt.

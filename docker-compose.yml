@@ -40,7 +40,8 @@ services:
 
       # ---- Daten ----
       SQLITE_PATH: /data/ideendb.sqlite
-      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-300}
+      # Nächtlicher Voll-Sync (UTC-Stunde); NUR nachts + manuell, nicht beim Start.
+      SYNC_NIGHTLY_HOUR: ${SYNC_NIGHTLY_HOUR:-1}
 
       # ---- Backup ----
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}

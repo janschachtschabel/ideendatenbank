@@ -32,13 +32,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Wir nutzen `npm install --no-save` statt `npm ci`, weil das Lockfile
-# auf Windows-Hosts gelegentlich Linux-spezifische peer-Deps (z.B.
-# `chokidar@^5` für native filesystem watchers) NICHT enthält, die
-# der Build im Linux-Container aber braucht. `--no-save` lässt das
-# Lockfile unverändert, ergänzt nur fehlende Pakete im Workspace.
-# Effekt: deterministisch wo möglich, robust wo nötig.
-RUN npm install --no-save --no-audit --no-fund
+# `npm ci` (Lockfile-bindend) statt `npm install --no-save`: Builds sind damit
+# reproduzierbar und Audit-Ergebnisse gelten fürs Image. Das frühere Problem
+# (Windows-erzeugtes Lockfile ohne Linux-Optional-Deps) reproduziert nicht
+# mehr — verifiziert am 2026-07-03 via `npm ci` im node:22-bookworm-slim-
+# Container gegen das eingecheckte Lockfile (Exit 0). Falls es je wieder
+# auftritt: Lockfile im Linux-Container regenerieren, NICHT auf install
+# zurückfallen.
+RUN npm ci --no-audit --no-fund
 
 COPY frontend/ ./
 RUN npm run build:embed

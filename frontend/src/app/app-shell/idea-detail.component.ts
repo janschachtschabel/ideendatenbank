@@ -2,14 +2,19 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, effect, inject, signal } from '@angular/core';
 import { ApiService, API_BASE_DEFAULT } from '../api.service';
-import { Attachment, Idea, TaxonomyEntry, Topic, VotingMode } from '../models';
+import { Attachment, Idea, TaxonomyEntry, Topic } from '../models';
 import { VotingService } from '../voting.service';
 import { ShareDialogComponent } from './share-dialog.component';
+import { ReportProblemModalComponent } from './report-problem-modal.component';
+import { CommentThreadComponent } from './comment-thread.component';
+import { VoteBoxComponent } from './vote-box.component';
+import { initialsOf as initialsOfUtil } from '../format-utils';
 
 @Component({
   selector: 'ideendb-idea-detail',
   standalone: true,
-  imports: [CommonModule, FormsModule, ShareDialogComponent],
+  imports: [CommonModule, FormsModule, ShareDialogComponent, ReportProblemModalComponent,
+            CommentThreadComponent, VoteBoxComponent],
   styles: [`
     :host { display: block; }
 
@@ -318,71 +323,7 @@ import { ShareDialogComponent } from './share-dialog.component';
     .side-card h3 { margin: 0 0 12px; font-size: .95rem;
                     color: var(--wlo-muted); text-transform: uppercase; letter-spacing: .06em; }
 
-    /* (alte rating-display-Klasse durch rating-avg ersetzt) */
-    /* Durchschnitt — nur lesen, mit Sternen visualisiert */
-    .rating-avg {
-      display: flex; flex-direction: column; gap: 2px;
-      margin-bottom: 14px;
-    }
-    .rating-avg.empty .stars-readonly .star { color: #e2e7ef; }
-    .stars-readonly { display: flex; gap: 2px; font-size: 1.4rem;
-                      line-height: 1; user-select: none; }
-    .stars-readonly .star {
-      color: #d1d9e6;  /* leer: Hellgrau */
-      position: relative; display: inline-block;
-    }
-    .stars-readonly .star.full { color: var(--wlo-accent, #f5b600); }
-    /* halber Stern: Stern in Akzentfarbe, aber rechte Hälfte clipt */
-    .stars-readonly .star.half {
-      background: linear-gradient(90deg,
-        var(--wlo-accent, #f5b600) 50%, #d1d9e6 50%);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      color: transparent;
-    }
-    .rating-numbers { font-size: .9rem; color: var(--wlo-text);
-                      strong { color: var(--wlo-primary); font-size: 1.05rem; }
-                      small { color: var(--wlo-muted); } }
-
-    /* Eigene Bewertung */
-    .own-rating-label {
-      font-size: .85rem; color: var(--wlo-muted); margin-bottom: 4px;
-      strong { color: var(--wlo-accent, #f5b600); }
-    }
-    .rating-clear {
-      background: none; border: none; padding: 4px 0; cursor: pointer;
-      color: var(--wlo-muted); font: inherit; font-size: .8rem;
-      text-decoration: underline;
-      &:hover { color: var(--wlo-text); }
-    }
-    .stars-input { display: flex; gap: 4px; font-size: 1.8rem; cursor: pointer; user-select: none; }
-    .stars-input .star { color: #d1d9e6; transition: color .1s; }
-    .stars-input .star.on, .stars-input:hover .star:hover,
-    .stars-input:hover .star:hover ~ .star { color: var(--wlo-accent, #f5b600); }
-    .stars-input:hover .star { color: #d1d9e6; }
-    .stars-input:hover .star:hover,
-    .stars-input:hover .star:hover ~ .star { color: transparent; }
-    /* simpler: only highlight the selected count */
-    .stars-input .star.on { color: var(--wlo-accent); }
-    /* Daumen-Modus */
-    .thumb-summary { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
-    .thumb-count-big { font-size: 1.6rem; font-weight: 700; color: var(--wlo-text); }
-    .thumb-sub { font-size: .85rem; color: var(--wlo-muted); }
-    .thumb-vote-btn {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 10px 18px; border-radius: 999px; cursor: pointer;
-      border: 1px solid var(--wlo-primary, #1d3a6e);
-      background: transparent; color: var(--wlo-primary, #1d3a6e);
-      font: inherit; font-weight: 600; font-size: 1rem;
-      transition: background .12s, transform .1s;
-      &:hover:not(:disabled) { transform: translateY(-1px); }
-      &:disabled { opacity: .7; cursor: default; }
-      &.on { background: var(--wlo-primary, #1d3a6e); color: #fff; }
-    }
-    .rate-status { margin-top: 6px; font-size: .85rem; font-weight: 600; }
-    .rate-status.ok { color: #137333; }
-    .rate-status.err { color: #c5221f; }
+    /* Bewertung (Sterne/Daumen): Styles leben in vote-box.component.ts */
 
     .action-btn {
       display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -454,50 +395,14 @@ import { ShareDialogComponent } from './share-dialog.component';
       &.ok { color: #1a7f37; font-weight: 600; }
     }
 
-    /* === Comments === */
-    .comments-card { margin-top: 24px; }
-    .comments-card h2 { display: flex; align-items: baseline; gap: 10px; }
-    .comments-card h2 small { color: var(--wlo-muted); font-weight: 400; font-size: .85rem; }
-    .comment-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+    /* Kommentare: Styles leben in comment-thread.component.ts.
+       Die textarea-Element-Regel unten ist geteilt (Edit-Modal) und bleibt. */
     textarea { width: 100%; border: 1px solid var(--wlo-border); border-radius: 8px; padding: 12px;
                resize: vertical; min-height: 80px; box-sizing: border-box; font: inherit; }
     textarea:focus { outline: none; border-color: var(--wlo-primary); }
-    .comment-form .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-    .submit-btn { background: var(--wlo-primary); color: #fff; border: none;
-                  padding: 10px 22px; border-radius: 8px; font-weight: 600; cursor: pointer;
-                  &:hover:not(:disabled) { background: var(--wlo-primary-600); }
-                  &:disabled { opacity: .5; cursor: not-allowed; } }
-    .comment { padding: 14px 0; border-top: 1px solid var(--wlo-border); display: flex; gap: 12px; }
-    .comment.reply { margin-left: 48px; border-top: none; border-left: 2px solid var(--wlo-border);
-                     padding-left: 12px; background: var(--wlo-bg); border-radius: 6px; margin-top: 4px; }
-    .reply-hint { background: var(--wlo-primary-soft, #e6edf7); color: var(--wlo-primary); padding: 1px 8px; border-radius: 999px;
-                  font-size: .72rem; font-weight: 600; margin-left: 8px; }
     .hidden-badge { background: var(--wlo-accent-soft, #fff8db); color: #8a5a00;
                     padding: 6px 10px; border-radius: 6px; font-size: .8rem;
                     font-weight: 600; margin: 8px 0 0; text-align: center; }
-    .reply-btn { background: none; border: none; color: var(--wlo-primary); cursor: pointer;
-                 font-weight: 600; font-size: .82rem; padding: 4px 0; margin-top: 6px;
-                 &:hover { text-decoration: underline; }
-                 &.danger { color: var(--wlo-danger, #c5221f); margin-left: 12px; }
-                 &:disabled { opacity: .5; cursor: progress; } }
-    .reply-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px;
-                  align-items: flex-end; }
-    .reply-form textarea { min-height: 60px; }
-    .reply-form .submit-btn { background: var(--wlo-primary); color: #fff; border: none;
-                              padding: 8px 16px; border-radius: 6px; font-weight: 600;
-                              cursor: pointer; font-size: .88rem;
-                              &:hover:not(:disabled) { background: var(--wlo-primary-600); }
-                              &:disabled { opacity: .5; cursor: not-allowed; } }
-    .comment .avatar {
-      flex: 0 0 36px; height: 36px; width: 36px; border-radius: 50%;
-      background: var(--wlo-primary); color: #fff;
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 700; font-size: .85rem;
-    }
-    .comment .body { flex: 1; min-width: 0; }
-    .comment .who { font-weight: 600; color: var(--wlo-primary); font-size: .9rem; }
-    .comment .when { color: var(--wlo-muted); font-size: .78rem; margin-left: 8px; }
-    .comment .text { margin-top: 4px; color: var(--wlo-text); white-space: pre-wrap; word-wrap: break-word; }
 
     .notice { background: var(--wlo-accent-soft, #fff8db); border: 1px solid #f5b600; border-radius: 8px;
               padding: 10px 14px; font-size: .88rem; color: #5c4a00; }
@@ -524,7 +429,7 @@ import { ShareDialogComponent } from './share-dialog.component';
            color: var(--wlo-muted); line-height: 1; padding: 0 4px;
            &:hover { color: var(--wlo-text); } }
     }
-    .edit-box label {
+    .edit-box label, .edit-box .field-label {
       display: block; font-size: .82rem; font-weight: 600;
       color: var(--wlo-text); margin: 8px 0 4px;
     }
@@ -597,64 +502,30 @@ import { ShareDialogComponent } from './share-dialog.component';
   `],
   template: `
     @if (reportOpen && idea(); as i) {
-      <div class="edit-overlay" (click)="$event.target === $event.currentTarget && closeReport()">
-        <div class="edit-box" (click)="$event.stopPropagation()">
-          <div class="edit-head">
-            <h2>⚠ Problem melden</h2>
-            <button class="x" (click)="closeReport()">×</button>
-          </div>
-          @if (reportSent) {
-            <p style="color: #137333; font-weight: 600; padding: 16px 0;">
-              ✓ Meldung gesendet — danke! Das Mod-Team prüft sie zeitnah.
-            </p>
-          } @else if (reportStatus()?.reported && reportStatus()?.status === 'open') {
-            <p style="background: var(--wlo-accent-soft, #fff8db); color: #8a5a00;
-                      padding: 10px 14px; border-radius: 8px; margin-top: 0;">
-              ⚠ Du hast diese Idee bereits am
-              {{ formatHistoryDate(reportStatus()!.created_at!) }} gemeldet.
-              Das Mod-Team prüft sie noch.
-            </p>
-          } @else if (reportStatus()?.reported && reportStatus()?.status === 'resolved') {
-            <p style="background: #e6f6ec; color: #137333; padding: 10px 14px;
-                      border-radius: 8px; margin-top: 0;">
-              ✓ Deine frühere Meldung wurde bearbeitet. Du kannst bei Bedarf erneut melden.
-            </p>
-            <p style="color: var(--wlo-muted); margin-top: 8px;">
-              Was stimmt mit „{{ i.title }}" nicht?
-            </p>
-          } @else {
-            <p style="color: var(--wlo-muted); margin-top: 0;">
-              Was stimmt mit „{{ i.title }}" nicht? (Spam, falsche Phase, doppelt, …)
-            </p>
-            <textarea [(ngModel)]="reportText" rows="5"
-                      placeholder="Kurze Beschreibung — wird ans Mod-Team weitergeleitet."></textarea>
-            <div class="edit-actions">
-              <button class="action-btn" (click)="reportViaMail(i)">Stattdessen E-Mail</button>
-              <button class="action-btn primary"
-                      (click)="submitReport(i)"
-                      [disabled]="reportBusy || (reportText || '').trim().length < 3">
-                {{ reportBusy ? 'Sendet…' : 'Meldung senden' }}
-              </button>
-            </div>
-          }
-        </div>
-      </div>
+      <ideendb-report-problem-modal
+        [ideaId]="ideaId" [ideaTitle]="i.title" [shareUrl]="shareUrl"
+        (closed)="reportOpen = false" />
     }
 
     @if (editing && idea(); as i) {
+      <!-- Overlay-Klick schließt (Maus-Bequemlichkeit); Tastatur schließt über
+           die ×- und Abbrechen-Buttons. Ein fokussierbares Fullscreen-Overlay
+           wäre das a11y-Anti-Pattern. -->
+      <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
       <div class="edit-overlay" (click)="cancelEdit($event)">
+        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
         <div class="edit-box" (click)="$event.stopPropagation()">
           <div class="edit-head">
             <h2>Idee bearbeiten</h2>
             <button class="x" (click)="closeEdit()">×</button>
           </div>
           @if (api.isModerator()) {
-            <label>Herausforderung
+            <label for="ed-topic">Herausforderung
               <small style="font-weight:400; color:var(--wlo-muted)">
                 · Auswahl wird sofort übernommen (Reference wird umgehängt)
               </small>
             </label>
-            <select [ngModel]="i.topic_id || ''"
+            <select id="ed-topic" [ngModel]="i.topic_id || ''"
                     (ngModelChange)="onChangeTopic(i.id, $event)"
                     [disabled]="topicChangeBusy">
               <option value="">— keine —</option>
@@ -669,9 +540,9 @@ import { ShareDialogComponent } from './share-dialog.component';
               <div class="quick-error">{{ topicChangeError }}</div>
             }
           }
-          <label>Titel</label>
-          <input [(ngModel)]="edit.title" />
-          <label>Phase
+          <label for="ed-title">Titel</label>
+          <input id="ed-title" [(ngModel)]="edit.title" />
+          <label for="ed-phase">Phase
             @if (idea(); as i) {
               @if (i.allowed_next_phases?.length && i.allowed_next_phases!.length < phases.length) {
                 <small style="font-weight:400; color:var(--wlo-muted)">
@@ -680,14 +551,14 @@ import { ShareDialogComponent } from './share-dialog.component';
               }
             }
           </label>
-          <select [(ngModel)]="edit.phase">
+          <select id="ed-phase" [(ngModel)]="edit.phase">
             <option value="">— offen —</option>
             @for (p of allowedPhases(); track p.slug) {
               <option [value]="p.slug">{{ p.label }}</option>
             }
           </select>
-          <label>Veranstaltungen <small style="font-weight:400; color:var(--wlo-muted)">(Mehrfachauswahl)</small></label>
-          <div class="edit-event-chips">
+          <div class="field-label" id="ed-events-label">Veranstaltungen <small style="font-weight:400; color:var(--wlo-muted)">(Mehrfachauswahl)</small></div>
+          <div class="edit-event-chips" role="group" aria-labelledby="ed-events-label">
             <label class="event-chip" [class.on]="editSelectedEvents.size === 0">
               <input type="checkbox"
                      [checked]="editSelectedEvents.size === 0"
@@ -703,12 +574,12 @@ import { ShareDialogComponent } from './share-dialog.component';
               </label>
             }
           </div>
-          <label>Beschreibung</label>
-          <textarea [(ngModel)]="edit.description" rows="6"></textarea>
+          <label for="ed-desc">Beschreibung</label>
+          <textarea id="ed-desc" [(ngModel)]="edit.description" rows="6"></textarea>
 
           <!-- Vorschaubild ersetzen ───────────────────────────────────── -->
           <div class="upload-row">
-            <label>Vorschaubild <small style="font-weight:400; opacity:.6">(max. 10 MB)</small></label>
+            <div class="field-label">Vorschaubild <small style="font-weight:400; opacity:.6">(max. 10 MB)</small></div>
             @if (i.preview_url) {
               <div class="preview-thumb">
                 <img [src]="previewSrc(i.preview_url)" alt="Aktuelle Vorschau" />
@@ -728,7 +599,7 @@ import { ShareDialogComponent } from './share-dialog.component';
                ausschließlich als Serienobjekte (unten). ─────────────────── -->
           @if (primaryFile(i); as pf) {
             <div class="upload-row">
-              <label>Hauptdatei</label>
+              <div class="field-label">Hauptdatei</div>
               <div class="meta">
                 Aktuell: {{ pf.name || '–' }}
                 @if (pf.size) { · {{ formatSize(pf.size!) }} }
@@ -749,7 +620,7 @@ import { ShareDialogComponent } from './share-dialog.component';
 
           <!-- Serienobjekt-Anhänge direkt im Dialog verwalten ──────────── -->
           <div class="upload-row">
-            <label>Weitere Anhänge (Serienobjekte)</label>
+            <div class="field-label">Weitere Anhänge (Serienobjekte)</div>
             @if (serialAttachments(i).length) {
               <ul class="dlg-attach-list">
                 @for (a of serialAttachments(i); track a.id) {
@@ -796,18 +667,18 @@ import { ShareDialogComponent } from './share-dialog.component';
             @if (folderUploadError) { <div class="error">{{ folderUploadError }}</div> }
           </div>
 
-          <label>Name</label>
-          <input [(ngModel)]="edit.author" placeholder="Name der/des Ideengeber:in" />
-          <label>Projekt-Link</label>
-          <input [(ngModel)]="edit.project_url" type="url" placeholder="https://…" />
-          <label>Schlagwörter (Komma-getrennt, ohne phase:/event:-Präfix)</label>
-          <input [(ngModel)]="edit.keywordsCsv" />
-          <label>Kontakt für Rückfragen
+          <label for="ed-author">Name</label>
+          <input id="ed-author" [(ngModel)]="edit.author" placeholder="Name der/des Ideengeber:in" />
+          <label for="ed-url">Projekt-Link</label>
+          <input id="ed-url" [(ngModel)]="edit.project_url" type="url" placeholder="https://…" />
+          <label for="ed-keywords">Schlagwörter (Komma-getrennt, ohne phase:/event:-Präfix)</label>
+          <input id="ed-keywords" [(ngModel)]="edit.keywordsCsv" />
+          <label for="ed-contact">Kontakt für Rückfragen
             <small style="font-weight:400; color:var(--wlo-muted)">
               (E-Mail oder Link · nur für Eingeloggte sichtbar · leer = löschen)
             </small>
           </label>
-          <input [(ngModel)]="edit.contact" type="text" maxlength="200"
+          <input id="ed-contact" [(ngModel)]="edit.contact" type="text" maxlength="200"
                  placeholder="z.B. name@uni.de — leer lassen entfernt den Kontakt" />
 
           @if (editError) { <div class="edit-error">{{ editError }}</div> }
@@ -1011,172 +882,19 @@ import { ShareDialogComponent } from './share-dialog.component';
             </section>
           }
 
-          <section class="card comments-card">
-            <h2>Kommentare <small>({{ i.comments === undefined ? '…' : i.comments.length }})</small></h2>
-
-            @if (!i.main_content_id) {
-              <div class="notice">
-                Diese Idee ist noch eine leere Sammlung ohne Haupt-Inhalt. Kommentare und
-                Bewertungen gehen technisch nur an einem Inhalts-Node (<code>ccm:io</code>).
-                Die Moderation kann einen anlegen, dann werden die Funktionen hier aktiv.
-              </div>
-            } @else if (!api.hasCredentials()) {
-              <div class="notice">
-                Zum Kommentieren bitte oben rechts anmelden. Lesen geht auch ohne Konto.
-              </div>
-            } @else {
-              <div class="comment-form">
-                <textarea [(ngModel)]="newComment"
-                          placeholder="Schreib einen Kommentar, eine Rückfrage oder bekunde dein Interesse mitzumachen …"></textarea>
-                <div class="row">
-                  @if (commentError) {
-                    <span class="error">{{ commentError }}</span>
-                  } @else { <span></span> }
-                  <button class="submit-btn" (click)="submitComment(i.id)"
-                          [disabled]="!newComment.trim() || commentBusy">
-                    {{ commentBusy ? 'Sendet…' : 'Kommentar abschicken' }}
-                  </button>
-                </div>
-              </div>
-            }
-
-            @for (c of threadedComments(i.comments || []); track c.ref.id) {
-              <div class="comment" [class.reply]="isReply(c)">
-                <div class="avatar">{{ initials(c) }}</div>
-                <div class="body">
-                  <span class="who">{{ formatUser(c) }}</span>
-                  <span class="when">{{ formatTs(c.created) }}</span>
-                  @if (isReply(c)) { <span class="reply-hint">↩ Antwort</span> }
-                  <div class="text">{{ c.comment || '(leer)' }}</div>
-                  @if (api.hasCredentials()) {
-                    <button class="reply-btn" (click)="startReply(c.ref.id)">
-                      {{ replyingTo === c.ref.id ? 'Abbrechen' : '↩ Antworten' }}
-                    </button>
-                    @if (canDeleteComment(c)) {
-                      <button class="reply-btn danger" (click)="deleteComment(c, i.id)"
-                              [disabled]="deletingCommentId === c.ref.id">
-                        {{ deletingCommentId === c.ref.id ? 'Lösche…' : '🗑 Löschen' }}
-                      </button>
-                    }
-                  }
-                  @if (replyingTo === c.ref.id) {
-                    <div class="reply-form">
-                      <textarea [(ngModel)]="replyText"
-                                placeholder="Antwort an {{ formatUser(c) }} schreiben…"></textarea>
-                      @if (commentError) {
-                        <span class="error">{{ commentError }}</span>
-                      }
-                      <button class="submit-btn" (click)="submitReply(i.id, replyTargetId(c))"
-                              [disabled]="!replyText.trim() || commentBusy">
-                        {{ commentBusy ? 'Sendet…' : 'Antwort senden' }}
-                      </button>
-                    </div>
-                  }
-                </div>
-              </div>
-            } @empty {
-              @if (i.comments === undefined) {
-                <p style="color: var(--wlo-muted); font-style: italic; margin: 10px 0 0;">
-                  Lädt Kommentare …
-                </p>
-              } @else if (api.hasCredentials()) {
-                <p style="color: var(--wlo-muted); font-style: italic; margin: 10px 0 0;">
-                  Sei der/die Erste, die einen Kommentar hinterlässt.
-                </p>
-              }
-            }
-          </section>
+          <ideendb-comment-thread
+            [ideaId]="i.id"
+            [comments]="i.comments"
+            [mainContentId]="i.main_content_id"
+            (changed)="load()" />
         </div>
 
         <!-- Sidebar -->
         <aside class="sidebar">
-          <div class="side-card">
-            <h3>{{ mode() === 'thumbs' ? 'Zustimmung' : 'Bewertung' }}</h3>
-
-          @if (mode() === 'thumbs') {
-            <!-- Daumen-Modus -->
-            <div class="thumb-summary">
-              <span class="thumb-count-big">👍 {{ i.rating_count }}</span>
-              <span class="thumb-sub">{{ i.rating_count === 1 ? 'Stimme' : 'Stimmen' }}</span>
-            </div>
-            @if (!i.rating_open) {
-              <div class="notice">{{ ratingClosedHint(i) }}</div>
-            } @else if (!api.hasCredentials()) {
-              <div class="notice">Zum Abstimmen anmelden.</div>
-            } @else {
-              <button type="button" class="thumb-vote-btn"
-                      [class.on]="userRating > 0"
-                      [disabled]="thumbBusy"
-                      (click)="toggleThumb(i.id)">
-                👍 {{ userRating > 0 ? 'Zugestimmt' : 'Daumen hoch' }}
-              </button>
-              @if (rateStatus) {
-                <div class="rate-status" [class.ok]="rateStatusOk"
-                     [class.err]="!rateStatusOk">{{ rateStatus }}</div>
-              }
-            }
-          } @else {
-
-            <!-- Durchschnitt der Community: nur lesen, mit Sternen visualisiert -->
-            @if (i.rating_count > 0) {
-              <div class="rating-avg">
-                <div class="stars-readonly" [attr.aria-label]="i.rating_avg + ' von 5'">
-                  @for (n of [1,2,3,4,5]; track n) {
-                    <span class="star"
-                          [class.full]="i.rating_avg >= n"
-                          [class.half]="i.rating_avg >= n - 0.5 && i.rating_avg < n">★</span>
-                  }
-                </div>
-                <div class="rating-numbers">
-                  <strong>{{ i.rating_avg | number: '1.1-1' }}</strong>
-                  <span>/ 5 · {{ i.rating_count }} {{ i.rating_count === 1 ? 'Stimme' : 'Stimmen' }}</span>
-                </div>
-              </div>
-            } @else {
-              <div class="rating-avg empty">
-                <div class="stars-readonly">
-                  <span class="star">★</span><span class="star">★</span>
-                  <span class="star">★</span><span class="star">★</span><span class="star">★</span>
-                </div>
-                <div class="rating-numbers">
-                  <small>Noch keine Bewertungen</small>
-                </div>
-              </div>
-            }
-
-            <!-- Eigene Bewertung: klickbar -->
-            @if (!i.rating_open) {
-              <div class="notice">{{ ratingClosedHint(i) }}</div>
-            } @else if (!api.hasCredentials()) {
-              <div class="notice">Zum Bewerten anmelden.</div>
-            } @else {
-              <div class="own-rating-label">
-                @if (userRating > 0) {
-                  Deine Bewertung: <strong>{{ userRating }} ★</strong>
-                } @else {
-                  Deine Bewertung
-                }
-              </div>
-              <div class="stars-input">
-                @for (n of [1,2,3,4,5]; track n) {
-                  <span class="star" [class.on]="n <= (userRating || 0)"
-                        (click)="setRating(i.id, n)" [attr.aria-label]="n + ' Sterne'">★</span>
-                }
-              </div>
-              @if (userRating > 0) {
-                <button class="rating-clear" (click)="setRating(i.id, 0)"
-                        title="Eigene Bewertung zurücksetzen">
-                  Bewertung zurücksetzen
-                </button>
-              }
-              @if (rateStatus) {
-                <div class="rate-status" [class.ok]="rateStatusOk"
-                     [class.err]="!rateStatusOk">{{ rateStatus }}</div>
-              }
-              @if (rateError) { <div class="error">{{ rateError }}</div> }
-            }
-          }
-          </div>
+          <ideendb-vote-box
+            [idea]="i"
+            (ideaChanged)="idea.set($event)"
+            (requestLogin)="requestLogin.emit()" />
 
           <div class="side-card share-card">
             <h3>Teilen</h3>
@@ -1210,9 +928,9 @@ import { ShareDialogComponent } from './share-dialog.component';
                 Änderung wird sofort gespeichert.
               </p>
               @if (api.isModerator()) {
-                <label>Herausforderung</label>
+                <label for="qe-topic">Herausforderung</label>
                 <p class="quick-note">Idee wird neu einsortiert</p>
-                <select [ngModel]="i.topic_id || ''"
+                <select id="qe-topic" [ngModel]="i.topic_id || ''"
                         (ngModelChange)="onChangeTopic(i.id, $event)"
                         [disabled]="topicChangeBusy">
                   <option value="">— keine —</option>
@@ -1227,7 +945,7 @@ import { ShareDialogComponent } from './share-dialog.component';
                   <div class="quick-error">{{ topicChangeError }}</div>
                 }
               }
-              <label [style.margin-top]="api.isModerator() ? '8px' : '0'">Phase
+              <label for="qe-phase" [style.margin-top]="api.isModerator() ? '8px' : '0'">Phase
                 @if (idea()?.allowed_next_phases?.length &&
                      idea()!.allowed_next_phases!.length < phases.length) {
                   <small style="font-weight:400; color:var(--wlo-muted)">
@@ -1235,15 +953,15 @@ import { ShareDialogComponent } from './share-dialog.component';
                   </small>
                 }
               </label>
-              <select [(ngModel)]="quickPhase" (change)="saveQuick('phase')"
+              <select id="qe-phase" [(ngModel)]="quickPhase" (change)="saveQuick('phase')"
                       [disabled]="quickBusy">
                 <option value="">— offen —</option>
                 @for (p of allowedPhases(); track p.slug) {
                   <option [value]="p.slug">{{ p.label }}</option>
                 }
               </select>
-              <label style="margin-top: 8px">Veranstaltung</label>
-              <select [(ngModel)]="quickEvent" (change)="saveQuick('event')"
+              <label for="qe-event" style="margin-top: 8px">Veranstaltung</label>
+              <select id="qe-event" [(ngModel)]="quickEvent" (change)="saveQuick('event')"
                       [disabled]="quickBusy">
                 <option value="">— keine —</option>
                 @for (e of events; track e.slug) {
@@ -1408,7 +1126,7 @@ import { ShareDialogComponent } from './share-dialog.component';
               </svg>
               Im edu-sharing öffnen
             </a>
-            <button class="action-btn" (click)="reportProblem(i)">
+            <button class="action-btn" (click)="reportProblem()">
               <svg class="act-ico" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
                 <line x1="12" y1="9" x2="12" y2="13"/>
@@ -1446,48 +1164,8 @@ export class IdeaDetailComponent implements OnChanges {
     if (this.ideaId) this.load({ keepCurrent: true });
   });
 
-  /** Detailseite ist nicht event-gescoped → globaler Bewertungs-Modus. */
-  mode(): VotingMode {
-    return this.voting.effective(null);
-  }
-  /** Hinweistext, wenn die Bewertung für diese Idee aktuell nicht offen ist
-   *  (global aus / Einreichungsphase / bereits abgeschlossen). */
-  ratingClosedHint(i: Idea): string {
-    // Grund kommt vom Backend (robust gegen veralteten globalen Schalter).
-    if ((i.rating_closed_reason || (this.voting.ratingActive() ? 'phase' : 'global')) === 'global') {
-      return 'Im Moment ist keine Bewertung möglich.';
-    }
-    if ((i.rating_count || 0) > 0) return 'Bewertung abgeschlossen.';
-    return 'Bewertung startet nach der Einreichungsphase.';
-  }
-  thumbBusy = false;
-
-  /** Daumen-Modus: Zustimmung setzen/zurücknehmen. */
-  toggleThumb(id: string) {
-    if (!this.api.hasCredentials()) { this.requestLogin.emit(); return; }
-    const prev = this.userRating;
-    this.thumbBusy = true;
-    this.rateStatus = '';
-    if (this.userRating > 0) {
-      this.userRating = 0;
-      this.api.unrateIdea(id).subscribe({
-        next: () => { this.thumbBusy = false; this.refreshAfterVote(id); },
-        // Fehler beim Zurücknehmen → vorigen Stand wiederherstellen (Daumen
-        // bleibt an, die Bewertung existiert ja noch), statt fälschlich auf 0.
-        error: (e) => { this.thumbBusy = false; this.userRating = prev; this.rateStatus = e?.error?.detail || 'Fehler'; this.rateStatusOk = false; },
-      });
-    } else {
-      this.userRating = 5;
-      this.api.rateIdea(id, 5).subscribe({
-        next: () => { this.thumbBusy = false; this.rateStatus = '✓ Danke!'; this.rateStatusOk = true; this.refreshAfterVote(id); },
-        error: (e) => { this.thumbBusy = false; this.userRating = prev; this.rateStatus = e?.error?.detail || 'Fehler'; this.rateStatusOk = false; },
-      });
-    }
-  }
-
-  private refreshAfterVote(id: string) {
-    this.api.getIdea(id).subscribe({ next: (i) => this.idea.set(i as any), error: () => { /* Re-Fetch nach Vote optional — Fehler ignorieren */ } });
-  }
+  // ===== Bewertung (Vote-Box: Sterne/Daumen, setRating/toggleThumb) =====
+  // → ausgelagert nach vote-box.component.ts
 
   @Input() ideaId!: string;
   /** Beim Klick aus der Liste bekanntes Idee-Objekt → sofortiger Kern-Render
@@ -1511,19 +1189,7 @@ export class IdeaDetailComponent implements OnChanges {
   @Output() openEvent = new EventEmitter<string>();
 
   idea = signal<Idea | null>(null);
-  newComment = '';
-  commentBusy = false;
-  commentError = '';
-  replyingTo: string | null = null;
-  replyText = '';
-  deletingCommentId: string | null = null;
 
-  reportStatus = signal<{ reported: boolean; status?: 'open' | 'resolved';
-                          created_at?: string } | null>(null);
-  userRating = 0;
-  rateError = '';
-  rateStatus = '';
-  rateStatusOk = true;
 
   interactions = signal<{
     interest: {
@@ -1666,21 +1332,15 @@ export class IdeaDetailComponent implements OnChanges {
       // (Kommentare, Dokumente, frisches Rating).
       this.idea.set(this.initialIdea ?? null);
       this.interactions.set(null);
-      this.userRating = 0;
     }
     this.api.getIdea(this.ideaId).subscribe({
-      next: (i: any) => {
+      next: (i) => {
         this.idea.set(i);
         // Im editOnly-Modus (Moderation „Inhalte verwalten") direkt den
         // Bearbeiten-Dialog öffnen, statt die Detailseite zu zeigen.
         if (this.editOnly && !this.editing) this.startEdit(i);
         this.quickPhase = i.phase || '';
         this.quickEvent = (i.events && i.events[0]) || '';
-        // Eigenes Rating direkt aus den Live-Metadaten übernehmen, damit die
-        // Sterne nach einem Reload korrekt vorausgewählt sind.
-        if (typeof i.my_rating === 'number' && i.my_rating > 0) {
-          this.userRating = i.my_rating;
-        }
       },
       error: () => {
         // Fresh idea, noch nicht im Cache — optimistische Anzeige beibehalten.
@@ -1693,27 +1353,8 @@ export class IdeaDetailComponent implements OnChanges {
     if (!this.phases.length) this.api.listPhases().subscribe((p) => (this.phases = p));
     if (!this.events.length)  this.api.listEvents().subscribe((e) => (this.events = e));
     if (!this.topics().length) this.api.topics().subscribe((t) => this.topics.set(t));
-
-    // Eigenen Report-Status laden (für „bereits gemeldet"-Hinweis im Melden-Dialog)
-    if (this.api.hasCredentials()) {
-      this.api.ideaReportStatus(this.ideaId).subscribe({
-        next: (r) => this.reportStatus.set(r),
-        error: () => this.reportStatus.set(null),
-      });
-    } else {
-      this.reportStatus.set(null);
-    }
-  }
-
-  formatHistoryDate(iso: string): string {
-    if (!iso) return '';
-    try {
-      const d = new Date(iso);
-      return d.toLocaleString('de-DE', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-      });
-    } catch { return iso; }
+    // Report-Status („bereits gemeldet?") lädt das Melden-Modal selbst bei
+    // Öffnung (report-problem-modal.component) — kein Fetch mehr pro Detailaufruf.
   }
 
   /** Topic-Titel für die Header-Breadcrumb. Wenn Topic noch nicht aus
@@ -1815,7 +1456,7 @@ export class IdeaDetailComponent implements OnChanges {
    *  edu-sharing-Profil (firstName + lastName, wie in den Kommentaren),
    *  fallback der Freitext-Autor aus dem Submit-Formular, sonst leer.
    *  Der Login-Username wird NIE angezeigt (er ist zugleich der Anmeldename). */
-  ownerLabel(i: any): string {
+  ownerLabel(i: Idea): string {
     return (i.owner_display_name || i.author || '').trim();
   }
 
@@ -1831,7 +1472,7 @@ export class IdeaDetailComponent implements OnChanges {
 
   /** Erzeugt einen URL zur öffentlichen Profilseite des Owners, oder
    *  leeren String, wenn kein technischer Username vorhanden ist. */
-  ownerProfileUrl(i: any): string {
+  ownerProfileUrl(i: Idea): string {
     const uname = i?.owner_username;
     if (!uname) return '';
     const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
@@ -2014,7 +1655,7 @@ export class IdeaDetailComponent implements OnChanges {
         this.quickBusy = false;
         this.quickStatus = '✓ Gespeichert';
         // Optimistic local update
-        const updated: any = { ...i };
+        const updated: Idea = { ...i };
         if (field === 'phase') updated.phase = this.quickPhase || null;
         else updated.events = newEvents;
         this.idea.set(updated);
@@ -2147,140 +1788,7 @@ export class IdeaDetailComponent implements OnChanges {
     return this.repoBaseUrl + path;
   }
 
-  submitComment(id: string) {
-    this.commentBusy = true;
-    this.commentError = '';
-    this.api.commentIdea(id, this.newComment.trim()).subscribe({
-      next: () => {
-        this.newComment = '';
-        this.commentBusy = false;
-        this.load();
-      },
-      error: (e) => {
-        this.commentError = e?.error?.detail || `Fehler beim Senden (HTTP ${e?.status})`;
-        this.commentBusy = false;
-      },
-    });
-  }
-
-  startReply(parentId: string) {
-    this.replyingTo = this.replyingTo === parentId ? null : parentId;
-    this.replyText = '';
-  }
-
-  submitReply(ideaId: string, parentId: string) {
-    this.commentBusy = true;
-    this.commentError = '';
-    this.api.commentIdea(ideaId, this.replyText.trim(), parentId).subscribe({
-      next: () => {
-        this.replyText = '';
-        this.replyingTo = null;
-        this.commentBusy = false;
-        this.load();
-      },
-      error: (e) => {
-        this.commentError = e?.error?.detail || `Fehler (HTTP ${e?.status})`;
-        this.commentBusy = false;
-      },
-    });
-  }
-
-  /** Wer darf den Kommentar löschen? Der Verfasser selbst oder ein
-   *  Moderator. Username wird gegen `creator.authorityName` gematcht. */
-  canDeleteComment(c: any): boolean {
-    if (!this.api.hasCredentials()) return false;
-    if (this.api.isModerator()) return true;
-    const me = (this.api.currentUser() || '').toLowerCase();
-    const author = (c?.creator?.authorityName || '').toLowerCase();
-    return !!me && me === author;
-  }
-
-  deleteComment(c: any, ideaId: string) {
-    if (!confirm('Diesen Kommentar wirklich löschen? Antworten bleiben sichtbar.')) return;
-    const cid = c?.ref?.id;
-    if (!cid) return;
-    this.deletingCommentId = cid;
-    this.api.deleteComment(cid, ideaId).subscribe({
-      next: () => { this.deletingCommentId = null; this.load(); },
-      error: (e) => {
-        this.deletingCommentId = null;
-        alert(e?.error?.detail || `Löschen fehlgeschlagen (HTTP ${e?.status})`);
-      },
-    });
-  }
-
-  /** Returns parent-comment-id for a comment, or null if it's a root.
-   *  edu-sharing serialisiert `replyTo` als Objekt `{id, repo, ...}`. */
-  private replyParentId(c: any): string | null {
-    if (!c?.replyTo) return null;
-    if (typeof c.replyTo === 'string') return c.replyTo;  // Defensive
-    return c.replyTo.id || null;
-  }
-  /** Helper fürs Template (Class-Binding `[class.reply]`). */
-  isReply(c: any): boolean { return this.replyParentId(c) !== null; }
-
-  /** Wenn der User auf eine Antwort antwortet, hängen wir die neue
-   *  Antwort an denselben Thread-Root, damit unser flacher 1-Level-Tree
-   *  konsistent bleibt. Bei einem Top-Level-Kommentar ist die Eltern-ID
-   *  der Kommentar selbst. */
-  replyTargetId(c: any): string {
-    return this.replyParentId(c) || c.ref.id;
-  }
-
-  /** Order comments so each reply follows its parent. One level deep;
-   *  nested replies (reply-to-reply) come out flat unter dem Thread-Root. */
-  threadedComments(list: any[]): any[] {
-    const byId = new Map<string, any>(list.map((c) => [c.ref.id, c]));
-    const roots = list.filter((c) => {
-      const pid = this.replyParentId(c);
-      return !pid || !byId.has(pid);
-    });
-    const out: any[] = [];
-    for (const r of roots) {
-      out.push(r);
-      for (const c of list) {
-        if (this.replyParentId(c) === r.ref.id) out.push(c);
-      }
-    }
-    return out;
-  }
-
-  setRating(id: string, n: number) {
-    const prev = this.userRating;
-    this.userRating = n;
-    this.rateError = '';
-    this.rateStatus = `Speichere ${n} ★…`;
-    this.rateStatusOk = true;
-    this.api.rateIdea(id, n).subscribe({
-      next: (r: any) => {
-        const i = this.idea();
-        if (i && r?.rating) {
-          this.idea.set({
-            ...i,
-            rating_avg: r.rating.avg,
-            rating_count: r.rating.count,
-          });
-          this.userRating = r.rating.mine || n;
-        }
-        this.rateStatusOk = true;
-        this.rateStatus = `✓ ${n} ★ gespeichert`;
-        setTimeout(() => { if (this.rateStatus.startsWith('✓')) this.rateStatus = ''; }, 2500);
-      },
-      error: (e) => {
-        // Auf den vorherigen Wert zurück (NICHT 0) — sonst sieht ein bereits
-        // bewertender User nach einem Fehler fälschlich „nicht bewertet".
-        this.userRating = prev;
-        this.rateStatus = '';
-        // Backend liefert klare Fehlermeldungen: 401 (Login) oder 403
-        // (Permission verweigert) — beide haben ein `detail`-Feld mit
-        // verständlichem Text. Anzeigen.
-        this.rateError = e?.error?.detail
-          || (e?.status === 401
-              ? 'Bitte zuerst anmelden, um zu bewerten.'
-              : `Fehler beim Speichern (HTTP ${e?.status || '?'})`);
-      },
-    });
-  }
+  // ===== Kommentare ===== → ausgelagert nach comment-thread.component.ts
 
   startEdit(i: Idea) {
     // Lazy-load taxonomies on first edit
@@ -2395,82 +1903,15 @@ export class IdeaDetailComponent implements OnChanges {
   }
 
   // ===== Problem-Melden =====
+  // Report-Modal ausgelagert → report-problem-modal.component.ts.
+  // Hier nur noch das Öffnungs-Flag (Trigger via „⚠ Problem melden"-Button).
   reportOpen = false;
-  reportText = '';
-  reportBusy = false;
-  reportSent = false;
+  reportProblem() { this.reportOpen = true; }
 
-  reportProblem(_i: Idea) {
-    this.reportText = '';
-    this.reportSent = false;
-    this.reportOpen = true;
-  }
 
-  closeReport() { this.reportOpen = false; }
-
-  submitReport(i: Idea) {
-    const text = (this.reportText || '').trim();
-    if (text.length < 3) { return; }
-    this.reportBusy = true;
-    this.api.reportIdea(i.id, text).subscribe({
-      next: () => {
-        this.reportBusy = false;
-        this.reportSent = true;
-        // Dialog noch 1.5s offen lassen, dann zu
-        setTimeout(() => { this.reportOpen = false; }, 1500);
-      },
-      error: (e) => {
-        this.reportBusy = false;
-        alert(`Senden fehlgeschlagen: ${e?.error?.detail || e?.message}`);
-      },
-    });
-  }
-
-  /** Fallback: User ohne Login bekommt mailto. */
-  reportViaMail(i: Idea) {
-    const mail = `mailto:redaktion@wirlernenonline.de`
-      + `?subject=${encodeURIComponent('Problem mit Idee: ' + i.title)}`
-      + `&body=${encodeURIComponent('Idee-ID: ' + this.ideaId + '\nLink: ' + this.shareUrl + '\n\nBeschreibung:\n')}`;
-    window.open(mail);
-  }
-
-  /** edu-sharing kann Vor-/Nachnamen an drei Stellen liefern:
-   *  - direkt am creator (`creator.firstName`)
-   *  - im Profile-Objekt (`creator.profile.firstName`)
-   *  - oder als Property-Array (`creator.properties['cm:firstName']`)
-   *  Wir checken in der Reihenfolge profile → properties → creator-direct
-   *  und fallen zurück auf userName/authorityName. */
-  formatUser(c: any): string {
-    const u = c?.creator || {};
-    const profile = u.profile || {};
-    const props = u.properties || {};
-    const fn = profile.firstName
-      || (props['cm:firstName'] || [])[0]
-      || u.firstName;
-    const ln = profile.lastName
-      || (props['cm:lastName'] || [])[0]
-      || u.lastName;
-    const name = [fn, ln].filter(Boolean).join(' ');
-    return name
-      || u.userName
-      || (props['cm:userName'] || [])[0]
-      || u.authorityName
-      || 'Unbekannt';
-  }
-
-  initials(c: any): string {
-    const n = this.formatUser(c);
-    return this.initialsOf(n);
-  }
-
-  initialsOf(name: string): string {
-    if (!name) return '?';
-    return name
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((s) => s[0]?.toUpperCase() ?? '')
-      .join('') || name[0]?.toUpperCase() || '?';
-  }
+  /** Initialen für Avatar-Kreise (Team-Sidebar) — delegiert an die
+   *  geteilte Util (format-utils.ts); der Kommentar-Thread nutzt dieselbe. */
+  initialsOf(name: string): string { return initialsOfUtil(name); }
 
   /** Short icon letter based on mimetype family; fallback to file extension. */
   iconLabel(a: Attachment): string {
@@ -2536,7 +1977,6 @@ export class IdeaDetailComponent implements OnChanges {
     return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
   }
 
-  formatTs(t: number) { return t ? new Date(t).toLocaleString('de-DE') : ''; }
   formatDate(iso: string) {
     const d = new Date(iso);
     return isNaN(d.getTime()) ? '' : d.toLocaleDateString('de-DE');

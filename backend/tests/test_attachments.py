@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import base64
 
-from app import routes
+from app import routes_captcha, routes_common
 from app.config import settings
 from app.db import connect
 
@@ -40,7 +40,7 @@ def test_anonymous_attachment_rejected_without_token(client):
 
 
 def test_anonymous_attachment_ok_with_valid_token(client, fake_es):
-    token = routes._upload_token_issue("fresh-idea")
+    token = routes_common._upload_token_issue("fresh-idea")
     r = client.post(
         "/api/v1/ideas/fresh-idea/attachments/upload",
         files=_file(),
@@ -52,7 +52,7 @@ def test_anonymous_attachment_ok_with_valid_token(client, fake_es):
 
 def test_anonymous_attachment_token_for_other_node_rejected(client):
     """Token ist an EINE Knoten-ID gebunden — es autorisiert keinen anderen."""
-    token = routes._upload_token_issue("other-node")
+    token = routes_common._upload_token_issue("other-node")
     r = client.post(
         "/api/v1/ideas/fresh-idea/attachments/upload",
         files=_file(),
@@ -64,7 +64,7 @@ def test_anonymous_attachment_token_for_other_node_rejected(client):
 def test_attachment_cap_is_enforced(client, fake_es):
     # Mit gültigem Token kommt der anonyme Upload durch die Token-Prüfung — die
     # Mengen-Obergrenze greift danach trotzdem (409).
-    token = routes._upload_token_issue("fresh-idea")
+    token = routes_common._upload_token_issue("fresh-idea")
     fake_es.child_objects = [{} for _ in range(settings.max_attachments_per_idea)]
     r = client.post(
         "/api/v1/ideas/fresh-idea/attachments/upload",
@@ -78,7 +78,7 @@ def test_anonymous_attachment_blocked_for_cached_idea(client, seed_idea):
     # Selbst MIT gültigem Token bleibt eine bereits einsortierte (gecachte) Idee
     # für anonyme Uploads gesperrt → Anmeldung nötig.
     seed_idea("cached1")
-    token = routes._upload_token_issue("cached1")
+    token = routes_common._upload_token_issue("cached1")
     r = client.post(
         "/api/v1/ideas/cached1/attachments/upload",
         files=_file(),
@@ -96,7 +96,7 @@ def test_anonymous_preview_rejected_without_token(client):
 
 
 def test_anonymous_preview_ok_with_valid_token(client, fake_es):
-    token = routes._upload_token_issue("fresh-idea")
+    token = routes_common._upload_token_issue("fresh-idea")
     r = client.post(
         "/api/v1/ideas/fresh-idea/preview",
         files=_img(),
@@ -112,7 +112,7 @@ def test_anonymous_preview_ok_with_valid_token(client, fake_es):
 def test_anonymous_submit_issues_upload_token(client):
     """End-to-end: der anonyme Submit gibt ein Token zurück, das genau die neue
     Knoten-ID autorisiert."""
-    ch = routes._captcha_issue()
+    ch = routes_captcha._captcha_issue()
     with connect() as con:
         ans = con.execute(
             "SELECT answer FROM captcha_challenge WHERE token=?", (ch["token"],)
@@ -125,7 +125,7 @@ def test_anonymous_submit_issues_upload_token(client):
     body = r.json()
     assert body["node_id"] == "new-node-1"
     assert body["upload_token"]
-    assert routes._upload_token_valid(body["upload_token"], "new-node-1")
+    assert routes_common._upload_token_valid(body["upload_token"], "new-node-1")
 
 
 def test_logged_in_attachment_needs_no_token(client, fake_es, seed_idea):

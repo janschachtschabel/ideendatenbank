@@ -138,7 +138,7 @@ export class RankTrendComponent implements OnChanges {
   private load() {
     const sort = this.modeFor() === 'thumbs' ? 'likes' : 'rating';
     this.api.ranking({ sort, event: this.event, limit: 20 }).subscribe({
-      next: (r) => this.data.set(r as any),
+      next: (r) => this.data.set(r),
       error: () => this.data.set(null),
     });
   }

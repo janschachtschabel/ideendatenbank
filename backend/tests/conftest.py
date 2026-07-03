@@ -36,7 +36,7 @@ import httpx  # noqa: E402  (Import nach dem Env-Setup ist beabsichtigt)
 import pytest  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
-from app import auth, edu_sharing, routes  # noqa: E402
+from app import auth, edu_sharing, routes_common  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.db import connect, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -190,6 +190,12 @@ class FakeES:
         self._record("create_node", parent_id=parent_id)
         return {"node": {"ref": {"id": "new-node-1"}, "properties": {}}}
 
+    async def create_collection(
+        self, parent_id: str | None = None, title: str | None = None, **kwargs
+    ) -> dict:
+        self._record("create_collection", parent_id=parent_id, title=title)
+        return {"collection": {"ref": {"id": f"coll::{title}"}}}
+
     async def upload_preview(self, node_id: str, *args, **kwargs) -> dict:
         self._record("upload_preview", node_id=node_id)
         return {}
@@ -209,10 +215,14 @@ class FakeES:
 
 @pytest.fixture(autouse=True)
 def _fresh_db(tmp_path, monkeypatch):
-    """Frische temporäre SQLite-DB pro Test + geleerte In-Memory-Caches."""
+    """Frische temporäre SQLite-DB pro Test + geleerte In-Memory-Caches.
+    Auch das Backup-Verzeichnis wird isoliert — sonst lesen Tests (z.B. der
+    /status-Diagnostics-Block via list_backups) echte ZIPs aus ./data/backups
+    der Entwickler-Maschine (Hermetik-Loch, vom Backup-Testlauf aufgedeckt)."""
     monkeypatch.setattr(settings, "sqlite_path", tmp_path / "test.sqlite")
+    monkeypatch.setattr(settings, "backup_dir", tmp_path / "backups")
     init_db()
-    routes._DISPLAY_NAME_CACHE.clear()
+    routes_common._DISPLAY_NAME_CACHE.clear()
     auth._MOD_CACHE.clear()  # Mod-Status-Cache pro Test leeren (Isolation)
     yield
 

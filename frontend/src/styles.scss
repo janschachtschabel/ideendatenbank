@@ -1,4 +1,16 @@
-@use '@angular/material' as mat;
+/* Barrierefreiheit: OS-Einstellung „Bewegung reduzieren" respektieren.
+   Neutralisiert zeitbasierte Effekte (Transitions/Animationen) praktisch
+   vollständig, ohne das Layout zu verändern. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ────────────────────────────────────────────────────────────────────────
  * Themen / Color Schemes
@@ -44,15 +56,6 @@ html {
   --wlo-topbar-hover:     rgba(255,255,255,.10);
   --wlo-topbar-active:    rgba(255,255,255,.15);
   --wlo-topbar-border:    rgba(255,255,255,.20);
-
-  @include mat.theme((
-    color: (
-      primary: mat.$azure-palette,
-      tertiary: mat.$blue-palette,
-    ),
-    typography: Roboto,
-    density: 0,
-  ));
 }
 
 /* ───── Theme: HackathOERn (heller Header, Logo-Farben als Akzente) ───── */

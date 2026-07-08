@@ -91,6 +91,35 @@ export interface Attachment {
   from_folder?: boolean;
 }
 
+/** Review-Vorschau einer Inbox-Einreichung (`GET /inbox/{id}/preview`).
+ *  Das Backend formt die edu-sharing-Rohdaten SERVERSEITIG in dieses stabile
+ *  Shape (routes_inbox.inbox_item_preview) — deshalb hier typisierbar, obwohl
+ *  die Quelle ES ist. Alle Felder optional: der Fehler-Fallback der
+ *  Inbox-Liste baut nur einen Minimal-Stub. */
+export interface InboxPreview {
+  id?: string;
+  title?: string | null;
+  description?: string | null;
+  author?: string | null;
+  project_url?: string | null;
+  owner_username?: string | null;
+  contact?: string | null;
+  phase?: string | null;
+  events?: string[];
+  target_topic?: string | null;
+  submitter?: string | null;
+  keywords?: string[];
+  preview_url?: string | null;
+  attachments?: Attachment[];
+  created_at?: string | null;
+  modified_at?: string | null;
+  rating_avg?: number | null;
+  rating_count?: number | null;
+  /** Vom Backend derzeit nicht geliefert — das Template blendet den
+   *  Kommentar-Block dann einfach aus. */
+  comment_count?: number | null;
+}
+
 export interface Comment {
   ref: { id: string; repo?: string; archived?: boolean };
   /** edu-sharing liefert ein verschachteltes Profile-Objekt; firstName/

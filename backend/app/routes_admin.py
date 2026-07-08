@@ -61,10 +61,13 @@ async def admin_backup_create(authorization: str | None = Header(None)):
 
 @router.get("/admin/backups", tags=["admin"])
 async def admin_backup_list(authorization: str | None = Header(None)):
-    """Liste vorhandener Backups, neueste zuerst."""
+    """Liste vorhandener Backups, neueste zuerst. ZIP-Header-Reads laufen im
+    Threadpool — Datei-I/O gehört nicht auf den Event-Loop."""
     await _require_moderator(authorization)
+    import asyncio as _aio
+
     return {
-        "backups": backup_mod.list_backups(),
+        "backups": await _aio.to_thread(backup_mod.list_backups),
         "keep": settings.backup_keep,
         "interval_hours": settings.backup_interval_hours,
         "enabled": settings.backup_enabled,

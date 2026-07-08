@@ -36,11 +36,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install slowapi ruff
+          pip install slowapi ruff pytest pip-audit
 
       - name: Lint (ruff)
         working-directory: backend
         run: ruff check app/
+
+      - name: Tests (pytest)
+        working-directory: backend
+        run: python -m pytest tests
+
+      - name: Dependency-Audit (pip-audit)
+        working-directory: backend
+        # Prüft die installierte Umgebung gegen die PyPI-Advisory-DB — ergänzt
+        # die manuell gepflegten CVE-Floors in pyproject.toml um ein CI-Gate.
+        run: python -m pip_audit
 
       - name: Import smoke
         working-directory: backend
@@ -70,7 +80,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          # Node 22 LTS — Angular 19 + @angular-eslint 21 + typescript-eslint 8
+          # Node 22 LTS — Angular 21 + @angular-eslint 21 + typescript-eslint 8
           # erwarten >=20.19; 22.x ist die nächste „rounded" LTS-Variante.
           node-version: "22"
           cache: "npm"
@@ -78,18 +88,27 @@ jobs:
 
       - name: Install
         working-directory: frontend
-        # `npm install --no-save` statt `npm ci`, weil das Lockfile auf
-        # einem Windows-Host generiert wurde und gelegentlich Linux-
-        # spezifische peer-Deps (z.B. `chokidar@^5`) fehlen. `--no-save`
-        # behält das Lockfile unverändert, ergänzt nur fehlende Pakete.
-        # Identisch zum Dockerfile.
-        run: npm install --no-save --no-audit --no-fund
+        # Lockfile-bindend (reproduzierbar; identisch zum Dockerfile). Das
+        # frühere Windows-Lockfile-Problem reproduziert nicht mehr —
+        # verifiziert 2026-07-03 im node:22-Container (Exit 0).
+        run: npm ci --no-audit --no-fund
+
+      - name: Dependency-Audit (npm audit)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Lint (ng lint)
         working-directory: frontend
         # Warnings sind ok (Accessibility/any-Hinweise), Errors brechen
         # den Build ab.
         run: npx ng lint --max-warnings=999
+
+      - name: Unit-Tests (ng test, headless)
+        working-directory: frontend
+        # Audit-Nachtrag: die Specs (u.a. Interceptor-Sicherheit — Credentials
+        # gehen NIE an Fremd-Origins) existierten, liefen aber nirgends.
+        # ubuntu-latest bringt Chrome mit → plain ChromeHeadless reicht.
+        run: npx ng test --watch=false --browsers=ChromeHeadless
 
       - name: Build embed bundle
         working-directory: frontend

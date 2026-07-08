@@ -68,7 +68,7 @@ without them. They are stored in the chart-managed `Secret` (`<release>-...-env`
 | `config.edu.guestUser`                 | edu-sharing guest username (**REQUIRED**, stored in Secret)            | `""`                                     |
 | `config.edu.guestPass`                 | edu-sharing guest password (**REQUIRED**, stored in Secret)            | `""`                                     |
 | `config.app.corsOrigins`               | Comma-separated allowed browser origins                                | `https://ideen.example.de`               |
-| `config.app.syncIntervalSeconds`       | Repository sync interval in seconds                                    | `300`                                    |
+| `config.app.syncNightlyHour`           | UTC hour (0–23) of the nightly full repository sync                    | `1`                                      |
 | `config.backup.enabled`                | Enable periodic ZIP backups of the SQLite DB                           | `true`                                   |
 | `config.backup.intervalHours`          | Backup interval in hours                                               | `24`                                     |
 | `config.backup.keep`                   | Number of backups to retain                                            | `3`                                      |
@@ -107,7 +107,7 @@ without them. They are stored in the chart-managed `Secret` (`<release>-...-env`
 | `terminationGracePeriod`               | Grace period for termination in seconds                                | `60`                 |
 | `startupProbe.*`                       | Startup probe tuning (`GET /api/v1/health`)                            | see `values.yaml`    |
 | `livenessProbe.*`                      | Liveness probe tuning (`GET /api/v1/health`)                           | see `values.yaml`    |
-| `readinessProbe.*`                     | Readiness probe tuning (`GET /api/v1/health`)                          | see `values.yaml`    |
+| `readinessProbe.*`                     | Readiness probe tuning (`GET /api/v1/ready` — DB check)                | see `values.yaml`    |
 | `resources.limits.cpu`                 | Set CPU limit on resources                                             | `1000m`              |
 | `resources.limits.memory`              | Set memory limit on resources                                          | `1Gi`                |
 | `resources.requests.cpu`               | Set CPU for requests on resources                                      | `250m`               |

@@ -370,8 +370,15 @@ async def get_interactions(
         try:
             # Reines Anzeige-Flag (Team-Verwaltungs-Buttons). `verified=True`:
             # die tatsächlichen Aktionen (set/remove_team_member) re-verifizieren
-            # via _verify_login. Kein zusätzlicher Roundtrip im Read-Pfad.
-            can_manage = (await _is_owner_or_mod(idea_id, authorization, verified=True))[0]
+            # via _verify_login. `live_fallback=False`: wie bei get_idea reicht
+            # der Cache-Owner-Match — dieser GET lädt bei JEDEM Detailseiten-
+            # Öffnen parallel, ein Live-node_metadata pro Aufruf wäre dieselbe
+            # Latenzfalle, die dort behoben wurde.
+            can_manage = (
+                await _is_owner_or_mod(
+                    idea_id, authorization, verified=True, live_fallback=False
+                )
+            )[0]
         except Exception:
             can_manage = False
 

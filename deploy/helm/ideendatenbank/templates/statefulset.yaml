@@ -72,9 +72,12 @@ spec:
           timeoutSeconds: {{ .timeoutSeconds }}
         {{- end }}
         {{- with .Values.readinessProbe }}
+        # Readiness prüft die DB (/ready = SELECT 1) — ein Pod mit kaputter DB
+        # fällt aus dem Service, wird aber NICHT neu gestartet (das entscheidet
+        # weiterhin die Liveness auf dem I/O-freien /health).
         readinessProbe:
           httpGet:
-            path: /api/v1/health
+            path: /api/v1/ready
             port: http
           failureThreshold: {{ .failureThreshold }}
           initialDelaySeconds: {{ .initialDelaySeconds }}

@@ -137,6 +137,29 @@ def test_can_edit_idea_collaborator_fail_closed(seed_idea, seed_interaction):
     assert asyncio.run(auth.can_edit_idea("i1", header, verified=True))[0] is True
 
 
+def test_is_owner_or_mod_mutation_path_keeps_live_fallback(seed_idea, fake_es):
+    """Mutationspfade (Default live_fallback=True): sagt der Cache „nicht
+    Owner", wird weiterhin live nachgeprüft (cm:creator / submitter:-Keyword) —
+    der Detail-Performance-Fix ändert die Rechte-Prüfung der Writes NICHT."""
+    seed_idea("i1", owner_username="alice")
+    header = "Basic " + _b64("user:pw")
+    allowed, _user, _mod = asyncio.run(auth.is_owner_or_mod("i1", header, verified=True))
+    assert allowed is False
+    assert fake_es.called("node_metadata")  # Live-Fallback lief
+
+
+def test_is_owner_or_mod_ui_path_skips_live_fallback(seed_idea, fake_es):
+    """UI-Flag-Pfad (live_fallback=False): kennt der Cache den Owner, ist ein
+    Nicht-Treffer verlässlich → KEIN Live-Roundtrip."""
+    seed_idea("i1", owner_username="alice")
+    header = "Basic " + _b64("user:pw")
+    allowed, _user, _mod = asyncio.run(
+        auth.is_owner_or_mod("i1", header, verified=True, live_fallback=False)
+    )
+    assert allowed is False
+    assert fake_es.called("node_metadata") == []
+
+
 def test_is_owner_or_mod_grants_moderator_regardless_of_verified(seed_idea, fake_es):
     """Moderatoren (my_memberships-verifiziert) kommen unabhängig von `verified`
     durch — der fail-closed-Default betrifft nur den Owner-/Mitwirkenden-Pfad."""

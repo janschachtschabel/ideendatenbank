@@ -128,8 +128,8 @@ config:
   app:
     ## @param config.app.corsOrigins Comma-separated list of allowed browser origins
     corsOrigins: "https://ideen.example.de"
-    ## @param config.app.syncIntervalSeconds Repository sync interval in seconds
-    syncIntervalSeconds: 300
+    ## @param config.app.syncNightlyHour UTC hour (0-23) of the nightly full repository sync (replaces the removed dead syncIntervalSeconds — the backend syncs nightly, not on an interval)
+    syncNightlyHour: 1
 
   backup:
     ## @param config.backup.enabled Enable periodic ZIP backups of the SQLite DB

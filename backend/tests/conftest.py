@@ -224,6 +224,7 @@ def _fresh_db(tmp_path, monkeypatch):
     init_db()
     routes_common._DISPLAY_NAME_CACHE.clear()
     auth._MOD_CACHE.clear()  # Mod-Status-Cache pro Test leeren (Isolation)
+    auth._MEMBERSHIP_INFLIGHT.clear()  # In-Flight-Coalescing-Registry (defensiv)
     yield
 
 

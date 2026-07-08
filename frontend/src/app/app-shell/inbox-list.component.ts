@@ -2,7 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Component, EventEmitter, Input, OnInit, Output, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../api.service';
-import { InboxItem, Topic } from '../models';
+import { Attachment, InboxItem, InboxPreview, Topic } from '../models';
 import { formatSize as fmtSize } from '../format-utils';
 import { SyncDiffComponent } from './sync-diff.component';
 
@@ -438,7 +438,7 @@ import { SyncDiffComponent } from './sync-diff.component';
                             </svg>
                             Veranstaltung(en)
                           </dt>
-                          <dd>{{ p.events.join(', ') }}</dd>
+                          <dd>{{ p.events?.join(', ') }}</dd>
                         }
                         @if (p.created_at) {
                           <dt>🆕 Erstellt</dt><dd>{{ formatDate(p.created_at) }}</dd>
@@ -488,7 +488,7 @@ import { SyncDiffComponent } from './sync-diff.component';
                   <!-- Keywords / Schlagwörter -->
                   @if (p.keywords?.length) {
                     <div>
-                      <h4>Schlagwörter ({{ p.keywords.length }})</h4>
+                      <h4>Schlagwörter ({{ p.keywords?.length }})</h4>
                       <div class="kw-list">
                         @for (kw of p.keywords; track kw) {
                           <span class="kw">#{{ kw }}</span>
@@ -500,7 +500,7 @@ import { SyncDiffComponent } from './sync-diff.component';
                   <!-- Anhänge -->
                   @if (p.attachments?.length) {
                     <div class="preview-attachments">
-                      <h4>Dokumente / Anhänge ({{ p.attachments.length }})</h4>
+                      <h4>Dokumente / Anhänge ({{ p.attachments?.length }})</h4>
                       @for (a of p.attachments; track a.id) {
                         <span class="att">
                           <span>{{ attIcon(a) }}</span>
@@ -658,7 +658,7 @@ export class InboxListComponent implements OnInit {
    *  aus edu-sharing, damit auch noch nicht einsortierte Einreichungen (die
    *  `getIdea` mangels Cache-Eintrag mit 404 quittiert) vollständig mit
    *  Beschreibung, Schlagwörtern und Anhängen geprüft werden können. */
-  inboxPreview: Record<string, any> = {};
+  inboxPreview: Record<string, InboxPreview> = {};
 
   toggleInboxPreview(id: string) {
     if (this.expandedInbox.has(id)) {
@@ -668,7 +668,7 @@ export class InboxListComponent implements OnInit {
     this.expandedInbox.add(id);
     if (!this.inboxPreview[id]) {
       this.api.inboxItemPreview(id).subscribe({
-        next: (idea: any) => { this.inboxPreview[id] = idea; },
+        next: (idea) => { this.inboxPreview[id] = idea; },
         error: () => {
           // Fallback: minimaler Stub mit Inbox-Daten, damit was angezeigt wird
           const it = this.items().find(x => x.id === id);
@@ -681,7 +681,7 @@ export class InboxListComponent implements OnInit {
     }
   }
 
-  attIcon(a: any): string {
+  attIcon(a: Attachment): string {
     const m = (a?.mimetype || '').toLowerCase();
     if (m.startsWith('image/')) return '🖼';
     if (m === 'application/pdf') return '📕';
@@ -716,7 +716,8 @@ export class InboxListComponent implements OnInit {
    *  (ngOnInit über das @if des Parents) — Änderungen aus dem Themen-
    *  Editor sind so beim nächsten Postfach-Besuch automatisch sichtbar. */
   reloadTopicMaps() {
-    this.api.topics().subscribe((ts) => {
+    this.api.topics().subscribe({
+      next: (ts) => {
       this.topicsById = Object.fromEntries(ts.map((t) => [t.id, t]));
       // Challenge-Ebene (Ebene 2) als Move-Ziel — Moderator sortiert Ideen
       // konkret in eine Herausforderung, nicht in den Themen-Oberbereich.
@@ -743,6 +744,8 @@ export class InboxListComponent implements OnInit {
       // Falls die Items schon geladen sind (Topics-Request kam später):
       // Wunsch-Ziele jetzt vorbelegen.
       this.prefillMoveTargets();
+      },
+      error: () => { /* soft-fail: Move-Ziel-Dropdowns bleiben leer, kein uncaught error */ },
     });
   }
 
@@ -761,10 +764,12 @@ export class InboxListComponent implements OnInit {
     if (f !== 'diff') this.load();  // 'diff': das Sync-Diff-Kind lädt sich selbst
   }
 
-  /** Holt die Counts der drei Inbox-Filter parallel für die „(N)"-Anzeige. */
+  /** Holt die Counts der ÜBRIGEN Inbox-Filter für die „(N)"-Anzeige. Der
+   *  aktive Filter ist bereits durch `load()` bekannt und wird hier
+   *  übersprungen (sonst ein redundanter Live-ES-Walk pro Postfach-Öffnung). */
   private loadInboxCounts() {
-    const filters: ('uncategorized' | 'all' | 'categorized')[] =
-      ['uncategorized', 'all', 'categorized'];
+    const filters = (['uncategorized', 'all', 'categorized'] as const)
+      .filter((f) => f !== this.inboxFilter);
     for (const f of filters) {
       this.api.inbox(f).subscribe({
         next: (r) => (this.inboxCounts[f] = (r as { total?: number }).total ?? r.count),
@@ -781,10 +786,11 @@ export class InboxListComponent implements OnInit {
       next: (r) => {
         this.items.set(r.items);
         this.countChanged.emit(r.items.length);
+        // Count des AKTIVEN Filters aus dem Haupt-Load übernehmen (kein
+        // zweiter Request dafür); die übrigen holt loadInboxCounts.
+        this.inboxCounts[filter] = (r as { total?: number }).total ?? r.count;
         this.prefillMoveTargets();
         this.loading.set(false);
-        // Counts mit aktualisieren — der aktuelle Filter ist schon da,
-        // die übrigen drei laden wir parallel im Hintergrund.
         this.loadInboxCounts();
       },
       error: () => this.loading.set(false),
@@ -825,9 +831,12 @@ export class InboxListComponent implements OnInit {
   }
 
   doDelete(id: string) {
-    this.api.deleteInboxItem(id).subscribe(() => {
-      this.confirmId = null;
-      this.load();
+    this.api.deleteInboxItem(id).subscribe({
+      next: () => {
+        this.confirmId = null;
+        this.load();
+      },
+      error: (e) => alert(`Löschen fehlgeschlagen: ${e?.error?.detail || 'HTTP ' + (e?.status ?? '?')}`),
     });
   }
 

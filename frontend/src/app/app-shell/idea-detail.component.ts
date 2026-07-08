@@ -720,7 +720,9 @@ import { initialsOf as initialsOfUtil } from '../format-utils';
             @if (ownerLabel(i); as label) {
               <span class="meta-item">
                 👤 <span class="meta-role">Ideengeber:in:</span>
-                @if (i.owner_username && ownerProfileUrl(i)) {
+                <!-- Profil-Link nur bei echtem Namen — das „Anonym"-Fallback
+                     darf nie auf eine Profilseite verlinken. -->
+                @if (label !== 'Anonym' && i.owner_username && ownerProfileUrl(i)) {
                   <a class="author-link" [href]="ownerProfileUrl(i)">{{ label }}</a>
                 } @else { <span>{{ label }}</span> }
               </span>
@@ -1348,11 +1350,11 @@ export class IdeaDetailComponent implements OnChanges {
         if (this.editOnly) this.editClosed.emit();
       },
     });
-    this.api.getInteractions(this.ideaId).subscribe((x) => this.interactions.set(x));
+    this.api.getInteractions(this.ideaId).subscribe({ next: (x) => this.interactions.set(x), error: this._softLoadFail });
     // Taxonomien lazy laden, falls noch nicht vorhanden (für Quick-Edit-Dropdowns)
-    if (!this.phases.length) this.api.listPhases().subscribe((p) => (this.phases = p));
-    if (!this.events.length)  this.api.listEvents().subscribe((e) => (this.events = e));
-    if (!this.topics().length) this.api.topics().subscribe((t) => this.topics.set(t));
+    if (!this.phases.length) this.api.listPhases().subscribe({ next: (p) => (this.phases = p), error: this._softLoadFail });
+    if (!this.events.length)  this.api.listEvents().subscribe({ next: (e) => (this.events = e), error: this._softLoadFail });
+    if (!this.topics().length) this.api.topics().subscribe({ next: (t) => this.topics.set(t), error: this._softLoadFail });
     // Report-Status („bereits gemeldet?") lädt das Melden-Modal selbst bei
     // Öffnung (report-problem-modal.component) — kein Fetch mehr pro Detailaufruf.
   }
@@ -1452,12 +1454,13 @@ export class IdeaDetailComponent implements OnChanges {
   renamingAttachmentId: string | null = null;
   renameAttachmentValue = '';
 
-  /** Anzeige-Label für den Eigentümer: bevorzugt der Real-Name aus dem
-   *  edu-sharing-Profil (firstName + lastName, wie in den Kommentaren),
-   *  fallback der Freitext-Autor aus dem Submit-Formular, sonst leer.
-   *  Der Login-Username wird NIE angezeigt (er ist zugleich der Anmeldename). */
+  /** Anzeige-Label für die Ideengeber:in (Anforderungs-Priorität):
+   *  1. der Freitext-Name aus dem Einreichformular (`author`),
+   *  2. der Klarname des einreichenden WLO-Users (Profil/edu-sharing),
+   *  3. „Anonym" — nie der Mod, der freigeschaltet hat, nie der Login-Username
+   *  (er ist zugleich der Anmeldename) und nie der Guest-Service-Account. */
   ownerLabel(i: Idea): string {
-    return (i.owner_display_name || i.author || '').trim();
+    return (i.author || i.owner_display_name || '').trim() || 'Anonym';
   }
 
   /** Klickbarer Link aus dem Kontakt: mailto: bei E-Mail, href bei http(s)-URL,
@@ -1675,15 +1678,21 @@ export class IdeaDetailComponent implements OnChanges {
     });
   }
 
+  /** Transienter Read-Fehler beim Nachladen: Sektion behält ihren Stand, kein
+   *  uncaught error (bewusste weiche Degradation). */
+  private _softLoadFail = () => { /* intentional graceful degradation */ };
+
   toggleInterest() {
-    this.api.toggleInterest(this.ideaId).subscribe(() => {
-      this.api.getInteractions(this.ideaId).subscribe((x) => this.interactions.set(x));
+    this.api.toggleInterest(this.ideaId).subscribe({
+      next: () => this.api.getInteractions(this.ideaId).subscribe({ next: (x) => this.interactions.set(x), error: this._softLoadFail }),
+      error: (e) => alert(`Aktion fehlgeschlagen: ${e?.error?.detail || e?.message}`),
     });
   }
 
   toggleFollow() {
-    this.api.toggleFollow(this.ideaId).subscribe(() => {
-      this.api.getInteractions(this.ideaId).subscribe((x) => this.interactions.set(x));
+    this.api.toggleFollow(this.ideaId).subscribe({
+      next: () => this.api.getInteractions(this.ideaId).subscribe({ next: (x) => this.interactions.set(x), error: this._softLoadFail }),
+      error: (e) => alert(`Aktion fehlgeschlagen: ${e?.error?.detail || e?.message}`),
     });
   }
 
@@ -1694,7 +1703,7 @@ export class IdeaDetailComponent implements OnChanges {
     this.api.setTeamMember(this.ideaId, userKey, patch).subscribe({
       next: () => {
         this.teamBusy = null;
-        this.api.getInteractions(this.ideaId).subscribe((x) => this.interactions.set(x));
+        this.api.getInteractions(this.ideaId).subscribe({ next: (x) => this.interactions.set(x), error: this._softLoadFail });
       },
       error: (e) => {
         this.teamBusy = null;
@@ -1709,7 +1718,7 @@ export class IdeaDetailComponent implements OnChanges {
     this.api.removeTeamMember(this.ideaId, userKey).subscribe({
       next: () => {
         this.teamBusy = null;
-        this.api.getInteractions(this.ideaId).subscribe((x) => this.interactions.set(x));
+        this.api.getInteractions(this.ideaId).subscribe({ next: (x) => this.interactions.set(x), error: this._softLoadFail });
       },
       error: (e) => {
         this.teamBusy = null;
@@ -1793,10 +1802,10 @@ export class IdeaDetailComponent implements OnChanges {
   startEdit(i: Idea) {
     // Lazy-load taxonomies on first edit
     if (!this.phases.length) {
-      this.api.listPhases().subscribe((p) => (this.phases = p));
+      this.api.listPhases().subscribe({ next: (p) => (this.phases = p), error: this._softLoadFail });
     }
     if (!this.events.length) {
-      this.api.listEvents().subscribe((e) => (this.events = e));
+      this.api.listEvents().subscribe({ next: (e) => (this.events = e), error: this._softLoadFail });
     }
     // Strip phase:/event: prefixes from keywords for the freetext field
     const userKws = (i.keywords || []).filter(

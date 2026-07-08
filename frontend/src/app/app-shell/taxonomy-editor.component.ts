@@ -442,16 +442,24 @@ export class TaxonomyEditorComponent implements OnInit {
         this.votingModeChange.emit(s.voting_mode_global || 'stars');
         this.ratingEnabledChange.emit(s.rating_enabled !== false);
       },
+      // Transienter Fehler beim Rollback-Nachladen: nichts überschreiben.
+      error: () => { /* soft-fail: alter Zustand bleibt */ },
     });
   }
 
   loadEvents() {
     // Mod sieht ALLES — drafts + archived inkl. inaktiv
     this.api.listEvents({ includeInactive: true, includeDrafts: true, includeArchived: true })
-      .subscribe((es) => this.events.set(es));
+      .subscribe({
+        next: (es) => this.events.set(es),
+        error: () => { /* soft-fail: Liste behält ihren Stand statt uncaught error */ },
+      });
   }
   loadPhases() {
-    this.api.listPhases(true).subscribe((ps) => this.phases.set(ps));
+    this.api.listPhases(true).subscribe({
+      next: (ps) => this.phases.set(ps),
+      error: () => { /* soft-fail */ },
+    });
   }
 
   /** Lifecycle-Label für die Status-Pille. */
@@ -522,11 +530,19 @@ export class TaxonomyEditorComponent implements OnInit {
       featured_until: this.newEvent.featured_until ?? null,
       sort_order: maxOrder + 10,
     };
-    this.api.upsertEvent(entry).subscribe(() => {
-      this.newEvent = this.blankEventEntry();
-      this.loadEvents();
+    this.api.upsertEvent(entry).subscribe({
+      next: () => {
+        this.newEvent = this.blankEventEntry();
+        this.loadEvents();
+      },
+      error: this._taxSaveError,
     });
   }
+  /** Einheitliches Fehler-Feedback für Taxonomie-Schreibaktionen (Add/Save/
+   *  Toggle) — sonst scheiterte ein Mod-Write still + als uncaught error. */
+  private _taxSaveError = (e: { error?: { detail?: string }; status?: number }) => {
+    alert(`Speichern fehlgeschlagen: ${e?.error?.detail || 'HTTP ' + (e?.status ?? '?')}`);
+  };
   deleteEvent(e: TaxonomyEntry) {
     const n = this.usageEvent(e.slug);
     const warn = n > 0
@@ -551,18 +567,24 @@ export class TaxonomyEditorComponent implements OnInit {
   }
   savePhase() {
     if (!this.editingPhase) return;
-    this.api.upsertPhase(this.editingPhase).subscribe(() => {
-      this.editingPhase = null;
-      this.loadPhases();
+    this.api.upsertPhase(this.editingPhase).subscribe({
+      next: () => {
+        this.editingPhase = null;
+        this.loadPhases();
+      },
+      error: this._taxSaveError,
     });
   }
   addPhase() {
     const slug = this.normalizeSlug(this.newPhase.slug);
     const maxOrder = this.phases().reduce((m, p) => Math.max(m, p.sort_order ?? 0), 0);
     const entry: TaxonomyEntry = { ...this.newPhase, slug, sort_order: maxOrder + 10 };
-    this.api.upsertPhase(entry).subscribe(() => {
-      this.newPhase = this.blankEntry();
-      this.loadPhases();
+    this.api.upsertPhase(entry).subscribe({
+      next: () => {
+        this.newPhase = this.blankEntry();
+        this.loadPhases();
+      },
+      error: this._taxSaveError,
     });
   }
   deletePhase(p: TaxonomyEntry) {
@@ -588,11 +610,17 @@ export class TaxonomyEditorComponent implements OnInit {
     const updated: TaxonomyEntry = { ...e, active: !e.active };
     const op = kind === 'event'
       ? this.api.upsertEvent(updated) : this.api.upsertPhase(updated);
-    op.subscribe(() => kind === 'event' ? this.loadEvents() : this.loadPhases());
+    op.subscribe({
+      next: () => kind === 'event' ? this.loadEvents() : this.loadPhases(),
+      error: this._taxSaveError,
+    });
   }
 
   setEventRating(e: TaxonomyEntry, open: boolean) {
-    this.api.upsertEvent({ ...e, rating_open: open }).subscribe(() => this.loadEvents());
+    this.api.upsertEvent({ ...e, rating_open: open }).subscribe({
+      next: () => this.loadEvents(),
+      error: this._taxSaveError,
+    });
   }
 
   // ===== Nutzungszahlen + Lösch-Feedback =====
@@ -649,14 +677,12 @@ export class TaxonomyEditorComponent implements OnInit {
       bySlug.has(ph.slug) ? { ...ph, sort_order: bySlug.get(ph.slug)! } : ph,
     ));
     this.phaseSortBusy = p.slug;
-    let done = 0;
-    const fin = () => { if (++done >= updates.length) { this.phaseSortBusy = null; this.loadPhases(); } };
-    for (const u of updates) {
-      this.api.upsertPhase(u).subscribe({
-        next: fin,
-        error: () => { this.phaseSortBusy = null; this.loadPhases(); },
-      });
-    }
+    // EIN Bulk-Call statt N Einzel-Upserts; schreibt nur sort_order.
+    const items = updates.map((u) => ({ slug: u.slug, sort_order: u.sort_order! }));
+    this.api.sortTaxonomy('phase', items).subscribe({
+      next: () => { this.phaseSortBusy = null; this.loadPhases(); },
+      error: () => { this.phaseSortBusy = null; this.loadPhases(); },
+    });
   }
 
   // ===== Event-Reihenfolge per ▲▼ =====
@@ -690,14 +716,12 @@ export class TaxonomyEditorComponent implements OnInit {
       bySlug.has(ev.slug) ? { ...ev, sort_order: bySlug.get(ev.slug)! } : ev,
     ));
     this.eventSortBusy = e.slug;
-    let done = 0;
-    const fin = () => { if (++done >= updates.length) { this.eventSortBusy = null; this.loadEvents(); } };
-    for (const u of updates) {
-      this.api.upsertEvent(u).subscribe({
-        next: fin,
-        error: () => { this.eventSortBusy = null; this.loadEvents(); },
-      });
-    }
+    // EIN Bulk-Call statt N Einzel-Upserts; schreibt nur sort_order.
+    const items = updates.map((u) => ({ slug: u.slug, sort_order: u.sort_order! }));
+    this.api.sortTaxonomy('event', items).subscribe({
+      next: () => { this.eventSortBusy = null; this.loadEvents(); },
+      error: () => { this.eventSortBusy = null; this.loadEvents(); },
+    });
   }
 
   // ===== Share-Dialog für Events =====

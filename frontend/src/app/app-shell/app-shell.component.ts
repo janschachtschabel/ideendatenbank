@@ -1142,22 +1142,33 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.go('detail');
   }
 
+  /** Transienter Fehler bei einem Topic-/Facetten-Read: weich abfangen, damit
+   *  Navigation/Filter nicht mit einem uncaught error abbrechen (Zähler/Listen
+   *  behalten ihren Stand). */
+  private _softDataFail = () => { /* intentional graceful degradation */ };
+
   /** Drill Level 1 → Level 2: Herausforderungen unter dem Themenbereich. */
   enterTopicDrill(t: Topic) {
     this.topicDrillRoot.set(t);
     this.topicDrillChild.set(null);
-    this.api.topicDetail(t.id).subscribe((d) => {
-      // Counts der Herausforderungen über EINEN /meta-Call statt je eine
-      // listIdeas-Abfrage pro Kind (vormals N+1).
-      this.api.meta({}).subscribe((m) => {
-        // Stale-Guard: ein spät auflösender Callback eines inzwischen
-        // gewechselten/verlassenen Drills darf die Counts nicht überschreiben.
-        if (this.topicDrillRoot()?.id !== t.id) return;
-        const counts: Record<string, number> = m.topics || {};
-        this.subtopicCounts = {};
-        for (const c of d.children) this.subtopicCounts[c.id] = this.subtreeIdeaCount(c.id, counts);
-        this.subtopicCounts = { ...this.subtopicCounts };
-      });
+    this.api.topicDetail(t.id).subscribe({
+      next: (d) => {
+        // Counts der Herausforderungen über EINEN /meta-Call statt je eine
+        // listIdeas-Abfrage pro Kind (vormals N+1).
+        this.api.meta({}).subscribe({
+          next: (m) => {
+            // Stale-Guard: ein spät auflösender Callback eines inzwischen
+            // gewechselten/verlassenen Drills darf die Counts nicht überschreiben.
+            if (this.topicDrillRoot()?.id !== t.id) return;
+            const counts: Record<string, number> = m.topics || {};
+            this.subtopicCounts = {};
+            for (const c of d.children) this.subtopicCounts[c.id] = this.subtreeIdeaCount(c.id, counts);
+            this.subtopicCounts = { ...this.subtopicCounts };
+          },
+          error: this._softDataFail,
+        });
+      },
+      error: this._softDataFail,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -1192,8 +1203,9 @@ export class AppShellComponent implements OnInit, OnDestroy {
    *  zeigt — unabhängig vom Browser-Filter. */
   private loadFacets() {
     // Global (für Events-Seite, Themen-Übersicht) — ungefiltert
-    this.api.meta({}).subscribe((m) => {
-      this.allAvailableEvents.set(m.events || []);
+    this.api.meta({}).subscribe({
+      next: (m) => this.allAvailableEvents.set(m.events || []),
+      error: this._softDataFail,
     });
     // Scoped: berücksichtigt die übrigen aktiven Filter, damit die Pillen-Counts
     // zueinander passen (Drill-down: Phase=Anregung → nur Events in Anregung).
@@ -1204,27 +1216,36 @@ export class AppShellComponent implements OnInit, OnDestroy {
         event: this.filterEvent,
         q: this.searchQ,
       })
-      .subscribe((m) => {
-        this.availablePhases.set(m.phases || []);
-        this.availableEvents.set(m.events || []);
-        this.filterTopicCounts.set(m.topics || {});
+      .subscribe({
+        next: (m) => {
+          this.availablePhases.set(m.phases || []);
+          this.availableEvents.set(m.events || []);
+          this.filterTopicCounts.set(m.topics || {});
+        },
+        error: this._softDataFail,
       });
   }
 
   private loadTopicContext(id: string) {
-    this.api.topicDetail(id).subscribe((d) => {
+    this.api.topicDetail(id).subscribe({
+      next: (d) => {
       this.currentTopic.set(d.topic);
       this.topicParent.set(d.parent);
       this.topicChildren.set(d.children);
       // Idee-Zahlen je Herausforderung über EINEN /meta-Call (vormals N+1).
-      this.api.meta({}).subscribe((m) => {
+      this.api.meta({}).subscribe({
+        next: (m) => {
         // Stale-Guard: nur anwenden, wenn diese Sammlung noch die aktuelle ist.
         if (this.currentTopic()?.id !== id) return;
         const counts: Record<string, number> = m.topics || {};
         this.subtopicCounts = {};
         for (const c of d.children) this.subtopicCounts[c.id] = this.subtreeIdeaCount(c.id, counts);
         this.subtopicCounts = { ...this.subtopicCounts };
+        },
+        error: this._softDataFail,
       });
+      },
+      error: this._softDataFail,
     });
   }
 

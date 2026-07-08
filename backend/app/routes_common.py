@@ -21,6 +21,7 @@ from . import edu_sharing
 from . import sync as sync_mod
 from .auth import decode_basic_user as _user_key_from_auth
 from .auth import is_moderator as _is_moderator
+from .config import settings
 from .db import connect
 
 log = logging.getLogger(__name__)
@@ -65,11 +66,16 @@ def _rating_open_for_events(event_slugs: list[str] | None) -> bool:
 def _row_to_idea(r) -> dict:
     # Login-Username NIE als Anzeigename ausliefern: `author` ist im Cache evtl.
     # nur cm:creator (= Login). Daher author verwerfen, wenn er == owner_username,
-    # und einen sicheren owner_display_name bilden (Klarname aus edu-sharing,
-    # sonst ein echter Freitext-Autor, sonst None — nie der Login).
+    # und einen sicheren owner_display_name bilden. Anzeige-Priorität (Anforderung):
+    # 1. author-Freitext aus der Einreichung, 2. Klarname aus edu-sharing,
+    # sonst None — nie der Login, nie der Guest-Service-Account.
     _un = _safe_get(r, "owner_username")
     _au = r["author"]
     _safe_author = _au if (_au and _au != _un) else None
+    # Der technische Guest-Account (anonyme Submits) ist keine Person: Login
+    # nicht ausliefern → kein Profil-Link auf den Service-Account im Frontend.
+    if settings.edu_guest_user and _un == settings.edu_guest_user:
+        _un = None
     return {
         "id": r["id"],
         "kind": r["kind"],
@@ -92,7 +98,7 @@ def _row_to_idea(r) -> dict:
         "attachment_name": _safe_get(r, "attachment_name"),
         "attachment_url": _safe_get(r, "attachment_url"),
         "owner_username": _un,
-        "owner_display_name": _safe_get(r, "owner_display_name") or _safe_author,
+        "owner_display_name": _safe_author or _safe_get(r, "owner_display_name"),
         "attachment_folder_id": _safe_get(r, "attachment_folder_id"),
         "created_at": r["created_at"],
         "modified_at": r["modified_at"],

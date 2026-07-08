@@ -11,7 +11,7 @@ Gepinnt:
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.db import connect
 
@@ -101,6 +101,66 @@ def test_my_rating_from_vote_event_ledger(client, seed_idea, user_headers):
     assert r.json()["my_rating"] == 4.0
 
 
+# ---- D: Owner-Check ohne Live-Roundtrip -------------------------------------
+# can_edit/can_delete sind reine UI-Flags — die echte Mutation re-verifiziert
+# serverseitig (dort bleibt der Live-Fallback). Der Detail-Pfad vertraut dem
+# Cache, sobald der den Owner kennt.
+
+
+def _basic(user: str) -> dict:
+    import base64
+
+    return {"Authorization": "Basic " + base64.b64encode(f"{user}:pw".encode()).decode()}
+
+
+def test_detail_view_by_non_owner_does_no_live_owner_check(client, fake_es, seed_idea):
+    """D: Eingeloggter Nicht-Owner öffnet eine gecachte fremde Idee → KEIN
+    Live-node_metadata für die UI-Flags. (Vorher: ungecachter ~300–450-ms-
+    ES-Call auf JEDEM Detailaufruf fremder Ideen; bei ES-Hängern bis zum
+    30-s-Timeout — die gemeldeten Einzel-Ausreißer.)"""
+    seed_idea("i1", owner_username="alice")
+    r = client.get("/api/v1/ideas/i1", headers=_basic("user"))
+    assert r.status_code == 200
+    assert r.json()["can_edit"] is False
+    assert r.json()["can_delete"] is False
+    assert fake_es.called("node_metadata") == []
+
+
+def test_detail_view_owner_gets_edit_flag_from_cache_alone(client, fake_es, seed_idea):
+    """D: Der Owner bekommt can_edit=True aus dem Cache-Match — ebenfalls ohne
+    Live-Call."""
+    seed_idea("i1", owner_username="alice")
+    r = client.get("/api/v1/ideas/i1", headers=_basic("alice"))
+    assert r.json()["can_edit"] is True
+    assert fake_es.called("node_metadata") == []
+
+
+def test_interactions_view_does_no_live_owner_check(client, fake_es, seed_idea):
+    """D: Auch der interactions-GET (lädt die Detailseite bei jedem Öffnen
+    parallel!) darf für das reine `can_manage`-UI-Flag keinen Live-Roundtrip
+    machen — gleiche Klasse wie get_idea; die echten Team-Mutationen
+    (set/remove_team_member) re-verifizieren weiterhin live."""
+    seed_idea("i1", owner_username="alice")
+    r = client.get("/api/v1/ideas/i1/interactions", headers=_basic("user"))
+    assert r.status_code == 200
+    assert r.json()["interest"]["can_manage"] is False
+    assert fake_es.called("node_metadata") == []
+
+
+def test_detail_view_falls_back_live_when_cache_owner_unknown(client, fake_es, seed_idea):
+    """D (Randfall): Cache-Row OHNE owner_username → der Live-Blick bleibt,
+    damit der echte Submitter seinen Edit-Button behält."""
+    seed_idea("i1", owner_username=None)
+    fake_es.nodes["i1"] = {
+        "ref": {"id": "i1"},
+        "properties": {"cm:creator": ["user"]},
+        "parent": {"id": "ch1"},
+    }
+    r = client.get("/api/v1/ideas/i1", headers=_basic("user"))
+    assert r.json()["can_edit"] is True
+    assert fake_es.called("node_metadata")
+
+
 # ---- B: Kommentar-Cache mit Count-Invalidierung ----------------------------
 
 
@@ -137,12 +197,23 @@ def test_comments_refetched_when_count_changed(client, fake_es, seed_idea):
 
 
 def test_comments_live_when_no_cache(client, fake_es, seed_idea):
-    """B: leerer Cache → Live-Call (und füllt den Cache)."""
+    """B: leerer Cache MIT Kommentaren (count>0) → Live-Call (und füllt den Cache)."""
     seed_idea("i1")
     _set("i1", comment_count=1)  # comments_cache bleibt NULL
     r = client.get("/api/v1/ideas/i1")
     assert r.status_code == 200
     assert fake_es.called("comments")
+
+
+def test_comments_skipped_when_count_zero(client, fake_es, seed_idea):
+    """B: comment_count==0 → beweisbar keine Kommentare → KEIN Live-Call, auch
+    ohne Cache. Der häufigste Fall (kommentarlose Idee); spart beim Erstaufruf
+    den ~300-450-ms-ES-Roundtrip, den die Detailseite sonst kostete."""
+    seed_idea("i1")  # comment_count-Default 0, comments_cache NULL
+    r = client.get("/api/v1/ideas/i1")
+    assert r.status_code == 200
+    assert r.json()["comments"] == []
+    assert fake_es.called("comments") == []
 
 
 # ---- C: Child-IO-Anhänge mit TTL-Cache -------------------------------------
@@ -184,3 +255,48 @@ def test_child_attachments_live_when_no_cache(client, fake_es, seed_idea):
     r = client.get("/api/v1/ideas/i1")
     assert r.status_code == 200
     assert fake_es.called("list_child_objects")
+
+
+def test_child_attachments_stale_cache_served_instantly_then_refreshed(client, fake_es, seed_idea):
+    """C (SWR): ABGELAUFENER children_cache wird sofort ausgeliefert — kein
+    ES-Roundtrip im Antwortpfad. Der Refresh läuft NACH der Antwort als
+    Background-Task und stempelt den Cache neu. Kein Aufruf zahlt mehr die
+    Anhang-Latenz; die ES-Last bleibt identisch (gleich viele Refreshes,
+    nur asynchron). Anhang-Mutationen über die App invalidieren den Cache
+    weiterhin sofort — Staleness betrifft nur Out-of-band-Änderungen."""
+    seed_idea("i1")
+    _set(
+        "i1",
+        children_cache=json.dumps([{"id": "old-att", "is_child_object": True}]),
+        children_cache_at="2020-01-01T00:00:00+00:00",  # längst abgelaufen
+    )
+    r = client.get("/api/v1/ideas/i1")
+    assert r.status_code == 200
+    # Antwort enthält SOFORT die gecachten (ggf. leicht veralteten) Anhänge
+    assert any(a.get("id") == "old-att" for a in r.json()["attachments"])
+    # Hintergrund-Refresh ist gelaufen (TestClient wartet Background-Tasks ab) …
+    assert fake_es.called("list_child_objects")
+    # … und hat den Cache mit frischem Stand + Zeitstempel überschrieben.
+    with connect() as con:
+        row = con.execute(
+            "SELECT children_cache, children_cache_at FROM idea WHERE id='i1'"
+        ).fetchone()
+    assert row["children_cache_at"] != "2020-01-01T00:00:00+00:00"
+    assert json.loads(row["children_cache"]) == []  # FakeES liefert keine Children
+
+
+def test_child_attachments_cache_survives_far_beyond_old_60s(client, fake_es, seed_idea):
+    """C: der children_cache überlebt jetzt weit länger als die frühere 60-s-TTL —
+    ein 5-Minuten-alter Cache wird OHNE Live-Call serviert (unter 60 s wäre es ein
+    Call gewesen). Anhang-Mutationen invalidieren ohnehin sofort; die TTL bewacht
+    nur seltene out-of-band-Änderungen. Pinnt die Behebung der Detailseiten-Latenz."""
+    seed_idea("i1")
+    _set(
+        "i1",
+        children_cache=json.dumps([{"id": "att1", "is_child_object": True}]),
+        children_cache_at=(datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+    )
+    r = client.get("/api/v1/ideas/i1")
+    assert r.status_code == 200
+    assert fake_es.called("list_child_objects") == []
+    assert any(a.get("id") == "att1" for a in r.json()["attachments"])

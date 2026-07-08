@@ -23,7 +23,7 @@ from typing import Literal
 log = logging.getLogger(__name__)
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query
 
 from . import edu_sharing
 from . import sync as sync_mod
@@ -392,10 +392,18 @@ def _suggest_for_empty_query(q: str) -> dict:
     }
 
 
-# Tier C: TTL (Sekunden) für den Child-IO-Anhang-Cache der Detailseite. Kurz
-# genug, dass Anhang-Änderungen zeitnah erscheinen; lang genug, dass unter Last
-# (viele gleichzeitige Views) der Per-View-`list_child_objects`-Call entfällt.
-CHILD_CACHE_TTL_SECONDS = 60
+# Tier C: TTL (Sekunden) für den Child-IO-Anhang-Cache der Detailseite.
+#
+# Die TTL ist bewusst LANG (1 h), weil sie NUR seltene out-of-band-Änderungen
+# bewacht: jede Anhang-Mutation ÜBER DIE APP (Upload/Ersetzen/Umbenennen/Löschen
+# in routes_attachments) ruft `_invalidate_children_cache` → NULL → der nächste
+# View lädt sofort frisch. Direkt-in-edu-sharing-Änderungen (abnormal) erscheinen
+# spätestens nach der TTL bzw. beim nächtlichen Attachment-Scan.
+#
+# Die frühere 60-s-TTL war ein Fehlgriff: sie erzwang bei praktisch JEDEM
+# Detailaufruf (>60 s Abstand) einen Live-`list_child_objects`-ES-Call (~300-450 ms
+# gemessen), obwohl der Cache bei App-Änderungen ohnehin invalidiert wird.
+CHILD_CACHE_TTL_SECONDS = 3600
 
 
 def _owner_display_name_cached(owner_username: str | None, cached_name: str | None) -> str | None:
@@ -419,8 +427,44 @@ def _owner_display_name_cached(owner_username: str | None, cached_name: str | No
     return cached_name or None
 
 
+def _map_child_attachments(children: list[dict]) -> list[dict]:
+    """Child-IO-Knoten → Anhang-Dicts fürs Frontend (Serienobjekt-Flags)."""
+    out: list[dict] = []
+    for n in children:
+        a = _attachment_from_node(n)
+        a["from_folder"] = True  # Backwards-compat-Flag fürs Frontend
+        a["is_child_object"] = True
+        out.append(a)
+    return out
+
+
+def _store_children_cache(idea_id: str, atts: list[dict]) -> None:
+    with connect() as con:
+        con.execute(
+            "UPDATE idea SET children_cache=?, children_cache_at=? WHERE id=?",
+            (json.dumps(atts), datetime.now(UTC).isoformat(), idea_id),
+        )
+
+
+async def _refresh_children_cache_bg(idea_id: str, auth_header: str | None) -> None:
+    """Stale-while-revalidate-Refresh der Child-Anhänge — läuft als Background-
+    Task NACH der Antwort. Best-effort: Fehler nur loggen, der nächste Aufruf
+    serviert dann eben weiter den (funktionierenden) alten Stand."""
+    try:
+        children = await edu_sharing.client.list_child_objects(
+            idea_id, auth_header=auth_header
+        )
+        await asyncio.to_thread(_store_children_cache, idea_id, _map_child_attachments(children))
+    except Exception as e:
+        log.debug("children-Cache-SWR-Refresh für %s fehlgeschlagen: %s", idea_id, e)
+
+
 @router.get("/ideas/{idea_id}")
-async def get_idea(idea_id: str, authorization: str | None = Header(None)):
+async def get_idea(
+    idea_id: str,
+    background_tasks: BackgroundTasks,
+    authorization: str | None = Header(None),
+):
     def _read_idea():
         with connect() as con:
             row = con.execute("SELECT * FROM idea WHERE id = ?", (idea_id,)).fetchone()
@@ -508,9 +552,12 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
         # Umhängen bleibt Owner/Mod vorbehalten. `verified=True`: reines
         # Anzeige-Flag (can_edit/can_delete steuern nur UI-Buttons) — die
         # tatsächliche Mutation re-verifiziert serverseitig (edit_idea/delete_idea
-        # via edu-sharing-Write). Kein Verify-Roundtrip auf dem heißen Detail-Pfad.
+        # via edu-sharing-Write). Kein Verify-Roundtrip auf dem heißen Detail-Pfad
+        # UND kein Owner-Live-Fallback (`live_fallback=False`): der kostete jeden
+        # eingeloggten Nicht-Owner pro Detailaufruf einen ungecachten
+        # node_metadata-Roundtrip (~300–450 ms, bei ES-Hängern bis zum Timeout).
         edit_allowed, _user, is_owner_or_mod = await _can_edit_idea(
-            row["id"], authorization, verified=True
+            row["id"], authorization, verified=True, live_fallback=False
         )
         can_edit = edit_allowed
         can_delete = is_owner_or_mod
@@ -561,22 +608,35 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     cur_count = _safe_get(row, "comment_count") or 0
     cached_count = _safe_get(row, "comments_cache_count")
     cached_json = _safe_get(row, "comments_cache")
-    comments_cached = cached_json is not None and cached_count == cur_count
+    # comment_count==0 → beweisbar KEINE Kommentare: ohne Live-Call leer
+    # ausliefern. Spart beim Erstaufruf jeder kommentarlosen Idee (der
+    # Normalfall) einen ES-Roundtrip — die zuvor gemessenen ~300-450 ms.
+    # Konsistent mit dem count-basierten Cache, der bei 0 auf Folgeaufrufen
+    # ohnehin leer serviert; neue Kommentare laufen über die App und bumpen
+    # comment_count (→ Count-Mismatch → dann wird wieder live geholt).
+    comments_cached = cur_count == 0 or (cached_json is not None and cached_count == cur_count)
 
     # Anhang-Cache (Tier C, Konsum weiter unten) schon HIER prüfen, damit beim
     # Doppel-Miss beide konditionalen Live-Reads (Kommentare + Child-Anhänge)
     # PARALLEL starten (create_task) statt seriell — spart auf dem langsamen
     # Backend eine volle ES-Latenz. Fehlerbehandlung bleibt an den Konsum-Stellen.
     child_atts: list[dict] | None = None
+    # SWR: abgelaufener, aber vorhandener Cache — wird sofort ausgeliefert,
+    # der Refresh läuft nach der Antwort (Background-Task, s. Konsum-Block).
+    stale_child_atts: list[dict] | None = None
     _cc_at = _safe_get(row, "children_cache_at")
     _cc = _safe_get(row, "children_cache")
     if _cc is not None and _cc_at:
         try:
             age = (datetime.now(UTC) - datetime.fromisoformat(_cc_at)).total_seconds()
+            _parsed = json.loads(_cc)
             if 0 <= age < CHILD_CACHE_TTL_SECONDS:
-                child_atts = json.loads(_cc)
+                child_atts = _parsed
+            else:
+                stale_child_atts = _parsed
         except Exception:
             child_atts = None
+            stale_child_atts = None
     _comments_task = (
         None
         if comments_cached
@@ -586,7 +646,7 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     )
     _children_task = (
         None
-        if child_atts is not None
+        if (child_atts is not None or stale_child_atts is not None)
         else asyncio.create_task(
             edu_sharing.client.list_child_objects(row["id"], auth_header=authorization)
         )
@@ -594,7 +654,8 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
 
     if comments_cached:
         try:
-            base["comments"] = json.loads(cached_json)
+            # cached_json kann None sein (comment_count==0-Kurzschluss) → leer.
+            base["comments"] = json.loads(cached_json) if cached_json else []
         except Exception:
             base["comments"] = []
     else:
@@ -689,24 +750,23 @@ async def get_idea(idea_id: str, authorization: str | None = Header(None)):
     # weil gecachte Ideen — und damit ihre Anhänge — öffentlich sind.
     # Cache-Check + Task-Start liegen oben beim Kommentar-Block (Parallel-Start
     # beim Doppel-Miss) — hier wird das Ergebnis nur noch konsumiert.
-    if child_atts is None:
+    if child_atts is None and stale_child_atts is not None:
+        # Stale-while-revalidate: den abgelaufenen Cache SOFORT ausliefern —
+        # kein Aufruf zahlt die ES-Latenz. Der Refresh läuft nach der Antwort
+        # (BackgroundTasks); die ES-Last bleibt identisch, nur asynchron.
+        # Staleness-Fenster unverändert akzeptabel: App-seitige Anhang-
+        # Mutationen invalidieren den Cache sofort (dann greift der
+        # synchrone Zweig unten), die TTL bewacht nur Out-of-band-Änderungen.
+        child_atts = stale_child_atts
+        background_tasks.add_task(_refresh_children_cache_bg, row["id"], authorization)
+    elif child_atts is None:
+        # Kein Cache (Erstaufruf oder frisch invalidiert) → synchron live holen.
         child_atts = []
         try:
             children = await _children_task
-            for n in children:
-                a = _attachment_from_node(n)
-                a["from_folder"] = True  # Backwards-compat-Flag fürs Frontend
-                a["is_child_object"] = True
-                child_atts.append(a)
+            child_atts = _map_child_attachments(children)
             try:
-                def _write_children_cache():
-                    with connect() as con:
-                        con.execute(
-                            "UPDATE idea SET children_cache=?, children_cache_at=? WHERE id=?",
-                            (json.dumps(child_atts), datetime.now(UTC).isoformat(), row["id"]),
-                        )
-
-                await asyncio.to_thread(_write_children_cache)
+                await asyncio.to_thread(_store_children_cache, row["id"], child_atts)
             except Exception:
                 pass  # Cache-Write best-effort — die Antwort stimmt trotzdem
         except Exception:

@@ -62,6 +62,37 @@ def _auth_cache_key(authorization: str) -> str:
     return hashlib.sha256(authorization.encode("utf-8")).hexdigest()
 
 
+# In-Flight-Coalescing für ``my_memberships``: identische Auth-Header, die
+# GLEICHZEITIG eine Verifikation brauchen, teilen sich EINEN edu-sharing-
+# Roundtrip statt N. Konkreter Auslöser: der Request-Burst der Profilseite —
+# /me/follows + /me/interest + /me/team-requests + /me/notifications/seen
+# feuern parallel und riefen bislang jeweils einen eigenen (ungecachten)
+# my_memberships-Call auf (~940 ms each), was edu-sharing mit 4 simultanen
+# Auth-Prüfungen belastete und transiente Fehler provozierte.
+#
+# Rein latenz-/last-mindernd, KEIN Zeit-Cache: sobald der gemeinsame Call
+# fertig ist, wird der Eintrag entfernt. Damit greift ein entzogenes/
+# geändertes Passwort auf Schreibpfaden weiterhin sofort (verify_login bleibt
+# ungecacht) — Coalescing bündelt nur NEBENLÄUFIGE, identische Prüfungen, deren
+# Ergebnis ohnehin gleich wäre.
+_MEMBERSHIP_INFLIGHT: dict[str, asyncio.Task] = {}
+
+
+async def _my_memberships(authorization: str) -> dict:
+    key = _auth_cache_key(authorization)
+    existing = _MEMBERSHIP_INFLIGHT.get(key)
+    if existing is not None:
+        return await existing
+    task = asyncio.ensure_future(
+        edu_sharing.client.my_memberships(auth_header=authorization)
+    )
+    _MEMBERSHIP_INFLIGHT[key] = task
+    try:
+        return await task
+    finally:
+        _MEMBERSHIP_INFLIGHT.pop(key, None)
+
+
 async def is_moderator(authorization: str | None) -> bool:
     """Bestätigt, ob der eingeloggte User Mod-Rechte hat — ausschließlich über
     Mitgliedschaft in einer der konfigurierten edu-sharing-Gruppen
@@ -82,7 +113,7 @@ async def is_moderator(authorization: str | None) -> bool:
     if cached and cached[1] > now:
         return cached[0]
     try:
-        m = await edu_sharing.client.my_memberships(auth_header=authorization)
+        m = await _my_memberships(authorization)
         groups = {(g.get("authorityName") or "") for g in (m.get("groups") or [])}
     except Exception:
         # Transienter ES-Fehler oder abgelehnte Credentials → NICHT cachen,
@@ -112,14 +143,18 @@ async def verify_login(authorization: str | None) -> str | None:
     if not user:
         return None
     try:
-        await edu_sharing.client.my_memberships(auth_header=authorization)
+        await _my_memberships(authorization)
     except Exception:
         return None
     return user
 
 
 async def is_owner_or_mod(
-    idea_id: str, authorization: str | None, *, verified: bool = False
+    idea_id: str,
+    authorization: str | None,
+    *,
+    verified: bool = False,
+    live_fallback: bool = True,
 ) -> tuple[bool, str | None, bool]:
     """Owner-Gating für Idee-Editieren / -Löschen.
 
@@ -142,6 +177,14 @@ async def is_owner_or_mod(
     gilt ausschließlich der passwort-verifizierte Mod-Status. Ein vergessenes
     ``verified=True`` sperrt den Owner aus (sichtbarer Bug) statt Impersonation
     per bloßem Username zu erlauben (stiller Auth-Bypass).
+
+    ``live_fallback`` (keyword-only): UI-Flag-Pfade (get_idea setzt die reinen
+    Anzeige-Flags can_edit/can_delete) übergeben ``False`` — kennt der Cache den
+    Owner (der Sync füllt ``owner_username`` inkl. ``submitter:``-Keyword
+    zuverlässig), ist ein Nicht-Treffer verlässlich und der Live-``node_metadata``-
+    Blick (~300–450 ms, bei ES-Hängern bis zum Client-Timeout) entfällt auf JEDEM
+    Detailaufruf fremder Ideen. Mutationspfade lassen den Default ``True`` —
+    dort zählt Korrektheit in Randfällen mehr als die Latenz.
     """
     if not authorization:
         return False, None, False
@@ -171,12 +214,19 @@ async def is_owner_or_mod(
                 (idea_id,),
             ).fetchone()
 
+    row = None
     try:
         row = await asyncio.to_thread(_read_owner)
         if row and row["owner_username"] and row["owner_username"] == user:
             return True, user, False
     except Exception:
         pass
+
+    # UI-Flag-Pfad: kennt der Cache den Owner, ist der Nicht-Treffer final —
+    # kein Live-Roundtrip. Fehlt die Row oder ihr owner_username (Alt-Daten,
+    # DB-Fehler), bleibt der Live-Blick auch hier erhalten (Randfall-Korrektheit).
+    if not live_fallback and row is not None and row["owner_username"]:
+        return False, user, False
 
     # 2. Live-Fallback: ES-Metadaten lesen (cm:creator / submitter:-Keyword)
     try:
@@ -209,7 +259,11 @@ async def is_owner_or_mod(
 
 
 async def can_edit_idea(
-    idea_id: str, authorization: str | None, *, verified: bool = False
+    idea_id: str,
+    authorization: str | None,
+    *,
+    verified: bool = False,
+    live_fallback: bool = True,
 ) -> tuple[bool, str | None, bool]:
     """Erweitert `is_owner_or_mod` um angenommene Mithackende mit
     Bearbeitungsrecht: idea_interaction (kind='interest', status='approved',
@@ -223,7 +277,9 @@ async def can_edit_idea(
     Treffer vertrauen dem dekodierten Usernamen und werden daher nur bei
     zugesicherter Passwort-Prüfung akzeptiert (fail-closed by default).
     """
-    allowed, user, is_mod = await is_owner_or_mod(idea_id, authorization, verified=verified)
+    allowed, user, is_mod = await is_owner_or_mod(
+        idea_id, authorization, verified=verified, live_fallback=live_fallback
+    )
     if allowed:
         return True, user, True
     if not user:

@@ -312,12 +312,16 @@ export class TopicEditorComponent implements OnInit {
           ts.map((t, i) => [t.id, t.sort_order ?? 100 + i])
         );
         this.topicsLoading.set(false);
-        // Ideen-Counts pro Topic für „leer?"-Check
-        for (const t of ts) {
-          this.api.listIdeas({ topic_id: t.id, limit: 1 }).subscribe((r) => {
-            this.ideasPerTopic[t.id] = r.total;
-          });
-        }
+        // Ideen-Counts pro Topic für den „leer?"-Check in EINEM /meta-Call
+        // (statt N Einzel-Requests, einer je Themenbereich — war ein N+1).
+        // /meta zählt direkt per topic_id (GROUP BY) — deckungsgleich mit dem
+        // Backend-Delete-Preflight (COUNT(*) WHERE topic_id=?); für die an
+        // Herausforderungen (Blättern) angezeigten Zahlen identisch zum vorigen
+        // Subtree-Count, da Blätter keine Kinder haben.
+        this.api.meta({}).subscribe({
+          next: (m) => { this.ideasPerTopic = m.topics; },
+          error: () => { /* soft-fail: Counts bleiben 0, kein uncaught error */ },
+        });
       },
       error: () => { this.topics.set([]); this.topicsLoading.set(false); },
     });

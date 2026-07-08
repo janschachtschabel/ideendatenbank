@@ -692,16 +692,27 @@ export class ProfileComponent implements OnInit {
   }
 
   reloadAll() {
-    this.api.myIdeas().subscribe((r) => this.mine.set(r.items || []));
-    this.api.myFollows().subscribe((r) => this.follows.set(r.items || []));
-    this.api.myInterest().subscribe((r) => this.interest.set(r.items || []));
-    this.api.myActivity().subscribe((r) => this.feed.set(r.items || []));
-    this.api.myTeamRequests().subscribe((r) => this.teamRequests.set(r.items || []));
+    // Jede Sektion lädt UNABHÄNGIG. Die auth-geprüften /me-Routen
+    // (follows/interest/team-requests verifizieren live gegen edu-sharing)
+    // können transient scheitern — ein error-Callback fängt das ab, damit die
+    // Seite NICHT mit einem uncaught error abbricht (der sichtbare „Fehler"
+    // beim Öffnen von „Mein Bereich"). Die betroffene Sektion behält ihren
+    // letzten Stand, die übrigen laden normal weiter.
+    this.api.myIdeas().subscribe({ next: (r) => this.mine.set(r.items || []), error: this._sectionSoftFail });
+    this.api.myFollows().subscribe({ next: (r) => this.follows.set(r.items || []), error: this._sectionSoftFail });
+    this.api.myInterest().subscribe({ next: (r) => this.interest.set(r.items || []), error: this._sectionSoftFail });
+    this.api.myActivity().subscribe({ next: (r) => this.feed.set(r.items || []), error: this._sectionSoftFail });
+    this.api.myTeamRequests().subscribe({ next: (r) => this.teamRequests.set(r.items || []), error: this._sectionSoftFail });
   }
 
+  /** Transienter /me-Fehler: bewusst weich abfangen (Sektion behält ihren
+   *  Stand), damit eine einzelne flaky Auth-Prüfung nicht die ganze
+   *  Profilseite als uncaught error abbrechen lässt. */
+  private _sectionSoftFail = () => { /* intentional graceful degradation */ };
+
   private reloadTeam() {
-    this.api.myInterest().subscribe((r) => this.interest.set(r.items || []));
-    this.api.myTeamRequests().subscribe((r) => this.teamRequests.set(r.items || []));
+    this.api.myInterest().subscribe({ next: (r) => this.interest.set(r.items || []), error: this._sectionSoftFail });
+    this.api.myTeamRequests().subscribe({ next: (r) => this.teamRequests.set(r.items || []), error: this._sectionSoftFail });
   }
 
   /** Owner: Mithackende:n auf einer eigenen Idee annehmen / Recht (de)aktivieren. */

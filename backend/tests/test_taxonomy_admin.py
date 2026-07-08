@@ -24,6 +24,58 @@ def _event_rows() -> list[str]:
         return [r["slug"] for r in con.execute("SELECT slug FROM taxonomy_event")]
 
 
+def _events_by_slug(client) -> dict:
+    return {e["slug"]: e for e in client.get("/api/v1/events").json()}
+
+
+def test_sort_taxonomy_updates_only_sort_order(client, mod_headers):
+    """Bulk-Reihenfolge (▲▼) in EINEM Call: setzt sort_order für mehrere
+    Einträge und lässt Label/Status unangetastet (kein Voll-Upsert je Zeile)."""
+    assert _put_event(client, mod_headers, "evt-a", label="Event A").status_code == 200
+    assert _put_event(client, mod_headers, "evt-b", label="Event B").status_code == 200
+    r = client.put(
+        "/api/v1/admin/taxonomy/sort",
+        json={"kind": "event", "items": [
+            {"slug": "evt-a", "sort_order": 20},
+            {"slug": "evt-b", "sort_order": 10},
+        ]},
+        headers=mod_headers,
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "updated": 2}
+    events = _events_by_slug(client)
+    assert events["evt-a"]["sort_order"] == 20 and events["evt-b"]["sort_order"] == 10
+    assert events["evt-a"]["label"] == "Event A"  # Label NICHT überschrieben
+    # /events sortiert nach sort_order → evt-b (10) vor evt-a (20)
+    order = [e["slug"] for e in client.get("/api/v1/events").json()]
+    assert order.index("evt-b") < order.index("evt-a")
+
+
+def test_sort_taxonomy_phases(client, mod_headers):
+    client.put(
+        "/api/v1/admin/phases/proto",
+        json={"slug": "proto", "label": "Proto"},
+        headers=mod_headers,
+    )
+    r = client.put(
+        "/api/v1/admin/taxonomy/sort",
+        json={"kind": "phase", "items": [{"slug": "proto", "sort_order": 5}]},
+        headers=mod_headers,
+    )
+    assert r.status_code == 200
+    phases = {p["slug"]: p for p in client.get("/api/v1/phases").json()}
+    assert phases["proto"]["sort_order"] == 5
+
+
+def test_sort_taxonomy_requires_moderator(client, user_headers):
+    r = client.put(
+        "/api/v1/admin/taxonomy/sort",
+        json={"kind": "event", "items": [{"slug": "a", "sort_order": 1}]},
+        headers=user_headers,
+    )
+    assert r.status_code == 403
+
+
 def test_upsert_event_creates_row_and_is_publicly_listed(client, mod_headers):
     r = _put_event(client, mod_headers, "hack-3", label="HackathOERn 3")
     assert r.status_code == 200

@@ -1,7 +1,7 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, finalize, shareReplay } from 'rxjs';
-import { ActivityEvent, AdminStats, BackupInfo, BootstrapResponse, FeaturedEvent, Idea, IdeaList, InboxItem, PublicUserProfile, RankingRiser, RestoreResult, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
+import { ActivityEvent, AdminStats, BackupInfo, BootstrapResponse, FeaturedEvent, Idea, IdeaList, InboxItem, InboxPreview, PublicUserProfile, RankingRiser, RestoreResult, SortBy, TaxonomyEntry, Topic, UserProfileMeta } from './models';
 import { AuthService } from './auth.service';
 
 // Re-export, damit bestehende `import { API_BASE_DEFAULT } from './api.service'`
@@ -188,14 +188,21 @@ export class ApiService {
   inbox(filter: 'uncategorized' | 'all' | 'categorized' = 'uncategorized'):
     Observable<{ count: number; items: InboxItem[]; filter: string }> {
     // Mod-only: der authInterceptor hängt den Auth-Header an, _require_moderator gated.
-    return this.http.get<{ count: number; items: InboxItem[]; filter: string }>(`${this.base}/inbox`, { params: { filter } });
+    // Coalesced (wie topics/meta/phases/events): beim Öffnen des Postfachs fragen
+    // Nav-Badge + Haupt-Load DENSELBEN Filter gleichzeitig ab — ein Live-ES-Walk
+    // (~1 s) statt zwei/drei; senkt zugleich die 502-anfällige parallele ES-Last.
+    return this.coalesced(`inbox?${filter}`, () =>
+      this.http.get<{ count: number; items: InboxItem[]; filter: string }>(
+        `${this.base}/inbox`, { params: { filter } }));
   }
 
   /** Vollständige Review-Vorschau einer Inbox-Einreichung (Mod). Liest direkt
    *  aus edu-sharing und funktioniert daher auch für noch nicht einsortierte
    *  Knoten, die `getIdea` mangels Cache-Eintrag mit 404 quittiert. */
-  inboxItemPreview(nodeId: string): Observable<any> {
-    return this.http.get(`${this.base}/inbox/${encodeURIComponent(nodeId)}/preview`);
+  inboxItemPreview(nodeId: string): Observable<InboxPreview> {
+    return this.http.get<InboxPreview>(
+      `${this.base}/inbox/${encodeURIComponent(nodeId)}/preview`,
+    );
   }
 
   /** Macht das Original einer Idee öffentlich lesbar — repariert die anonyme
@@ -299,6 +306,13 @@ export class ApiService {
   }
   deletePhase(slug: string): Observable<TaxDeleteResult> {
     return this.http.delete<TaxDeleteResult>(`${this.base}/admin/phases/${encodeURIComponent(slug)}`);
+  }
+  /** Reihenfolge mehrerer Veranstaltungen/Phasen in EINEM Call setzen
+   *  (▲▼-Umsortieren) — schreibt nur sort_order, kein Voll-Upsert je Zeile. */
+  sortTaxonomy(kind: 'event' | 'phase', items: { slug: string; sort_order: number }[]):
+      Observable<{ ok: boolean; updated: number }> {
+    return this.http.put<{ ok: boolean; updated: number }>(
+      `${this.base}/admin/taxonomy/sort`, { kind, items });
   }
 
   // ---- "Mein Bereich" ----

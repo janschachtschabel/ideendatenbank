@@ -251,26 +251,35 @@ async def restore_backup(zip_bytes: bytes) -> dict:
     """
     from . import sync as sync_mod
 
-    # 1. ZIP validieren
+    # Alle blockierenden Schritte (ZIP-I/O bis 200 MB, VACUUM-INTO-Backup,
+    # Datei-Tausch, Schema-Migration) laufen im Threadpool: ein Restore darf
+    # den Event-Loop — und damit ALLE parallelen Requests — nicht sekundenlang
+    # einfrieren. Die Schritt-Reihenfolge bleibt exakt wie zuvor.
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
-        zip_path = tmp / "upload.zip"
-        zip_path.write_bytes(zip_bytes)
-        try:
-            with zipfile.ZipFile(zip_path) as zf:
-                names = zf.namelist()
-                if "database.sqlite" not in names:
-                    raise ValueError("ZIP enthält keine database.sqlite — falsches Backup-Format")
-                zf.extract("database.sqlite", tmp)
-                if "metadata.json" in names:
-                    try:
-                        meta = json.loads(zf.read("metadata.json").decode("utf-8"))
-                    except Exception:
-                        meta = {}
-                else:
-                    meta = {}
-        except zipfile.BadZipFile:
-            raise ValueError("Datei ist kein gültiges ZIP")
+
+        # 1. ZIP validieren + extrahieren
+        def _validate_and_extract() -> dict:
+            zip_path = tmp / "upload.zip"
+            zip_path.write_bytes(zip_bytes)
+            try:
+                with zipfile.ZipFile(zip_path) as zf:
+                    names = zf.namelist()
+                    if "database.sqlite" not in names:
+                        raise ValueError(
+                            "ZIP enthält keine database.sqlite — falsches Backup-Format"
+                        )
+                    zf.extract("database.sqlite", tmp)
+                    if "metadata.json" in names:
+                        try:
+                            return json.loads(zf.read("metadata.json").decode("utf-8"))
+                        except Exception:
+                            return {}
+                    return {}
+            except zipfile.BadZipFile:
+                raise ValueError("Datei ist kein gültiges ZIP")
+
+        meta = await asyncio.to_thread(_validate_and_extract)
 
         new_db = tmp / "database.sqlite"
         # Plausibilitäts-Check: SQLite-Magic-Bytes
@@ -281,15 +290,16 @@ async def restore_backup(zip_bytes: bytes) -> dict:
         if not magic.startswith(b"SQLite format 3"):
             raise ValueError("database.sqlite ist keine SQLite-Datei (Magic-Bytes fehlen)")
 
-        # 2. Pre-Restore-Backup
+        # 2. Pre-Restore-Backup (VACUUM INTO + ZIP — mehrere Sekunden bei
+        #    großer DB, daher Threadpool)
         try:
-            pre = create_backup()
+            pre = await asyncio.to_thread(create_backup)
             log.info("pre-restore backup: %s", pre.name)
         except Exception as e:
             log.warning("pre-restore backup failed: %s", e)
 
         # 3. Unter Sync-Lock: alte DB löschen + neue an Stelle setzen
-        async with sync_mod._sync_lock:
+        def _swap_db_files() -> None:
             target = Path(settings.sqlite_path)
             target.parent.mkdir(parents=True, exist_ok=True)
             # Alte WAL/SHM-Begleitdateien wegräumen (sonst inkonsistent)
@@ -302,11 +312,14 @@ async def restore_backup(zip_bytes: bytes) -> dict:
                         log.warning("could not remove %s: %s", aux, e)
             shutil.copy(new_db, target)
 
+        async with sync_mod._sync_lock:
+            await asyncio.to_thread(_swap_db_files)
+
         # 4. Schema-Migration via init_db (idempotent — fügt fehlende Spalten ein)
         from .db import init_db
 
         try:
-            init_db()
+            await asyncio.to_thread(init_db)
         except Exception as e:
             log.warning("init_db post-restore failed: %s", e)
 

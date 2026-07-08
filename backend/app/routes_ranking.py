@@ -284,7 +284,8 @@ def ranking_risers(
                 "description": r["description"],
                 "preview_url": r["preview_url"],
                 "author": _safe_au,
-                "owner_display_name": _safe_get(r, "owner_display_name") or _safe_au,
+                # Anzeige-Priorität wie in _row_to_idea: Freitext-Autor zuerst.
+                "owner_display_name": _safe_au or _safe_get(r, "owner_display_name"),
                 "phase": r["phase"],
                 "events": json.loads(r["events"] or "[]"),
                 "rank": r["rank"],

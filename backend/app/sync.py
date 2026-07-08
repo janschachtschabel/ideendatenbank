@@ -21,6 +21,7 @@ import math
 from datetime import UTC, datetime, timedelta
 
 from . import edu_sharing
+from .config import settings
 from .db import connect
 
 log = logging.getLogger(__name__)
@@ -297,17 +298,35 @@ def _upsert_idea(
     )
     # Owner-Klarname (Vor- + Nachname) aus den Node-Metadaten — im Cache halten,
     # damit get_idea ihn ohne Live-Call zeigen kann und NIE den Login-Username
-    # (= zugleich Anmeldename) preisgeben muss. node_metadata (über refresh_idea)
-    # liefert createdBy/owner sicher; im Sammlungs-Walk evtl. nicht → dann None
-    # (per COALESCE im UPSERT wird ein bereits bekannter Name NICHT mit None
-    # überschrieben).
+    # (= zugleich Anmeldename) preisgeben muss.
+    #
+    # WICHTIG: Der Klarname zählt nur, wenn die Person auch der aufgelöste Owner
+    # (= Einreicher) IST. Beim Einsortieren legt der MOD den Reference-Knoten in
+    # der Sammlung an → createdBy/owner sind dort der Mod, nicht der Einreicher;
+    # blind übernommen stand deshalb der Mod als „Ideengeber:in" auf der Idee.
+    # Drei Ausgänge:
+    #   Klarname  — Person gehört zum owner_username (Login-Match)
+    #   ""        — Personen-Info vorhanden, aber Mismatch (Mod-Reference) oder
+    #               Guest-Service-Account → Sentinel: löscht per NULLIF im UPSERT
+    #               auch einen früher falsch gecachten Namen (Alt-Daten-Heilung)
+    #   None      — keine Personen-Info (Sammlungs-Walk) → COALESCE hält einen
+    #               bereits bekannten Namen
+    _creator_login = _first(props, "cm:creator")
+    _owner_login = _first(props, "cm:owner") or (node.get("owner") or {}).get(
+        "authorityName"
+    )
     owner_display_name = None
-    for _src in ("createdBy", "owner"):
+    for _src, _login in (("createdBy", _creator_login), ("owner", _owner_login)):
         _obj = node.get(_src) or {}
         _full = f"{(_obj.get('firstName') or '').strip()} {(_obj.get('lastName') or '').strip()}".strip()
-        if _full:
+        if not _full:
+            continue
+        if _login and owner_username and _login == owner_username:
             owner_display_name = _full
             break
+        owner_display_name = ""  # bekannt: keine vertrauenswürdige Person
+    if settings.edu_guest_user and owner_username == settings.edu_guest_user:
+        owner_display_name = ""  # technischer Account ist nie „Ideengeber:in"
 
     # Original-ID merken: Reference-Knoten in Sammlungen tragen
     # `originalId`, der auf den ursprünglichen Inbox-Knoten zeigt.
@@ -344,7 +363,7 @@ def _upsert_idea(
              attachment_name=excluded.attachment_name,
              attachment_url=excluded.attachment_url,
              owner_username=excluded.owner_username,
-             owner_display_name=COALESCE(excluded.owner_display_name, owner_display_name),
+             owner_display_name=NULLIF(COALESCE(excluded.owner_display_name, owner_display_name), ''),
              original_id=excluded.original_id,
              modified_at=excluded.modified_at,
              synced_at=excluded.synced_at""",

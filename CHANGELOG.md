@@ -1,5 +1,208 @@
 # Changelog
 
+## 2026-07-08 — Offene Audit-Punkte abgearbeitet: Chart-Fixes, Lint-Baseline eliminiert
+
+Abarbeitung der im Abschluss-Audit als „offen" gelisteten Punkte (auf explizite
+Freigabe hin auch die zwei deploy/-Notizen — einzige Chart-Änderungen):
+
+- **deploy/ (Chart 0.1.0 → 0.2.0):**
+  - Readiness-Probe zeigt jetzt auf **`/api/v1/ready`** (DB-`SELECT 1`) statt
+    `/health` — ein Pod mit kaputter DB fällt aus dem Service, wird aber nicht
+    neu gestartet (Liveness bleibt auf dem I/O-freien `/health`).
+  - Tote `SYNC_INTERVAL_SECONDS`/`syncIntervalSeconds` entfernt und durch die
+    vom Backend real gelesene **`SYNC_NIGHTLY_HOUR`** (`config.app.syncNightlyHour`,
+    Default 1) ersetzt — der Operator behält echte Sync-Steuerung statt einer
+    Schein-Variable. Env-Mapping verifiziert (Settings-Smoke-Test).
+  - README-Parametertabelle synchron; helm lokal nicht installiert →
+    verifiziert per Template↔Values-Konsistenz-Grep + YAML-Parse.
+- **Lint-`any`-Baseline eliminiert (4 → 0):** Die Inbox-Review-Vorschau ist KEIN
+  roher ES-Passthrough — das Backend formt das Response-Shape explizit
+  (routes_inbox.inbox_item_preview) → neues `InboxPreview`-Interface (models.ts,
+  Attachment-Reuse), typisiert `inboxItemPreview()`, den Preview-Cache und
+  `attIcon()`. Drei Template-Stellen auf optional chaining (Angular-Narrowing).
+  **ng lint: „All files pass linting."**
+- **Geprüft, unverändert (begründet):** npm-Advisories weiterhin nur in der
+  webpack-dev-server/sockjs-Kette, kein non-breaking Upstream-Fix (nur
+  `--force`-Downgrade) — Dev-only-Baseline bleibt. httpx-keepalive,
+  `/me`-Live-Verifikation, Mod-Cache 60 s: bewusste Tradeoffs, nicht angefasst.
+  Sentry-DSN/OAuth brauchen Secrets vom Betreiber; Bild-Proxy wäre ein neues
+  Feature (kein Fix).
+- Verifiziert: ng lint 0/0 · 16/16 FE-Tests · build:embed 0 Errors ·
+  pytest 199/199 + ruff clean (Backend unverändert, letzter Lauf).
+
+## 2026-07-08 — Audit-Fixes: Detailseite ohne Live-Owner-Check, SWR-Anhang-Cache, Restore blockiert nicht mehr
+
+Umsetzung der Audit-Befunde (DB-Connections/Blocking/ES-Lage/Caching/5–10-s-Ausreißer):
+
+- **🟠 Detailseite (HIGH):** `is_owner_or_mod`/`can_edit_idea` haben jetzt
+  `live_fallback` (Default `True`). `get_idea` setzt `False` — die UI-Flags
+  `can_edit`/`can_delete` kommen rein aus dem Cache-Owner-Match. Vorher zahlte
+  JEDER eingeloggte Nicht-Owner pro Detailaufruf einen ungecachten
+  `node_metadata`-Roundtrip (~300–450 ms; bei ES-Hängern bis zum 30-s-Timeout —
+  die beobachteten Einzel-Ausreißer). Randfall bleibt korrekt: Row ohne
+  `owner_username` → Live-Blick weiterhin. Mutationspfade (Edit/Delete/Anhänge)
+  unverändert mit Live-Fallback.
+- **Caching-Abwägung Detailseite:** Anhang-Cache jetzt **stale-while-revalidate**
+  — abgelaufener `children_cache` wird sofort ausgeliefert, der Refresh läuft
+  NACH der Antwort (FastAPI BackgroundTasks). Kein Aufruf zahlt mehr die
+  Anhang-Latenz; ES-Last identisch (gleiche Refresh-Anzahl, nur asynchron).
+  Sync-Vorwärmen bewusst VERWORFEN: ~100+ zusätzliche ES-Calls pro Nachtlauf,
+  Nutzen bei 1-h-TTL um 02:00 schon verpufft. Kommentare bleiben bewusst
+  synchron bei Count-Mismatch (stale wäre inhaltlich falsch, z.B. direkt nach
+  eigenem Kommentar).
+- **🟡 Admin-Restore (MEDIUM):** `restore_backup` blockierte den Event-Loop
+  (ZIP-I/O bis 200 MB, `create_backup()`/VACUUM INTO, Datei-Tausch, init_db
+  synchron im async-Body) → alle Schritte laufen jetzt im Threadpool; während
+  eines Restores frieren parallele Requests nicht mehr ein.
+- **🟢 `admin_backup_list` (LOW):** ZIP-Header-Reads via to_thread.
+- **Bewusst NICHT geändert:** httpx `keepalive_expiry` (Stale-Connection-Risiko,
+  dokumentierte Entscheidung), `/me`-Login-Verifikation (Sofort-Widerruf-
+  Garantie), deploy/ (eingefroren — Readiness-Probe→/ready + tote
+  SYNC_INTERVAL_SECONDS-Var als Notiz fürs nächste Chart-Update).
+- 6 neue Tests: kein `node_metadata` auf Detail (Nicht-Owner + Owner),
+  Live-Randfall bei unbekanntem Owner, Mutations-Pfad behält Fallback,
+  UI-Pfad-Unit, SWR (stale sofort + Hintergrund-Refresh + Neu-Stempel).
+- **Nachtrag (Abschluss-Audit):** gleiche Latenzfalle auch im
+  `GET /ideas/{id}/interactions` gefunden (lädt die Detailseite bei jedem
+  Öffnen parallel) — das reine `can_manage`-UI-Flag machte für eingeloggte
+  Nicht-Owner denselben Live-`node_metadata`-Roundtrip → `live_fallback=False`
+  (+ Regressionstest). Damit ist der Detailseiten-Load für eingeloggte User
+  komplett ES-frei, solange die Caches greifen.
+- Verifiziert: pytest 199/199 · ruff clean · AST-Scanner: 0 Event-Loop-DB-Zugriffe
+  in Request-Pfaden (nur dokumentierter Lifespan-Startup).
+
+## 2026-07-08 — Ideengeber:in: nie mehr der Mod, der freigeschaltet hat
+
+Live-Befund: Nach dem Einsortieren (Move Inbox → Herausforderung) stand auf der
+Ideenseite der **Moderations-Account** als „Ideengeber:in" — der Mod legt den
+Reference-Knoten in der Sammlung an, dessen `createdBy`/`owner` übernahm der
+Sync blind als `owner_display_name`, und die Anzeige bevorzugte diesen Klarnamen
+vor dem eingereichten Namen.
+
+- **Sync-Guard (Wurzel, `sync.py`):** Klarname aus `createdBy`/`owner` zählt nur
+  noch bei Login-Match mit dem aufgelösten Owner (`submitter:`-Keyword →
+  `cm:owner` → `cm:creator`). Bekannter Mismatch (Mod-Reference) oder
+  Guest-Service-Account → Sentinel `''`, das per `NULLIF` im UPSERT auch
+  **früher falsch gecachte Namen beim nächsten Refresh löscht**
+  (Alt-Daten-Heilung; Detailseiten-Aufruf genügt). Sammlungs-Walk ohne
+  Personen-Info hält weiterhin bekannte korrekte Namen (COALESCE).
+- **Anzeige-Priorität (Anforderung):** 1. Freitext-Name aus dem Einreichformular
+  (`author`), 2. Klarname des einreichenden WLO-Users, 3. „Anonym" — nie der
+  Mod, nie der Login. Umgesetzt in `ownerLabel` (Detailseite), `_row_to_idea`
+  (Listen) und im Ranking-Merge.
+- **Guest-Login nicht mehr in API-Antworten** (`owner_username=None` bei
+  anonymen Ideen) → kein Profil-Link auf den Service-Account; das
+  „Anonym"-Fallback verlinkt nie.
+- 7 neue Regression-Tests (`test_owner_attribution.py`): Mod-Reference,
+  Stale-Heilung, eigene Einreichung, Owner-Delegation, Sammlungs-Walk,
+  Guest-Fall, Listen-Priorität.
+- Verifiziert: pytest 192/192 · ruff clean · ng lint 0 Errors (4 any-Baseline) ·
+  16/16 FE-Tests · build:embed 0 Errors. Live sichtbar nach Rebuild+Redeploy;
+  falsche Alt-Namen korrigieren sich beim ersten Aufruf der jeweiligen
+  Detailseite (refresh) bzw. Sync mit Personen-Metadaten.
+
+## 2026-07-04 — Postfach: redundante Inbox-Abrufe entfernt
+
+Live-Diagnose (DevTools) beim Öffnen des Postfachs zeigte `inbox?filter=uncategorized`
+**3×** gefeuert + `all`/`categorized` je 1× — 5–6 parallele Live-ES-Walks (~1 s
+each), unter deren Last edu-sharing gelegentlich mit **502** antwortete (in der
+Konsole als „1 error" sichtbar, von der App aber bereits weich abgefangen).
+
+- **`api.inbox()` jetzt coalesced** (wie `topics`/`meta`/`phases`/`events`):
+  Nav-Badge (`moderation.loadInboxCount`) + Haupt-Load (`inbox-list.load`) fragen
+  beim Öffnen DENSELBEN Filter gleichzeitig ab → nur noch EIN Roundtrip.
+- **`loadInboxCounts()` überspringt den aktiven Filter** (dessen Count liefert
+  schon `load()`) — der Kommentar versprach das längst, der Code holte ihn aber
+  trotzdem. Ergebnis: `uncategorized` **3× → 1×**, gesamt 5–6 → 3 Calls beim
+  Öffnen. Kleinerer ES-Burst → seltener 502.
+- **Meldungen + Moderatoren geprüft — sauber:** je genau EIN Call.
+  `/admin/reports` ist eine einzelne SQL-JOIN-Query (kein N+1); die ~600–900 ms
+  sind der kalte Mod-Auth-ES-Check (`is_moderator`, 60-s-gecacht) + bei
+  Moderatoren der `group_members`-ES-Call — inhärente Basic-Auth-Latenz, kein
+  Defekt. Die „1 error"-Konsole war der akkumulierte Inbox-502, kein neuer Fehler.
+- Verifiziert: build 0 Errors · ng lint 0 Errors (4 any-Baseline) · 16/16 FE-Tests.
+
+## 2026-07-04 — Robustheit: alle Datenabrufe fangen Fehler ab
+
+Ausgehend vom „Mein Bereich"-Befund (fehlender error-Callback → transienter
+Auth-Fehler wurde als **uncaught error** sichtbar) den GESAMTEN Frontend-Code
+per Skript (`scan_subscribe.py`, balancierte Klammer-Erfassung) durchsucht:
+**32 `.subscribe(...)`-Aufrufe ohne error-Handler** in 6 Komponenten gefunden
+und behoben → Scanner jetzt **0**.
+
+- **Load-Reads** (Themen-/Facetten-/Taxonomie-/Interaktions-Abrufe beim Öffnen
+  bzw. Navigieren) fangen jetzt weich ab: die betroffene Sektion behält ihren
+  Stand (leer/vorherig), die Seite bricht NICHT ab. Betrifft app-shell
+  (Topic-Drill + Facetten, verschachtelt), idea-detail (Interaktionen +
+  Taxonomie-Lazy-Loads), submit-idea + inbox-list (Dropdown-Daten),
+  taxonomy-/topic-editor (Listen + Counts).
+- **Mutationen** (Mod-Schreibaktionen) geben jetzt **Feedback** statt still zu
+  scheitern — die Taxonomie-Writes (`addEvent`/`savePhase`/`addPhase`/
+  `toggleActive`/`setEventRating`) waren inkonsistent (nur `saveEvent`/`delete*`
+  hatten Handler); jetzt alle via `_taxSaveError`-Alert. Ebenso
+  `deleteInboxItem` (Postfach) und die Like/Follow-Toggles auf der Detailseite.
+- Verifiziert: build 0 Errors · ng lint 0 Errors (4 any-Baseline) · 16/16 FE-Tests.
+
+## 2026-07-03 — Performance: Live-Netzwerk-Befunde behoben (+ Folgeprüfung)
+
+Aus DevTools-Beobachtung im Live-Betrieb diagnostiziert und im Code verifiziert
+(je +Test, wo backendseitig):
+
+- **Detailseiten-Latenz (~300–450 ms bei FAST JEDEM Aufruf) — Hauptursache:**
+  Der Child-IO-Anhang-Cache (`children_cache`) hatte eine **60-s-TTL** → jeder
+  Detailaufruf mit >60 s Abstand erzwang einen Live-`list_child_objects`-ES-Call.
+  Ein Fehlgriff, denn Anhang-Mutationen über die App rufen ohnehin bereits
+  `_invalidate_children_cache` (NULL → nächster View lädt sofort frisch) — die
+  TTL bewacht nur seltene out-of-band-Änderungen. **TTL 60 s → 1 h** (60×
+  weniger Live-Reads; out-of-band spätestens per Nightly-Attachment-Scan). Test:
+  `test_child_attachments_cache_survives_far_beyond_old_60s`.
+- **Detailseite, Kommentar-Zweig:** bei `comment_count == 0` lief trotzdem ein
+  Live-`comments()`-Call (kalter Cache) → jetzt ohne Call leer ausgeliefert.
+  Reduziert die ES-LAST (der zweite konditionale Read lief bislang parallel zum
+  Anhang-Read); Wall-Clock-Gewinn erst zusammen mit dem TTL-Fix, da beide Reads
+  parallel starten. Test: `test_comments_skipped_when_count_zero`.
+- **Moderation → Themenbereiche: N+1 eliminiert.** Der Editor feuerte je
+  Themenbereich einen eigenen `ideas?topic_id=…`-Request (40+ Calls) nur für den
+  „leer?"-Count → ersetzt durch **einen** `/meta`-Call (liefert die Counts als
+  `topics: {id: n}` gebündelt). Verhaltensgleich: `/meta` zählt direkt per
+  `topic_id` — für die an Herausforderungen (Blättern) angezeigten Zahlen und
+  die Delete-Gate identisch zum vorigen Subtree-Count; `hidden`-Ausschluss in
+  beiden gleich.
+- **„Mein Bereich": 4 parallele Auth-Roundtrips → 1.** Der Profilseiten-Burst
+  (`/me/follows` + `/me/interest` + `/me/team-requests` + `/me/notifications/seen`)
+  rief je einen ungecachten `verify_login` → `my_memberships`-ES-Call (~940 ms)
+  auf — 4 simultane Auth-Prüfungen auf edu-sharing (Ursache der beobachteten
+  transienten Fehler). Neu: **In-Flight-Coalescing** in `auth.py` — nebenläufige,
+  identische Header teilen sich EINEN Roundtrip. Kein Zeit-Cache → die Sofort-
+  Widerruf-Garantie der Schreibpfade bleibt (nur überlappende Prüfungen werden
+  gebündelt, deren Ergebnis ohnehin gleich ist). Tests: `test_auth_coalesce.py`
+  (4 Fälle inkl. distinct-header + sequential-not-cached + Exception-Propagation).
+  **Zweite Ursache (Frontend-Robustheit):** `profile.reloadAll()`/`reloadTeam()`
+  riefen die 5 `/me`-Sektionen OHNE error-Callback → ein transienter Auth-Fehler
+  einer einzelnen Route wurde als **uncaught error** sichtbar. Jetzt fängt jede
+  Sektion weich ab (behält ihren Stand, die übrigen laden normal). Damit bricht
+  „Mein Bereich" nicht mehr ab, selbst wenn eine Auth-Prüfung mal zuckt.
+
+**Folgeprüfung „weitere ähnliche Probleme?"** (systematischer Sweep):
+- Backend-Hot-Paths **sauber**: `ranking`/`list_ideas`/`meta`/`/me/*`-Reads sind
+  reine SQLite-Zugriffe, kein Per-Item-ES. Die Per-Item-ES-Loops
+  (`_purge_tag_from_ideas`, Publication-Meta-Backfill, `group_members`,
+  `bulk_move`, Sync-Diff-Walk, `_annotate_stale_status`) sind allesamt Mod-only
+  Bulk-/Admin-Operationen, die jeden Knoten anfassen MÜSSEN — keine
+  versteckte N+1.
+- Frontend-Loop-Subscribes geprüft: `sortTopics` ist bereits **ein** Bulk-Call,
+  Inbox-Counts sind bounded (3).
+- **Taxonomie-Reorder N+1 behoben** (der oben notierte Minor-Fund): neuer
+  `PUT /admin/taxonomy/sort` (`{kind, items:[{slug,sort_order}]}`) ersetzt die N
+  Einzel-`upsertPhase/Event`-Calls beim ▲▼-Umsortieren durch EINEN. Schreibt
+  **nur** sort_order (der frühere Voll-Upsert je Zeile konnte nebenläufige
+  Label-/Status-Edits überschreiben — jetzt behoben) und loggt EINEN Aktivitäts-
+  Eintrag statt N. Tests: `test_sort_taxonomy_*` (Reihenfolge, Nur-sort_order,
+  Mod-Gate).
+
+Gates: **185 pytest** (+9) grün · ruff clean · build:embed 0 Errors · ng lint
+0 Errors (4 any-Baseline) · 16/16 FE-Tests.
+
 ## 2026-07-03 — npm audit fix + Split-Entscheidungen idea-detail/routes.py
 
 - **`npm audit fix` (ohne `--force`):** Dev-Tooling-Advisories **14 → 10**

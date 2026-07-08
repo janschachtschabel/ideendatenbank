@@ -454,28 +454,34 @@ export class SubmitIdeaComponent implements OnInit {
 
   ngOnInit() {
     this.api.setBase(this.apiBase);
-    this.api.topics().subscribe((ts) => {
-      this.topicsById = Object.fromEntries(ts.map((t) => [t.id, t]));
-      this.challenges = ts.filter((t) => t.parent_id); // only challenge-level
-      // Vorauswahl einer Herausforderung (Mitmach-Kachel). Nur übernehmen,
-      // wenn es eine wählbare (L2-)Herausforderung ist.
-      if (this.presetTopic && this.challenges.some((t) => t.id === this.presetTopic)) {
-        this.topicId = this.presetTopic;
-      }
+    this.api.topics().subscribe({
+      next: (ts) => {
+        this.topicsById = Object.fromEntries(ts.map((t) => [t.id, t]));
+        this.challenges = ts.filter((t) => t.parent_id); // only challenge-level
+        // Vorauswahl einer Herausforderung (Mitmach-Kachel). Nur übernehmen,
+        // wenn es eine wählbare (L2-)Herausforderung ist.
+        if (this.presetTopic && this.challenges.some((t) => t.id === this.presetTopic)) {
+          this.topicId = this.presetTopic;
+        }
+      },
+      error: () => { /* soft-fail: Themen-Dropdown bleibt leer, kein uncaught error */ },
     });
-    this.api.listPhases().subscribe((ps) => (this.phases = ps));
+    this.api.listPhases().subscribe({ next: (ps) => (this.phases = ps), error: () => { /* soft-fail: Dropdown bleibt leer */ } });
     // Nur live-Events fürs Submit-Dropdown; archivierte werden im
     // Backend bereits ausgeliefert, aber wir filtern für den Submit
     // clientseitig auf liveEvents().
-    this.api.listEvents({ includeArchived: false }).subscribe((es) => {
-      this.events = es;
-      // Wenn die App mit ?event=<slug>-Query gestartet wurde und der Slug
-      // existiert, vorbelegen + UI sperrt das Dropdown auf diesen Wert.
-      if (this.presetEvent && es.some((e) => e.slug === this.presetEvent)) {
-        this.event = this.presetEvent;
-        this.selectedEvents.add(this.presetEvent);
-        this.noEvent = false;
-      }
+    this.api.listEvents({ includeArchived: false }).subscribe({
+      next: (es) => {
+        this.events = es;
+        // Wenn die App mit ?event=<slug>-Query gestartet wurde und der Slug
+        // existiert, vorbelegen + UI sperrt das Dropdown auf diesen Wert.
+        if (this.presetEvent && es.some((e) => e.slug === this.presetEvent)) {
+          this.event = this.presetEvent;
+          this.selectedEvents.add(this.presetEvent);
+          this.noEvent = false;
+        }
+      },
+      error: () => { /* soft-fail: Event-Dropdown bleibt leer */ },
     });
     // Captcha lazy laden — nur, wenn der User nicht eingeloggt ist.
     if (!this.isLoggedIn()) this.loadCaptcha();

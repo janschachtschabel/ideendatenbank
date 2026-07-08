@@ -72,6 +72,19 @@ class EventEntry(TaxonomyEntry):
     detail_url: str | None = Field(default=None, max_length=500)
 
 
+class TaxonomySortItem(BaseModel):
+    slug: str = Field(..., min_length=1, max_length=80)
+    sort_order: int
+
+
+class TaxonomySortRequest(BaseModel):
+    """Bulk-Reihenfolge fürs ▲▼-Umsortieren: setzt sort_order für mehrere
+    Einträge in EINEM Call (statt N Einzel-Upserts)."""
+
+    kind: Literal["event", "phase"]
+    items: list[TaxonomySortItem] = Field(..., min_length=1, max_length=500)
+
+
 # ----- Read side: phases + events -------------------------------------------
 # Im Submit-Form als Dropdown angeboten und ans `cclom:general_keyword` als
 # `phase:<slug>` bzw. `event:<slug>` angehängt. Direkt vom /bootstrap-Bundle
@@ -210,6 +223,20 @@ def _upsert_taxonomy(table: str, body: TaxonomyEntry, user: str | None) -> dict:
     return {"ok": True, "slug": body.slug}
 
 
+def _sort_taxonomy(table: str, items: list[TaxonomySortItem]) -> int:
+    # `table` stammt aus einer festen Konstante der aufrufenden Route (kein
+    # User-Input). Es wird AUSSCHLIESSLICH sort_order gesetzt — Label/Status/
+    # Featured/… bleiben unangetastet (der frühere Reorder schrieb je Zeile den
+    # vollen Eintrag zurück und konnte nebenläufige Edits überschreiben).
+    with connect() as con:
+        for it in items:
+            con.execute(
+                f"UPDATE {table} SET sort_order=? WHERE slug=?",
+                (it.sort_order, it.slug),
+            )
+    return len(items)
+
+
 def _upsert_event(body: EventEntry, user: str | None) -> dict:
     """Upsert mit Event-spezifischen Feldern (Status + Featured + Voting-Modus)."""
     # Leerstring → NULL (= globalen Modus erben).
@@ -271,6 +298,27 @@ def _upsert_event(body: EventEntry, user: str | None) -> dict:
                 ),
             )
     return {"ok": True, "slug": body.slug}
+
+
+@router.put("/admin/taxonomy/sort", tags=["taxonomy"])
+async def sort_taxonomy(body: TaxonomySortRequest, authorization: str | None = Header(None)):
+    """Setzt sort_order für mehrere Veranstaltungen bzw. Phasen in EINEM Call
+    (statt N Einzel-Upserts beim ▲▼-Umsortieren — war ein N+1). Schreibt
+    ausschließlich sort_order (kein Voll-Upsert je Zeile → keine Kollision mit
+    nebenläufigen Label-/Status-Edits). Eigener Pfad ``/admin/taxonomy/sort`` —
+    kein ``{slug}``-Routing-Konflikt."""
+    await _require_moderator(authorization)
+    table = "taxonomy_event" if body.kind == "event" else "taxonomy_phase"
+    n = await asyncio.to_thread(_sort_taxonomy, table, body.items)
+    await asyncio.to_thread(
+        _log_activity,
+        action=f"taxonomy_{body.kind}_changed",
+        authorization=authorization,
+        is_mod=True,
+        target_type="taxonomy",
+        detail={"action": "sorted", "count": n},
+    )
+    return {"ok": True, "updated": n}
 
 
 @router.put("/admin/events/{slug}", tags=["taxonomy"])

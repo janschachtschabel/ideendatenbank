@@ -11,7 +11,7 @@ data:
 
   # ---- Daten ----
   SQLITE_PATH: {{ printf "%s/ideendb.sqlite" .Values.persistence.mountPath | quote }}
-  SYNC_INTERVAL_SECONDS: {{ .Values.config.app.syncIntervalSeconds | quote }}
+  SYNC_NIGHTLY_HOUR: {{ .Values.config.app.syncNightlyHour | quote }}
 
   # ---- edu-sharing ----
   EDU_REPO_BASE_URL: {{ .Values.config.edu.repoBaseUrl | quote }}

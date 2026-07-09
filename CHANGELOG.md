@@ -1,5 +1,65 @@
 # Changelog
 
+## 2026-07-09 — Browser-Zurück funktioniert jetzt in der App + Brotkrumen-Ausbau
+
+User-Feedback: Die Zurück-Taste des Browsers warf einen aus der App (SPA ohne
+History-Integration — kein Angular-Router wegen Web-Component-Embed).
+
+- **History-Integration (`nav-url.ts` + Shell):** Jede Navigation (View-Wechsel,
+  Idee öffnen, Themen-/Event-Drill, Drill verlassen, Topic-Filter) spiegelt den
+  Zustand per `pushState` in die Query-Params — dasselbe Vokabular wie die
+  bestehenden Share-Links (`view`/`id`/`u`/`event`, neu `topic`). `popstate`
+  stellt die Ansicht wieder her (inkl. Detailseite via ideaId-Selbst-Load,
+  Drill-Rekonstruktion aus dem Themenbaum, Browser-Filter). Embed-sicher:
+  NUR die app-eigenen Query-Keys werden angefasst, fremde Host-Params bleiben;
+  alles in try/catch (sandboxte iframes laufen einfach ohne). Der Start-Eintrag
+  wird nur normalisiert (replace) — der erste Back-Druck verlässt die App
+  weiterhin, solange nicht navigiert wurde.
+- **Drei lokale `replaceState`-Inseln konsolidiert** (goSubmitForEvent,
+  goVoteForEvent, enterEventDrillFromHome) — Featured-Klicks erzeugen jetzt
+  EINEN korrekten History-Eintrag statt URL-Update ohne Rückweg.
+- **Brotkrumen-Ausbau:** Detailseite zeigt jetzt die volle Kette
+  „← Zurück / Ideen / **Themenbereich** / Herausforderung" (Parent-Ebene neu,
+  klickbar); öffentliche Profilseite hat eine „← Zurück zu den Ideen"-Leiste
+  (hatte keinen In-App-Rückweg). Bestand geprüft: Browser-Breadcrumb (3-stufig),
+  Themen-/Event-Drill-Zurück-Links vorhanden ✓.
+- Verifiziert im echten Browser (Preview, lokale Daten): Push-Kette
+  `/ → ?view=browser → ?view=detail&id=…`, Back→Liste→Home, Forward→Liste,
+  Topic-Drill rein/raus, Featured-Event-Drill (ein Eintrag + state), 0
+  Console-Errors. Gates: ng lint clean · **22/22** FE-Tests (16 + 6 neue
+  nav-url-Specs) · build:embed 0 Errors.
+
+## 2026-07-09 — Detailseite: ~1,2-s-Hänger pro Ideenwechsel behoben (SWR-Mod-Status)
+
+Live-Diagnose (DevTools, frischer Deploy): `ideas`-Liste 59 ms, `unseen` 41 ms
+(DB-Pfade schnell ✓) — aber `get_idea` **1,24 s** und `interactions` **1,23 s**,
+parallel und fast identisch lang = beide warteten auf DENSELBEN (coalesced)
+`my_memberships`-Roundtrip. Ursache: der Mod-Status-Cache (TTL 60 s) läuft beim
+Stöbern ständig ab, und die Re-Verifikation (~1 s edu-sharing-Auth) blockierte
+die Antwort — nur um UI-Flags zu setzen. Betroffen: alle EINGELOGGTEN Nutzer,
+bei praktisch jedem Ideenwechsel nach >60 s Lesezeit.
+
+- **`is_moderator(stale_ok=True)` (SWR):** Anzeige-Pfade (get_idea
+  can_edit/can_delete + Phasen-Dropdown, interactions can_manage) verwenden
+  einen kurz abgelaufenen Cache-Eintrag SOFORT; die Re-Verifikation läuft im
+  Hintergrund (In-Flight-dedupliziert, Task-referenziert). Gnadenfenster
+  `_MOD_STALE_GRACE` 10 min — danach wieder blockierend (verhindert unbegrenzt
+  alte Anzeige-Zustände). Cache-Eviction um das Fenster verschoben.
+- **Sicherheits-GATES unverändert streng:** `require_moderator` (alle
+  Mod-Aktionen), hidden-404 und sämtliche Mutationen nutzen `stale_ok` NIE —
+  deren Widerrufs-Fenster bleibt 60 s (per Test gepinnt: Entzug greift sofort).
+- **Kontakt-Gate gehärtet:** Anzeige der (personenbezogenen) Kontaktdaten
+  verlangt jetzt IMMER die Passwort-Verifikation — der frühere Mod-Shortcut
+  entfällt (er wäre mit stale-Status ein Bypass gewesen; Verify ist coalesced
+  und läuft nur auf Ideen MIT hinterlegtem Kontakt).
+- Effekt nach Redeploy: nur der ERSTE Aufruf nach Login/Neustart zahlt die
+  Auth-Latenz einmalig; jeder weitere Ideenwechsel antwortet cache-schnell.
+  Bonus: die Detailseiten-Flags überleben jetzt sogar einen ES-Ausfall
+  (Integrationstest).
+- 4 neue Tests: stale liefert sofort + Hintergrund-Refresh erneuert, Gates
+  bleiben strikt nach Ablauf, Gnadenfenster begrenzt, Detailseite bei
+  ES-Ausfall. Verifiziert: pytest 206/206 · ruff clean.
+
 ## 2026-07-09 — Login-Latenz /me halbiert + Format-Baseline
 
 - **`GET /me` parallelisiert:** Der Login-Check machte zwei **serielle**

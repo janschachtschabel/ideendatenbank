@@ -706,6 +706,14 @@ import { initialsOf as initialsOfUtil } from '../format-utils';
             <button class="back-inline" (click)="back.emit()">← Zurück</button>
             <span>/</span>
             <button (click)="back.emit()">Ideen</button>
+            @if (topicParentOf(i); as tp) {
+              <span>/</span>
+              <button class="crumb-topic" type="button"
+                      (click)="openTopic.emit(tp.id)"
+                      title="Alle Ideen in diesem Themenbereich zeigen">
+                {{ tp.title }}
+              </button>
+            }
             @if (topicTitle(i) && i.topic_id) {
               <span>/</span>
               <button class="crumb-topic" type="button"
@@ -1364,6 +1372,16 @@ export class IdeaDetailComponent implements OnChanges {
   topicTitle(i: Idea): string {
     if (!i.topic_id) return '';
     return this.topics().find((t) => t.id === i.topic_id)?.title || '';
+  }
+
+  /** Übergeordneter Themenbereich der Herausforderung — für die Brotkrumen
+   *  (Start → Ideen → Themenbereich → Herausforderung). Null, wenn die Idee
+   *  direkt in einem Root-Topic liegt oder der Baum (noch) nicht geladen ist. */
+  topicParentOf(i: Idea): Topic | null {
+    if (!i.topic_id) return null;
+    const topic = this.topics().find((t) => t.id === i.topic_id);
+    if (!topic?.parent_id) return null;
+    return this.topics().find((t) => t.id === topic.parent_id) || null;
   }
 
   /** Event-Slug → Anzeigename aus der Event-Taxonomie (Fallback: Slug). */

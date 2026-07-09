@@ -56,6 +56,17 @@ _MOD_CACHE: dict[str, tuple[bool, float]] = {}
 _MOD_CACHE_TTL = 60.0
 # Obergrenze gegen unbegrenztes Wachstum bei vielen distinkten Auth-Headern.
 _MOD_CACHE_MAX = 4096
+# SWR-Gnadenfenster für REINE ANZEIGE-Pfade (``is_moderator(stale_ok=True)``):
+# ein abgelaufener Eintrag darf so lange weiterverwendet werden, während die
+# Re-Verifikation im Hintergrund läuft. Live-Befund: get_idea + interactions
+# hingen sonst bei JEDEM Detailaufruf nach TTL-Ablauf ~1,2 s am blockierenden
+# my_memberships-Roundtrip — nur für UI-Flags. Die GATES (require_moderator,
+# hidden-404) nutzen stale NIE; deren Widerrufs-Fenster bleibt 60 s.
+_MOD_STALE_GRACE = 600.0
+
+# Referenzen auf laufende Hintergrund-Refreshes — unreferenzierte Tasks kann
+# asyncio einsammeln, bevor sie laufen (bekanntes create_task-Gotcha).
+_MOD_REFRESH_TASKS: set[asyncio.Task] = set()
 
 
 def _auth_cache_key(authorization: str) -> str:
@@ -91,7 +102,37 @@ async def _my_memberships(authorization: str) -> dict:
         _MEMBERSHIP_INFLIGHT.pop(key, None)
 
 
-async def is_moderator(authorization: str | None) -> bool:
+def _is_mod_from_memberships(m: dict) -> bool:
+    groups = {(g.get("authorityName") or "") for g in (m.get("groups") or [])}
+    return any(g in groups for g in settings.fallback_mod_groups)
+
+
+def _spawn_mod_refresh(authorization: str, key: str) -> None:
+    """Re-Verifikation im Hintergrund (fire-and-forget) — erneuert den
+    Mod-Cache-Eintrag, ohne die Antwort zu blockieren. Läuft bereits eine
+    Verifikation für diese Credentials (In-Flight-Registry), passiert nichts —
+    parallele stale-Hits erzeugen keinen Task-/Roundtrip-Sturm."""
+    if key in _MEMBERSHIP_INFLIGHT:
+        return
+
+    async def _run() -> None:
+        try:
+            m = await _my_memberships(authorization)
+            _MOD_CACHE[key] = (
+                _is_mod_from_memberships(m),
+                time.monotonic() + _MOD_CACHE_TTL,
+            )
+        except Exception:
+            # Best-effort: stale bleibt bis zum Gnadenfenster nutzbar,
+            # der nächste Hit stößt den Refresh erneut an.
+            pass
+
+    task = asyncio.ensure_future(_run())
+    _MOD_REFRESH_TASKS.add(task)
+    task.add_done_callback(_MOD_REFRESH_TASKS.discard)
+
+
+async def is_moderator(authorization: str | None, *, stale_ok: bool = False) -> bool:
     """Bestätigt, ob der eingeloggte User Mod-Rechte hat — ausschließlich über
     Mitgliedschaft in einer der konfigurierten edu-sharing-Gruppen
     (Default: GROUP_ALFRESCO_ADMINISTRATORS).
@@ -102,6 +143,14 @@ async def is_moderator(authorization: str | None) -> bool:
     und war damit ein Auth-Bypass, sobald gesetzt.
 
     Das Ergebnis wird kurz gecacht (siehe ``_MOD_CACHE``).
+
+    ``stale_ok`` (keyword-only, Default False): NUR für reine ANZEIGE-Pfade
+    (UI-Flags wie can_edit/can_manage/Phasen-Dropdown). Ist der Cache-Eintrag
+    abgelaufen, aber jünger als ``_MOD_STALE_GRACE``, wird er sofort verwendet
+    und die Re-Verifikation läuft im Hintergrund — der Aufrufer wartet nie auf
+    den ~1-s-edu-sharing-Roundtrip. Autorisierungs-GATES (require_moderator,
+    hidden-404, Mutationen) lassen den Default False: dort bleibt das
+    Widerrufs-Fenster bei der 60-s-TTL.
     """
     if not authorization:
         return False
@@ -110,16 +159,20 @@ async def is_moderator(authorization: str | None) -> bool:
     cached = _MOD_CACHE.get(key)
     if cached and cached[1] > now:
         return cached[0]
+    if stale_ok and cached and cached[1] > now - _MOD_STALE_GRACE:
+        _spawn_mod_refresh(authorization, key)
+        return cached[0]
     try:
         m = await _my_memberships(authorization)
-        groups = {(g.get("authorityName") or "") for g in (m.get("groups") or [])}
     except Exception:
         # Transienter ES-Fehler oder abgelehnte Credentials → NICHT cachen,
         # damit ein kurzer Ausfall nicht TTL-lang „kein Mod" einbrennt.
         return False
-    result = any(g in groups for g in settings.fallback_mod_groups)
+    result = _is_mod_from_memberships(m)
     _MOD_CACHE[key] = (result, now + _MOD_CACHE_TTL)
-    evict_expired_and_cap(_MOD_CACHE, now, _MOD_CACHE_MAX)
+    # Eviction erst NACH dem Gnadenfenster — abgelaufene Einträge sind für
+    # stale_ok-Pfade noch wertvoll (deshalb der verschobene Zeit-Horizont).
+    evict_expired_and_cap(_MOD_CACHE, now - _MOD_STALE_GRACE, _MOD_CACHE_MAX)
     return result
 
 
@@ -153,6 +206,7 @@ async def is_owner_or_mod(
     *,
     verified: bool = False,
     live_fallback: bool = True,
+    mod_stale_ok: bool = False,
 ) -> tuple[bool, str | None, bool]:
     """Owner-Gating für Idee-Editieren / -Löschen.
 
@@ -189,7 +243,9 @@ async def is_owner_or_mod(
     user = decode_basic_user(authorization)
     if not user:
         return False, None, False
-    is_mod = await is_moderator(authorization)
+    # ``mod_stale_ok``: UI-Flag-Pfade akzeptieren einen kurz abgelaufenen
+    # Mod-Status (SWR, s. is_moderator) — Mutationspfade lassen den Default.
+    is_mod = await is_moderator(authorization, stale_ok=mod_stale_ok)
     if is_mod:
         return True, user, True
 
@@ -262,6 +318,7 @@ async def can_edit_idea(
     *,
     verified: bool = False,
     live_fallback: bool = True,
+    mod_stale_ok: bool = False,
 ) -> tuple[bool, str | None, bool]:
     """Erweitert `is_owner_or_mod` um angenommene Mithackende mit
     Bearbeitungsrecht: idea_interaction (kind='interest', status='approved',
@@ -276,7 +333,11 @@ async def can_edit_idea(
     zugesicherter Passwort-Prüfung akzeptiert (fail-closed by default).
     """
     allowed, user, is_mod = await is_owner_or_mod(
-        idea_id, authorization, verified=verified, live_fallback=live_fallback
+        idea_id,
+        authorization,
+        verified=verified,
+        live_fallback=live_fallback,
+        mod_stale_ok=mod_stale_ok,
     )
     if allowed:
         return True, user, True

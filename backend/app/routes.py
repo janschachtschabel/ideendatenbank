@@ -554,8 +554,11 @@ async def get_idea(
         # UND kein Owner-Live-Fallback (`live_fallback=False`): der kostete jeden
         # eingeloggten Nicht-Owner pro Detailaufruf einen ungecachten
         # node_metadata-Roundtrip (~300–450 ms, bei ES-Hängern bis zum Timeout).
+        # `mod_stale_ok=True`: kurz abgelaufener Mod-Status trägt die UI-Flags
+        # sofort (SWR) — sonst hängt jeder Ideenwechsel nach 60 s wieder ~1,2 s
+        # am my_memberships-Roundtrip (Live-Befund, DevTools).
         edit_allowed, _user, is_owner_or_mod = await _can_edit_idea(
-            row["id"], authorization, verified=True, live_fallback=False
+            row["id"], authorization, verified=True, live_fallback=False, mod_stale_ok=True
         )
         can_edit = edit_allowed
         can_delete = is_owner_or_mod
@@ -575,7 +578,8 @@ async def get_idea(
     is_mod_caller = False
     if authorization:
         try:
-            is_mod_caller = await _is_moderator(authorization)
+            # Nur fürs Phasen-Dropdown (Anzeige) → stale-toleranter Mod-Status.
+            is_mod_caller = await _is_moderator(authorization, stale_ok=True)
         except Exception:
             is_mod_caller = False
 
@@ -787,11 +791,11 @@ async def get_idea(
                     ).fetchone()
 
             crow = await asyncio.to_thread(_read_contact)
-            if (
-                crow
-                and crow["contact"]
-                and (is_mod_caller or (await _verify_login(authorization)) is not None)
-            ):
+            # Kontakt = personenbezogen → IMMER passwort-verifiziert (coalesced,
+            # läuft nur auf Ideen MIT hinterlegtem Kontakt). Der frühere
+            # is_mod_caller-Shortcut entfällt: der ist jetzt stale-tolerant und
+            # darf ein sensibles Feld nicht am Passwort-Check vorbei freigeben.
+            if crow and crow["contact"] and (await _verify_login(authorization)) is not None:
                 base["contact"] = crow["contact"]
         except Exception:
             pass

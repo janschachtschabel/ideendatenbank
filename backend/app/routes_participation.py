@@ -378,7 +378,13 @@ async def get_interactions(
             # Öffnen parallel, ein Live-node_metadata pro Aufruf wäre dieselbe
             # Latenzfalle, die dort behoben wurde.
             can_manage = (
-                await _is_owner_or_mod(idea_id, authorization, verified=True, live_fallback=False)
+                await _is_owner_or_mod(
+                    idea_id,
+                    authorization,
+                    verified=True,
+                    live_fallback=False,
+                    mod_stale_ok=True,
+                )
             )[0]
         except Exception:
             can_manage = False

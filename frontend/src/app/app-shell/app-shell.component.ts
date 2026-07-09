@@ -17,6 +17,7 @@ import { LegalComponent } from './legal.component';
 import { EmbedComponent } from './embed.component';
 import { HelpComponent } from './help.component';
 import { ShareDialogComponent, ShareTarget } from './share-dialog.component';
+import { NavState, buildNavUrl, readNavState } from '../nav-url';
 
 type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 'submit' | 'moderation' | 'profile' | 'user' | 'imprint' | 'privacy' | 'embed' | 'help';
 
@@ -551,7 +552,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
         @case ('topics') {
           <section class="container section">
             @if (topicDrillRoot()) {
-              <button class="back-link" (click)="topicDrillRoot.set(null); topicDrillChild.set(null)">
+              <button class="back-link" (click)="exitTopicDrill()">
                 ← Zurück zu allen Themenbereichen
               </button>
               <div class="topics-hero">
@@ -626,7 +627,7 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
         @case ('events') {
           <section class="container section">
             @if (eventDrill()) {
-              <button class="back-link" (click)="eventDrill.set(null)">
+              <button class="back-link" (click)="exitEventDrill()">
                 ← Zurück zu allen Veranstaltungen
               </button>
               <div class="topics-hero">
@@ -832,6 +833,11 @@ type View = 'home' | 'browser' | 'detail' | 'topics' | 'events' | 'ranking' | 's
         }
 
         @case ('user') {
+          <!-- Zurück-Leiste: die Profilseite wird auch per Direktlink erreicht
+               und hatte sonst keinen In-App-Rückweg (nur Top-Navigation). -->
+          <div class="container" style="padding-top: 12px">
+            <button class="back-link" (click)="go('browser')">← Zurück zu den Ideen</button>
+          </div>
           <ideendb-public-profile
             [apiBase]="apiBase"
             [username]="profileUsername"
@@ -1017,6 +1023,13 @@ export class AppShellComponent implements OnInit, OnDestroy {
     } else {
       this.parseUrlParams();
     }
+    // Browser-Zurück: Navigations-Zustand in der History spiegeln. Der
+    // Start-Eintrag wird nur NORMALISIERT (replace) — der erste Back-Druck
+    // führt weiterhin aus der App heraus, solange nicht navigiert wurde.
+    try {
+      window.addEventListener('popstate', this._onPopState);
+      this.syncHistory('replace');
+    } catch { /* sandboxed Embed ohne History-Zugriff */ }
     // Falls bereits eingeloggt (sessionStorage): Mod-Status auffrischen
     if (this.api.hasCredentials()) {
       this.api.refreshMe().subscribe({
@@ -1134,6 +1147,138 @@ export class AppShellComponent implements OnInit, OnDestroy {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // „Was ist neu"-Badge wird beim Öffnen von Mein Bereich geleert
     if (v === 'profile') this.markFeedSeen();
+    this.syncHistory();
+  }
+
+  // ===== Browser-History (Zurück-Taste in der SPA) ==========================
+  // Kein Angular-Router (Web-Component-Embed) — der Navigations-Zustand der
+  // Signals wird über pushState in die Query-Params gespiegelt (dasselbe
+  // Vokabular wie die Share-Links) und über popstate wiederhergestellt.
+  // Fremde Query-Params der Host-Seite bleiben unangetastet (s. nav-url.ts).
+
+  /** Während eines popstate-Restores keine neuen History-Einträge erzeugen. */
+  private _suppressHistorySync = false;
+  private _onPopState = () => this.restoreFromUrl();
+
+  /** Aktueller Navigations-Zustand für die URL — nur die Anteile, die eine
+   *  eigene „Seite" ausmachen (Filter-Feinheiten wie Suchtext bleiben außen). */
+  private currentNavState(): NavState {
+    const v = this.view();
+    const s: NavState = { view: v };
+    if (v === 'detail') s.id = this.currentIdeaId();
+    if (v === 'user') s.u = this.profileUsername || null;
+    if (v === 'events') s.event = this.eventDrill();
+    if (v === 'topics') s.topic = this.topicDrillChild()?.id || this.topicDrillRoot()?.id || null;
+    if (v === 'browser') {
+      s.topic = this.filterTopic || null;
+      s.event = this.filterEvent || null;
+    }
+    if (v === 'submit') s.event = this.presetEventForSubmit || null;
+    return s;
+  }
+
+  /** Spiegelt den Zustand in die History. `push` legt einen Eintrag an
+   *  (idempotent: identische URL wird nicht doppelt gepusht), `replace`
+   *  normalisiert den aktuellen Eintrag (Start / Restore). */
+  private syncHistory(mode: 'push' | 'replace' = 'push') {
+    if (this._suppressHistorySync) return;
+    try {
+      const state = this.currentNavState();
+      const url = buildNavUrl(window.location.href, state);
+      const current = window.location.pathname + window.location.search + window.location.hash;
+      if (mode === 'replace') {
+        window.history.replaceState({ idb: state }, '', url);
+      } else if (url !== current) {
+        window.history.pushState({ idb: state }, '', url);
+      }
+    } catch { /* sandboxed Embed ohne History-Zugriff — dann eben ohne */ }
+  }
+
+  /** popstate: Ansicht aus history.state (Fallback: URL) wiederherstellen. */
+  private restoreFromUrl() {
+    let s: NavState;
+    try {
+      s = (window.history.state && window.history.state.idb) || readNavState(window.location.search);
+    } catch {
+      return;
+    }
+    this._suppressHistorySync = true;
+    try {
+      this.applyNavState(s);
+    } finally {
+      this._suppressHistorySync = false;
+    }
+  }
+
+  /** Stellt eine Ansicht her, ohne History-Einträge zu erzeugen (Restore). */
+  private applyNavState(s: NavState) {
+    const known: View[] = ['home','browser','detail','topics','events','ranking','submit','moderation','profile','user','imprint','privacy','embed','help'];
+    const v = (known.includes(s.view as View) ? s.view : 'home') as View;
+    switch (v) {
+      case 'detail':
+        if (!s.id) { this.go('home'); break; }
+        if (this.currentIdeaId() !== s.id) {
+          // idea-detail lädt bei ideaId-Änderung selbst nach (ngOnChanges).
+          this.currentIdea.set(null);
+          this.currentIdeaId.set(s.id);
+        }
+        this.view.set('detail');
+        break;
+      case 'user':
+        if (!s.u) { this.go('home'); break; }
+        this.profileUsername = s.u;
+        this.view.set('user');
+        break;
+      case 'events':
+        this.topicDrillRoot.set(null);
+        this.topicDrillChild.set(null);
+        this.eventDrill.set(s.event || null);
+        this.view.set('events');
+        break;
+      case 'topics': {
+        this.eventDrill.set(null);
+        const t = s.topic ? this.allTopics().find((x) => x.id === s.topic) : undefined;
+        if (t?.parent_id) {
+          const root = this.allTopics().find((x) => x.id === t.parent_id) || null;
+          this.topicDrillRoot.set(root);
+          this.topicDrillChild.set(root ? t : null);
+        } else {
+          this.topicDrillRoot.set(t || null);
+          this.topicDrillChild.set(null);
+        }
+        this.view.set('topics');
+        break;
+      }
+      case 'browser':
+        this.filterEvent = s.event || null;
+        if (s.topic) {
+          this.openTopicById(s.topic);
+        } else {
+          this.clearTopicFilter();
+          this.go('browser');
+        }
+        break;
+      case 'submit':
+        this.presetEventForSubmit = s.event || null;
+        this.go('submit');
+        break;
+      default:
+        this.go(v);
+    }
+    window.scrollTo({ top: 0 });
+  }
+
+  /** Themen-Drill verlassen (Zurück-Link) — mit History-Eintrag. */
+  exitTopicDrill() {
+    this.topicDrillRoot.set(null);
+    this.topicDrillChild.set(null);
+    this.syncHistory();
+  }
+
+  /** Event-Drill verlassen (Zurück-Link) — mit History-Eintrag. */
+  exitEventDrill() {
+    this.eventDrill.set(null);
+    this.syncHistory();
   }
 
   openIdea(i: Idea) {
@@ -1151,6 +1296,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   enterTopicDrill(t: Topic) {
     this.topicDrillRoot.set(t);
     this.topicDrillChild.set(null);
+    this.syncHistory();
     this.api.topicDetail(t.id).subscribe({
       next: (d) => {
         // Counts der Herausforderungen über EINEN /meta-Call statt je eine
@@ -1193,6 +1339,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.topicChildren.set([]);
     this.searchQ = '';
     this.loadFacets();
+    this.syncHistory();
   }
 
   /** Lädt die Facetten-Counts (Phase/Event/Kategorie) — entweder global
@@ -1425,30 +1572,23 @@ export class AppShellComponent implements OnInit, OnDestroy {
   /** Featured-Slot: Klick auf „Idee einreichen" — landet im Submit
    * mit vorgewähltem Event-Slug (via URL-Parameter). */
   goSubmitForEvent(slug: string) {
+    // Presets VOR go() setzen — go() spiegelt sie in die URL/History
+    // (Reload/Share-Link behält den Slug; zentraler Mechanismus statt der
+    // früheren lokalen replaceState-Insel).
     this.presetEventForSubmit = slug;
     this.presetTopicForSubmit = null;
     this.go('submit');
-    // URL aktualisieren, damit Reload/Share-Link den Slug behält
-    try {
-      const u = new URL(window.location.href);
-      u.searchParams.set('view', 'submit');
-      u.searchParams.set('event', slug);
-      window.history.replaceState({}, '', u.toString());
-    } catch { /* iframe / sandbox */ }
   }
 
   /** Featured-Slot: „Jetzt voten" → Event-Ansicht (Drill) mit Rating-Sort
    * und aktiviertem Inline-Voting an den Kacheln. */
   goVoteForEvent(slug: string) {
     this.eventVotingSort = 'rating';
+    // Drill VOR go() setzen → EIN History-Eintrag mit view=events&event=…
+    // (go resettet eventDrill nur beim Verlassen des Events-Tabs).
+    this.eventDrill.set(slug);
+    this.shareOpen.set(false);
     this.go('events');
-    this.enterEventDrill(slug);
-    try {
-      const u = new URL(window.location.href);
-      u.searchParams.set('view', 'events');
-      u.searchParams.set('event', slug);
-      window.history.replaceState({}, '', u.toString());
-    } catch { /* iframe / sandbox */ }
   }
   /** Sortierung der Event-Drill-Ideenliste (rating beim Voten-Einstieg). */
   eventVotingSort: SortBy = 'modified';
@@ -1456,14 +1596,10 @@ export class AppShellComponent implements OnInit, OnDestroy {
   /** Featured-Slot: Klick auf den Event-Titel → Events-Tab + Drill in
    * dieses Event (zeigt die Ideen-Liste der Veranstaltung). */
   enterEventDrillFromHome(slug: string) {
+    // Drill VOR go() setzen → EIN History-Eintrag (s. goVoteForEvent).
+    this.eventDrill.set(slug);
+    this.shareOpen.set(false);
     this.go('events');
-    this.enterEventDrill(slug);
-    try {
-      const u = new URL(window.location.href);
-      u.searchParams.set('view', 'events');
-      u.searchParams.set('event', slug);
-      window.history.replaceState({}, '', u.toString());
-    } catch { /* iframe / sandbox */ }
   }
 
   /** Featured-Slot: hübsches Datums-Label aus ISO-Zeitstempel. */
@@ -1522,6 +1658,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.eventDrill.set(slug);
     this.shareOpen.set(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    this.syncHistory();
   }
 
   /** Slug → Anzeige-Label aus Taxonomie, fallback auf Slug selbst. */
@@ -1643,5 +1780,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
       clearInterval(this.unseenPollHandle);
       this.unseenPollHandle = undefined;
     }
+    try {
+      window.removeEventListener('popstate', this._onPopState);
+    } catch { /* symmetrisch zum add — Embed ohne History */ }
   }
 }

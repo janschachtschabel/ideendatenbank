@@ -161,6 +161,31 @@ def test_detail_view_falls_back_live_when_cache_owner_unknown(client, fake_es, s
     assert fake_es.called("node_metadata")
 
 
+def test_detail_view_survives_es_outage_with_stale_mod_status(client, fake_es, seed_idea):
+    """D (SWR-Mod-Status): Nach TTL-Ablauf trägt der STALE Mod-Status die
+    UI-Flags der Detailseite — sofort und sogar bei ES-Ausfall — statt jeden
+    Ideenwechsel ~1,2 s am blockierenden my_memberships-Roundtrip hängen zu
+    lassen (Live-Befund). Die Mod-GATES bleiben streng (separat gepinnt in
+    test_auth_cache)."""
+    import time as _time
+
+    from app import auth as auth_mod
+
+    fake_es.mods.add("user")
+    hdr = _basic("user")
+    seed_idea("i1", owner_username="alice")
+    r1 = client.get("/api/v1/ideas/i1", headers=hdr)
+    assert r1.json()["can_edit"] is True  # Mod → Edit-Flag (warm, 1 Call)
+    # TTL abgelaufen + edu-sharing down:
+    key = auth_mod._auth_cache_key(hdr["Authorization"])
+    val, _exp = auth_mod._MOD_CACHE[key]
+    auth_mod._MOD_CACHE[key] = (val, _time.monotonic() - 1)
+    fake_es.fail_es = True
+    r2 = client.get("/api/v1/ideas/i1", headers=hdr)
+    assert r2.status_code == 200
+    assert r2.json()["can_edit"] is True  # stale-Status trägt die Anzeige
+
+
 # ---- B: Kommentar-Cache mit Count-Invalidierung ----------------------------
 
 

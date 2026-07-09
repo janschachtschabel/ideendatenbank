@@ -174,6 +174,7 @@ app.add_middleware(
     ],
 )
 
+
 @app.middleware("http")
 async def _security_headers(request, call_next):
     """Grund-Härtung auf ALLEN Antworten (API + statisches Bundle):

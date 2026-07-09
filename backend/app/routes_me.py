@@ -39,10 +39,14 @@ async def whoami(authorization: str | None = Header(None)):
     if not authorization:
         return {"authenticated": False}
     user = _user_key_from_auth(authorization)
-    is_mod = await _is_moderator(authorization)
-    # Echten Namen mitgeben, damit das Frontend statt des Login-Usernamens
-    # den Klarnamen (+ Initialen) anzeigen kann. Fallback: Username.
-    display_name = await _resolve_display_name(authorization)
+    # Die zwei edu-sharing-Roundtrips (Mod-Status via memberships + Klarname via
+    # profile) sind unabhängig → PARALLEL statt seriell. Halbiert die Login-
+    # Latenz (~1,2 s → ~0,7 s = ein ES-Roundtrip als Untergrenze); beide Helfer
+    # fangen ihre Fehler selbst (kein Verhaltensunterschied zur Serienform).
+    is_mod, display_name = await asyncio.gather(
+        _is_moderator(authorization),
+        _resolve_display_name(authorization),
+    )
     return {
         "authenticated": bool(user),
         "username": user,
@@ -160,6 +164,7 @@ async def my_team_requests(authorization: str | None = Header(None)):
     user = await _verify_login(authorization)
     if not user:
         raise HTTPException(401, "Anmeldung erforderlich")
+
     def _read_team_requests():
         with connect() as con:
             rows = con.execute(

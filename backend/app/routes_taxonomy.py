@@ -395,6 +395,7 @@ async def _purge_tag_from_ideas(kind: str, slug: str, auth: str | None) -> dict:
                 await edu_sharing.client.update_metadata(
                     nid, {"cclom:general_keyword": new_kws}, auth_header=auth
                 )
+
             def _strip_tag_in_cache(node_id: str):
                 with connect() as con:
                     if kind == "phase":
@@ -458,6 +459,7 @@ async def delete_event(slug: str, authorization: str | None = Header(None)):
     # verwaister Tag ohne Label hängen; bei Teil-Fehler Eintrag behalten,
     # damit die Mod erneut löschen kann.
     if purge["failed"] == 0:
+
         def _delete_event_row():
             with connect() as con:
                 con.execute("DELETE FROM taxonomy_event WHERE slug=?", (slug,))
@@ -501,6 +503,7 @@ async def delete_phase(slug: str, authorization: str | None = Header(None)):
     purge = await _purge_tag_from_ideas("phase", slug, authorization)
     # Taxonomie nur entfernen, wenn ALLE Tags weg sind (s. delete_event).
     if purge["failed"] == 0:
+
         def _delete_phase_row():
             with connect() as con:
                 con.execute("DELETE FROM taxonomy_phase WHERE slug=?", (slug,))

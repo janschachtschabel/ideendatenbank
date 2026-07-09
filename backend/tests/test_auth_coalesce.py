@@ -72,6 +72,7 @@ def test_sequential_calls_are_not_cached(fake_es):
 def test_exception_propagates_and_clears_registry(fake_es):
     """Ein ES-Fehler erreicht ALLE Mit-Wartenden und hinterlässt keinen
     verwaisten Registry-Eintrag."""
+
     async def failing(auth_header=None, **_):
         await asyncio.sleep(0.01)
         raise RuntimeError("edu-sharing down")

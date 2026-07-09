@@ -451,9 +451,7 @@ async def _refresh_children_cache_bg(idea_id: str, auth_header: str | None) -> N
     Task NACH der Antwort. Best-effort: Fehler nur loggen, der nächste Aufruf
     serviert dann eben weiter den (funktionierenden) alten Stand."""
     try:
-        children = await edu_sharing.client.list_child_objects(
-            idea_id, auth_header=auth_header
-        )
+        children = await edu_sharing.client.list_child_objects(idea_id, auth_header=auth_header)
         await asyncio.to_thread(_store_children_cache, idea_id, _map_child_attachments(children))
     except Exception as e:
         log.debug("children-Cache-SWR-Refresh für %s fehlgeschlagen: %s", idea_id, e)
@@ -483,11 +481,10 @@ async def get_idea(
     if not row:
         ok = await sync_mod.refresh_idea(idea_id, auth_header=authorization)
         if ok:
+
             def _reread_idea():
                 with connect() as con:
-                    return con.execute(
-                        "SELECT * FROM idea WHERE id = ?", (idea_id,)
-                    ).fetchone()
+                    return con.execute("SELECT * FROM idea WHERE id = ?", (idea_id,)).fetchone()
 
             row = await asyncio.to_thread(_reread_idea)
         if not row:
@@ -529,6 +526,7 @@ async def get_idea(
         _uk = _user_key_from_auth(authorization)
         if _uk:
             try:
+
                 def _read_vote():
                     with connect() as con:
                         return con.execute(
@@ -580,6 +578,7 @@ async def get_idea(
             is_mod_caller = await _is_moderator(authorization)
         except Exception:
             is_mod_caller = False
+
     def _read_phase_order():
         with connect() as con:
             return _phase_order(con)
@@ -640,9 +639,7 @@ async def get_idea(
     _comments_task = (
         None
         if comments_cached
-        else asyncio.create_task(
-            edu_sharing.client.comments(target_id, auth_header=authorization)
-        )
+        else asyncio.create_task(edu_sharing.client.comments(target_id, auth_header=authorization))
     )
     _children_task = (
         None
@@ -664,6 +661,7 @@ async def get_idea(
             comments_list = (cm or {}).get("comments") or []
             base["comments"] = comments_list
             try:
+
                 def _write_comments_cache():
                     with connect() as con:
                         con.execute(
@@ -781,6 +779,7 @@ async def get_idea(
     # (spart den edu-sharing-Call auf den allermeisten Ideen).
     if authorization:
         try:
+
             def _read_contact():
                 with connect() as con:
                     return con.execute(

@@ -74,6 +74,7 @@ async def create_topic(
     new_id = (((result or {}).get("collection") or result or {}).get("ref") or {}).get("id")
     if not new_id:
         raise HTTPException(502, "edu-sharing lieferte keine ID")
+
     # Sofort in den Cache schreiben (Voll-Sync zieht später nach). Threadpool:
     # SQLite in async-Route darf den Event-Loop nicht blockieren (busy_timeout-
     # Wartezeit würde sonst ALLE Requests einfrieren, nicht nur diesen).
@@ -217,6 +218,7 @@ async def delete_topic(
             raise HTTPException(403, "Keine Berechtigung, diese Sammlung zu löschen.")
         if e.response.status_code != 404:
             raise HTTPException(e.response.status_code, f"edu-sharing: {e.response.text[:200]}")
+
     def _delete_topic_row():
         with connect() as con:
             con.execute("DELETE FROM topic WHERE id=?", (topic_id,))
@@ -270,6 +272,7 @@ async def upload_topic_preview(
         new_preview = (node.get("preview") or {}).get("url")
         is_icon = (node.get("preview") or {}).get("isIcon", False)
         if new_preview and not is_icon:
+
             def _write_preview_url():
                 with connect() as con:
                     con.execute(

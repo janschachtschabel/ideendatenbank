@@ -51,6 +51,7 @@ async def rate_idea(
     log.info("rate_idea: user=%s idea=%s rating=%s", user, idea_id, rating)
     if not authorization:
         raise HTTPException(401, "Authorization header required for rating")
+
     def _read_idea_target():
         with connect() as con:
             return con.execute(
@@ -148,6 +149,7 @@ async def rate_idea(
     # Nur wenn das Rating tatsächlich serverseitig steht. rating=0 = Reset.
     if persisted or not write_status:
         try:
+
             def _write_vote_event():
                 with connect() as con:
                     if rating and rating > 0:
@@ -203,6 +205,7 @@ async def unrate_idea(
     bis der Bug behoben ist. Frontend aktualisiert optimistisch."""
     if not authorization:
         raise HTTPException(401, "Anmeldung erforderlich")
+
     def _read_idea_target():
         with connect() as con:
             return con.execute(
@@ -227,6 +230,7 @@ async def unrate_idea(
     user = _user_key_from_auth(authorization)
     if user:
         try:
+
             def _delete_vote_event():
                 with connect() as con:
                     con.execute(
@@ -258,6 +262,7 @@ async def comment_idea(
 ):
     if not authorization:
         raise HTTPException(401, "Authorization header required for comments")
+
     def _read_idea_target():
         with connect() as con:
             return con.execute(
@@ -299,6 +304,7 @@ async def delete_comment(
     author_match = is_mod
     if not is_mod and idea_id:
         try:
+
             def _read_idea_target():
                 with connect() as con:
                     return con.execute(

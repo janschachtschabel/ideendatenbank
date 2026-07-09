@@ -327,7 +327,9 @@ async def delete_idea(
     # Titel + Original-ID VOR dem Löschen retten (für Log + Original-Cleanup).
     def _read_delete_preflight():
         with connect() as con:
-            return con.execute("SELECT title, original_id FROM idea WHERE id = ?", (idea_id,)).fetchone()
+            return con.execute(
+                "SELECT title, original_id FROM idea WHERE id = ?", (idea_id,)
+            ).fetchone()
 
     pre = await asyncio.to_thread(_read_delete_preflight)
     deleted_title: str | None = pre["title"] if pre else None
@@ -350,6 +352,7 @@ async def delete_idea(
     # Referenz war (eigenes Original vorhanden) und (b) keine ANDERE Referenz
     # dieses Original noch nutzt (Mehrfach-Referenz-Schutz über die App-DB).
     if original_id and original_id != idea_id:
+
         def _count_other_references():
             with connect() as con:
                 return con.execute(

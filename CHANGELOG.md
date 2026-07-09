@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-07-09 — Login-Latenz /me halbiert + Format-Baseline
+
+- **`GET /me` parallelisiert:** Der Login-Check machte zwei **serielle**
+  edu-sharing-Roundtrips (Mod-Status via memberships ~700 ms, dann Klarname via
+  profile ~500 ms) = die im Browser gemessenen **1,2 s**. Beide sind unabhängig →
+  `asyncio.gather` = **ein** Roundtrip Wandzeit (~0,7 s). Verhaltensgleich (beide
+  Helfer fangen ihre Fehler selbst); pytest grün.
+  **Einordnung Floor:** Unter ~0,7 s geht beim Login nicht ohne Credential-
+  Caching — die Passwort-Prüfung MUSS live gegen edu-sharing (bewusst ungecacht,
+  s. `verify_login`-Doku). Der /me/*-Burst der Profilseite teilt sich bereits
+  EINEN Roundtrip (In-Flight-Coalescing in auth.py); die ~770 ms je Call im
+  DevTools-Trace sind alle DERSELBE gemeinsame ES-Call, nicht vier.
+  Inbox-Listen (~1 s) bleiben live-by-design (Mod-Triage braucht Ist-Stand).
+- **Format-Baseline wiederhergestellt:** 19 Backend-Dateien hatten reine
+  Whitespace-Drift aus parallelen Arbeitssträngen — `ruff format --check`
+  (eigener CI-Job!) wäre rot gewesen. Normalisiert; check 58/58, pytest grün.
+- **Inbox: Einmal-Retry bei transienten edu-sharing-5xx.** Beim Einsortieren
+  (Move) mutiert edu-sharing den Inbox-Container, während die Mod-UI die drei
+  Sichtfilter parallel lädt — das quittierte ES gelegentlich mit einem kurzen
+  5xx (im Trace: `inbox?filter=categorized` → 502, Sekunden später wieder 200).
+  Der rein lesende, **idempotente** Seitenabruf (`node_children`) wird jetzt
+  GENAU EINMAL wiederholt (0,5 s Pause); 4xx wird sofort durchgereicht, bleibt
+  auch der Retry 5xx → weiterhin ehrlicher 502. **Schreibpfade (Move/Delete)
+  retryn bewusst NICHT** — ein wiederholtes „Reference anlegen" könnte doppelt
+  einsortieren. Tests: `tests/test_inbox_retry.py` (heilt transient / bleibt
+  502 bei Dauerausfall / kein 4xx-Retry).
+
 ## 2026-07-08 — Offene Audit-Punkte abgearbeitet: Chart-Fixes, Lint-Baseline eliminiert
 
 Abarbeitung der im Abschluss-Audit als „offen" gelisteten Punkte (auf explizite

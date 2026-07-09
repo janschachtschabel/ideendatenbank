@@ -72,9 +72,13 @@ def test_backup_download_unknown_is_404(client, mod_headers):
 def test_backup_path_rejects_traversal_and_foreign_names():
     """Direkt am Helper — die Route mappt ValueError auf 404, hier geht es um
     die eigentliche Abwehr (kein Verzeichnis-Ausbruch, kein Fremd-Download)."""
-    for bad in ("../ideendb-backup-x.zip", "..\\ideendb-backup-x.zip",
-                "ideendb-backup-../../etc.zip", "somefile.zip",
-                "ideendb-backup-x.txt"):
+    for bad in (
+        "../ideendb-backup-x.zip",
+        "..\\ideendb-backup-x.zip",
+        "ideendb-backup-../../etc.zip",
+        "somefile.zip",
+        "ideendb-backup-x.txt",
+    ):
         with pytest.raises(ValueError):
             backup_mod.get_backup_path(bad)
 

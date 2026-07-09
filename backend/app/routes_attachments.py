@@ -153,6 +153,7 @@ async def upload_idea_preview(
     # der Knoten als Reference im Postfach liegt), hängen wir manuell einen
     # Cache-Buster an, damit der Browser das neue Bild lädt.
     try:
+
         def _write_preview_cache_buster():
             with connect() as con:
                 row = con.execute(

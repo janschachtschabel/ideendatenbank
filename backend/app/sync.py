@@ -312,9 +312,7 @@ def _upsert_idea(
     #   None      — keine Personen-Info (Sammlungs-Walk) → COALESCE hält einen
     #               bereits bekannten Namen
     _creator_login = _first(props, "cm:creator")
-    _owner_login = _first(props, "cm:owner") or (node.get("owner") or {}).get(
-        "authorityName"
-    )
+    _owner_login = _first(props, "cm:owner") or (node.get("owner") or {}).get("authorityName")
     owner_display_name = None
     for _src, _login in (("createdBy", _creator_login), ("owner", _owner_login)):
         _obj = node.get(_src) or {}

@@ -42,9 +42,7 @@ def _node(
 
 def _upsert(node: dict) -> None:
     with connect() as con:
-        sync_mod._upsert_idea(
-            con, node, topic_id="ch1", main_content_id=node["ref"]["id"]
-        )
+        sync_mod._upsert_idea(con, node, topic_id="ch1", main_content_id=node["ref"]["id"])
 
 
 def _row(idea_id: str):
@@ -81,9 +79,7 @@ def test_refresh_heals_stale_moderator_name(seed_idea):
     statt per COALESCE ewig zu überleben."""
     seed_idea("i1", owner_username="alice")
     with connect() as con:
-        con.execute(
-            "UPDATE idea SET owner_display_name='Mona Mod' WHERE id='i1'"
-        )
+        con.execute("UPDATE idea SET owner_display_name='Mona Mod' WHERE id='i1'")
     _upsert(
         _node(
             "i1",
@@ -135,9 +131,7 @@ def test_collection_walk_without_person_keeps_known_name(seed_idea):
     ein bereits bekannter (korrekter) Klarname wird NICHT weggeworfen."""
     seed_idea("i1", owner_username="alice")
     with connect() as con:
-        con.execute(
-            "UPDATE idea SET owner_display_name='Alice Wonder' WHERE id='i1'"
-        )
+        con.execute("UPDATE idea SET owner_display_name='Alice Wonder' WHERE id='i1'")
     _upsert(_node("i1", keywords=["submitter:alice"], props={"cm:creator": ["alice"]}))
     assert _row("i1")["owner_display_name"] == "Alice Wonder"
 
@@ -174,8 +168,7 @@ def test_list_prefers_freetext_author_over_cached_realname(client, seed_idea):
     seed_idea("i1", owner_username="alice")
     with connect() as con:
         con.execute(
-            "UPDATE idea SET author='Maria Muster', owner_display_name='Alice Wonder' "
-            "WHERE id='i1'"
+            "UPDATE idea SET author='Maria Muster', owner_display_name='Alice Wonder' WHERE id='i1'"
         )
     item = next(x for x in client.get("/api/v1/ideas").json()["items"] if x["id"] == "i1")
     assert item["author"] == "Maria Muster"

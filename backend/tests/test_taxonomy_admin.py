@@ -35,10 +35,13 @@ def test_sort_taxonomy_updates_only_sort_order(client, mod_headers):
     assert _put_event(client, mod_headers, "evt-b", label="Event B").status_code == 200
     r = client.put(
         "/api/v1/admin/taxonomy/sort",
-        json={"kind": "event", "items": [
-            {"slug": "evt-a", "sort_order": 20},
-            {"slug": "evt-b", "sort_order": 10},
-        ]},
+        json={
+            "kind": "event",
+            "items": [
+                {"slug": "evt-a", "sort_order": 20},
+                {"slug": "evt-b", "sort_order": 10},
+            ],
+        },
         headers=mod_headers,
     )
     assert r.status_code == 200
@@ -108,15 +111,11 @@ def test_draft_events_hidden_from_public_even_with_flag(client, mod_headers):
     assert "entwurf" not in [e["slug"] for e in client.get("/api/v1/events").json()]
     anon_with_flag = client.get("/api/v1/events?include_drafts=true").json()
     assert "entwurf" not in [e["slug"] for e in anon_with_flag]
-    mod_with_flag = client.get(
-        "/api/v1/events?include_drafts=true", headers=mod_headers
-    ).json()
+    mod_with_flag = client.get("/api/v1/events?include_drafts=true", headers=mod_headers).json()
     assert "entwurf" in [e["slug"] for e in mod_with_flag]
 
 
-def test_delete_event_purges_tag_from_ideas_and_cache(
-    client, fake_es, mod_headers, seed_idea
-):
+def test_delete_event_purges_tag_from_ideas_and_cache(client, fake_es, mod_headers, seed_idea):
     _put_event(client, mod_headers, "hack-3")
     seed_idea("i1", events=["hack-3"])
     fake_es.nodes["i1"] = {

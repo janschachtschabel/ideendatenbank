@@ -86,6 +86,7 @@ async def toggle_interest(
     user = await _verify_login(authorization)
     if not user:
         raise HTTPException(401, "Anmeldung erforderlich")
+
     def _remove_existing_interest():
         with connect() as con:
             row = con.execute("SELECT id, title FROM idea WHERE id = ?", (idea_id,)).fetchone()
@@ -142,6 +143,7 @@ async def toggle_follow(
     user = await _verify_login(authorization)
     if not user:
         raise HTTPException(401, "Anmeldung erforderlich")
+
     def _toggle_follow():
         with connect() as con:
             row = con.execute("SELECT id FROM idea WHERE id = ?", (idea_id,)).fetchone()
@@ -272,6 +274,7 @@ async def remove_team_member(
     allowed, _u, is_mod = await _is_owner_or_mod(idea_id, authorization, verified=True)
     if not allowed:
         raise HTTPException(403, "Nur Einreicher:in oder Moderation können das Team verwalten.")
+
     def _remove_team_member():
         with connect() as con:
             con.execute(
@@ -375,9 +378,7 @@ async def get_interactions(
             # Öffnen parallel, ein Live-node_metadata pro Aufruf wäre dieselbe
             # Latenzfalle, die dort behoben wurde.
             can_manage = (
-                await _is_owner_or_mod(
-                    idea_id, authorization, verified=True, live_fallback=False
-                )
+                await _is_owner_or_mod(idea_id, authorization, verified=True, live_fallback=False)
             )[0]
         except Exception:
             can_manage = False

@@ -31,6 +31,9 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Pause vor dem EINEN Wiederholungsversuch der Inbox-Seitenabfrage (s. unten).
+# Modul-Konstante, damit Tests sie auf 0 setzen können.
+_INBOX_RETRY_DELAY_SECONDS = 0.5
 
 
 # ===== Postfach / Inbox (Mod-only) ========================================
@@ -61,18 +64,41 @@ async def list_inbox(
       - `app-submits`: nur Items mit `phase:`/`event:`/`target-topic:`-
         Keywords aus dem App-Einreichungs-Pfad.
     """
+
     # Fetch up to 3 pages of 200 newest-first nodes to surface our recent
     # submissions in an inbox that contains lots of legacy uploads.
+    async def _page(skip: int) -> dict:
+        # Transiente 5xx EINMAL wiederholen: die Inbox liest live aus edu-sharing,
+        # und ein gleichzeitig laufender Move mutiert denselben Container — das
+        # quittiert edu-sharing gelegentlich mit einem kurzen 5xx (im Trace als
+        # 502 der App sichtbar). Der Retry ist ein reiner, idempotenter GET —
+        # Schreibpfade (Move/Delete) retryn bewusst NICHT (Dubletten-Gefahr).
+        # 4xx (Auth/Permission) wird sofort durchgereicht; bleibt auch der
+        # zweite Versuch 5xx, gibt es weiterhin den ehrlichen 502.
+        for attempt in (1, 2):
+            try:
+                return await edu_sharing.client.node_children(
+                    settings.edu_guest_inbox_id,
+                    max_items=200,
+                    skip_count=skip,
+                    sort_prop="cm:created",
+                    sort_asc=False,
+                )
+            except httpx.HTTPStatusError as e:
+                if attempt == 2 or e.response.status_code < 500:
+                    raise
+                log.info(
+                    "inbox: transienter edu-sharing %s bei skip=%s — ein Retry",
+                    e.response.status_code,
+                    skip,
+                )
+                await asyncio.sleep(_INBOX_RETRY_DELAY_SECONDS)
+        raise AssertionError("unreachable")  # beide Versuche enden per return/raise
+
     raw_nodes: list[dict] = []
     try:
         for skip in (0, 200, 400):
-            page = await edu_sharing.client.node_children(
-                settings.edu_guest_inbox_id,
-                max_items=200,
-                skip_count=skip,
-                sort_prop="cm:created",
-                sort_asc=False,
-            )
+            page = await _page(skip)
             ns = page.get("nodes") or []
             raw_nodes.extend(ns)
             if len(ns) < 200:
@@ -274,6 +300,7 @@ async def inbox_item_preview(
     # edu-sharing, daher separater App-DB-Lookup über die Knoten-ID.
     contact = None
     try:
+
         def _read_contact():
             with connect() as con:
                 return con.execute(
@@ -480,7 +507,9 @@ async def sync_diff_cleanup(
 
     def _cleanup_sync_diff_rows():
         with connect() as con:
-            rows = con.execute("SELECT id, title FROM idea WHERE COALESCE(hidden, 0) = 0").fetchall()
+            rows = con.execute(
+                "SELECT id, title FROM idea WHERE COALESCE(hidden, 0) = 0"
+            ).fetchall()
             removed = [
                 {"id": r["id"], "title": r["title"]}
                 for r in rows

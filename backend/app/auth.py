@@ -83,9 +83,7 @@ async def _my_memberships(authorization: str) -> dict:
     existing = _MEMBERSHIP_INFLIGHT.get(key)
     if existing is not None:
         return await existing
-    task = asyncio.ensure_future(
-        edu_sharing.client.my_memberships(auth_header=authorization)
-    )
+    task = asyncio.ensure_future(edu_sharing.client.my_memberships(auth_header=authorization))
     _MEMBERSHIP_INFLIGHT[key] = task
     try:
         return await task

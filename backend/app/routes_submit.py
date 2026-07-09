@@ -172,6 +172,7 @@ async def submit_idea(
     contact = (body.contact or "").strip()
     if new_id and contact and body.contact_consent:
         try:
+
             def _write_submit_contact():
                 with connect() as con:
                     con.execute(

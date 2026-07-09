@@ -246,6 +246,7 @@ async def change_idea_topic(
                 row["id"],
                 auth_header=authorization,
             )
+
             def _delete_old_reference_cache():
                 with connect() as con:
                     con.execute("DELETE FROM idea WHERE id = ?", (row["id"],))
@@ -317,6 +318,7 @@ async def bulk_move_to_topic(
         except Exception as e:
             failed.append({"id": nid, "status": 0, "detail": str(e)[:160]})
             continue
+
         # Titel für Log (aus Cache nach Upsert)
         def _read_moved_title(current_new_id=new_id, current_nid=nid):
             with connect() as con:

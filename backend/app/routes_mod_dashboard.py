@@ -32,7 +32,6 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-
 # ===== Meldungen / Statistik / Aktivitätslog (Mod-only) ===================
 
 
@@ -65,15 +64,17 @@ async def admin_stats(authorization: str | None = Header(None)):
             # Totals
             ideas_total = con.execute("SELECT COUNT(*) FROM idea").fetchone()[0]
             topics_total = con.execute("SELECT COUNT(*) FROM topic").fetchone()[0]
-            themes_total = con.execute("SELECT COUNT(*) FROM topic WHERE parent_id IS NULL").fetchone()[
-                0
-            ]
+            themes_total = con.execute(
+                "SELECT COUNT(*) FROM topic WHERE parent_id IS NULL"
+            ).fetchone()[0]
             challenges_total = topics_total - themes_total
 
-            comments_total = con.execute("SELECT COALESCE(SUM(comment_count),0) FROM idea").fetchone()[
-                0
-            ]
-            ratings_total = con.execute("SELECT COALESCE(SUM(rating_count),0) FROM idea").fetchone()[0]
+            comments_total = con.execute(
+                "SELECT COALESCE(SUM(comment_count),0) FROM idea"
+            ).fetchone()[0]
+            ratings_total = con.execute(
+                "SELECT COALESCE(SUM(rating_count),0) FROM idea"
+            ).fetchone()[0]
             interest_total = con.execute(
                 "SELECT COUNT(*) FROM idea_interaction WHERE kind='interest'"
             ).fetchone()[0]
@@ -133,7 +134,9 @@ async def admin_stats(authorization: str | None = Header(None)):
 
             # Reports
             rep_open = (
-                con.execute("SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NULL").fetchone()[0]
+                con.execute(
+                    "SELECT COUNT(*) FROM idea_report WHERE resolved_at IS NULL"
+                ).fetchone()[0]
                 if con.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='idea_report'"
                 ).fetchone()
@@ -240,9 +243,9 @@ async def list_activity(
 
     def _read_activity_page():
         with connect() as con:
-            total = con.execute(
-                f"SELECT COUNT(*) FROM activity_log{sql_where}", params
-            ).fetchone()[0]
+            total = con.execute(f"SELECT COUNT(*) FROM activity_log{sql_where}", params).fetchone()[
+                0
+            ]
             rows = con.execute(
                 f"SELECT * FROM activity_log{sql_where} ORDER BY ts DESC LIMIT ? OFFSET ?",
                 (*params, limit, offset),

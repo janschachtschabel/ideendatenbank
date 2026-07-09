@@ -89,8 +89,6 @@ def test_sort_topics_persists_order(client, mod_headers):
 
 
 def test_create_topic_requires_moderator(client, fake_es, user_headers):
-    r = client.post(
-        "/api/v1/admin/topics", json={"title": "Nope"}, headers=user_headers
-    )
+    r = client.post("/api/v1/admin/topics", json={"title": "Nope"}, headers=user_headers)
     assert r.status_code == 403
     assert fake_es.called("create_collection") == []

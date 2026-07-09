@@ -310,6 +310,32 @@ def test_child_attachments_stale_cache_served_instantly_then_refreshed(client, f
     assert json.loads(row["children_cache"]) == []  # FakeES liefert keine Children
 
 
+def test_child_attachments_failure_negative_cached(client, fake_es, seed_idea):
+    """C: Schlägt der Anhang-Live-Call fehl (z.B. Gast ohne Leserecht auf
+    dieser Instanz), wird der Leer-Fallback KURZ gecacht (Stempel in der
+    nahen Vergangenheit) — der nächste Aufruf trifft den Cache statt bei
+    JEDEM Detailaufruf synchron gegen das werfende edu-sharing zu laufen.
+    Live-Befund: konstante +0,2 s auf jedem get_idea der hackathoern-Instanz."""
+    seed_idea("i1")
+    fake_es.child_objects_error = True
+    r1 = client.get("/api/v1/ideas/i1")
+    assert r1.status_code == 200
+    assert r1.json()["attachments"] == []
+    assert len(fake_es.called("list_child_objects")) == 1
+    with connect() as con:
+        row = con.execute(
+            "SELECT children_cache, children_cache_at FROM idea WHERE id='i1'"
+        ).fetchone()
+    assert row["children_cache"] == "[]"  # Fehlerfall gecacht …
+    assert row["children_cache_at"] is not None  # … mit (kurzem) Stempel
+    # Zweiter Aufruf SOFORT danach: Negative-Cache greift → KEIN weiterer
+    # synchroner ES-Call im Antwortpfad.
+    r2 = client.get("/api/v1/ideas/i1")
+    assert r2.status_code == 200
+    assert r2.json()["attachments"] == []
+    assert len(fake_es.called("list_child_objects")) == 1
+
+
 def test_child_attachments_cache_survives_far_beyond_old_60s(client, fake_es, seed_idea):
     """C: der children_cache überlebt jetzt weit länger als die frühere 60-s-TTL —
     ein 5-Minuten-alter Cache wird OHNE Live-Call serviert (unter 60 s wäre es ein

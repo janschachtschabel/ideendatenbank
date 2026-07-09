@@ -8,7 +8,7 @@ icon: https://raw.githubusercontent.com/openeduhub/ideendatenbank/main/logos/log
 type: application
 
 # Chart-Version (SemVer der Verpackung selbst).
-version: 0.2.0
+version: 0.2.1
 # Version der ausgelieferten Anwendung — entspricht dem Image-Tag.
 appVersion: "latest"
 kubeVersion: ">=1.23.0-0"

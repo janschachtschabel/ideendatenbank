@@ -81,6 +81,15 @@ export class ApiService {
     return this.coalesced('topics', () => this.http.get<Topic[]>(`${this.base}/topics`));
   }
 
+  /** Mini-Ping auf /health (I/O-frei, ~0,3 kB) — hält die HTTP/2-Verbindung
+   *  des Browsers warm. Hintergrund: Bei h2 laufen ALLE Requests über EINE
+   *  Verbindung; kappt ein vorgeschalteter Proxy sie nach Leerlauf STILL
+   *  (ohne GOAWAY/FIN, live gemessen auf einer Instanz: 1,3–4 s Hänger beim
+   *  nächsten Klick), hängen sämtliche XHRs gleichzeitig im toten Socket. */
+  ping(): Observable<{ ok: boolean }> {
+    return this.http.get<{ ok: boolean }>(`${this.base}/health`);
+  }
+
   /** Gebündelter Erststart-Datensatz: topics + meta + phases + events +
    *  featured + settings in EINER Antwort. Ersetzt den ~6-XHR-Schwall der
    *  App-Shell beim Laden, der hinter einem HTTP/2-Proxy (eine Verbindung) die

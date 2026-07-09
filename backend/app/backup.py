@@ -241,9 +241,13 @@ async def restore_backup(zip_bytes: bytes) -> dict:
     """Stellt aus einem ZIP-Bytes-Blob wieder her.
 
     Wichtig: läuft *unter* dem Sync-Lock, damit kein paralleler Sync auf
-    die alte DB schreibt während wir die Datei austauschen. Live-Connections
-    der API-Routen sind safe, weil unsere `connect()`-Wrapper jeweils nur
-    pro Request offen sind.
+    die alte DB schreibt während wir die Datei austauschen. Die THREAD-
+    GEPOOLTEN Connections (db.connect) werden vor UND nach dem Datei-Tausch
+    invalidiert: vorher, weil offene Handles den Tausch auf Windows blockieren
+    und auf Linux danach die alte Inode läsen; nachher, um Connections zu
+    verwerfen, die ein anderer Request GENAU im Tausch-Fenster geöffnet hat.
+    Ein Request, der dabei mitten in einer Query steckt, schlägt kontrolliert
+    fehl — akzeptiert für die seltene Restore-Wartung.
 
     Vor dem Restore wird ein automatisches Sicherungs-Backup („pre-restore")
     angelegt — falls die hochgeladene Datei kaputt ist, kann man sich
@@ -312,8 +316,12 @@ async def restore_backup(zip_bytes: bytes) -> dict:
                         log.warning("could not remove %s: %s", aux, e)
             shutil.copy(new_db, target)
 
+        from .db import invalidate_pooled_connections
+
         async with sync_mod._sync_lock:
+            await asyncio.to_thread(invalidate_pooled_connections)
             await asyncio.to_thread(_swap_db_files)
+            await asyncio.to_thread(invalidate_pooled_connections)
 
         # 4. Schema-Migration via init_db (idempotent — fügt fehlende Spalten ein)
         from .db import init_db

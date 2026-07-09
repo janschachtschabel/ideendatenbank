@@ -7,6 +7,7 @@ Uses FTS5 for full-text search across title + description + keywords.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
@@ -448,16 +449,127 @@ def init_db() -> None:
         con.execute("DELETE FROM idea_fts WHERE id NOT IN (SELECT id FROM idea)")
 
 
+# ===== Thread-lokaler Connection-Pool =======================================
+# Live-Befund (Instanz-Vergleich idee.hackathoern.de): Auf trägem Storage
+# kostet JEDES Öffnen der DB-Datei (open + Header-Page + PRAGMAs) ~35–40 ms —
+# Endpoints mit mehreren DB-Blöcken multiplizieren das (get_idea 303 ms vs.
+# 40 ms auf gesundem Storage). Deshalb hält jeder Worker-Thread EINE offene
+# Connection; die Contextmanager-Semantik von `connect()` (Commit bei Erfolg,
+# Rollback bei Exception) bleibt exakt erhalten.
+#
+# Invalidierung — die drei Fälle, in denen NICHT wiederverwendet wird:
+#   1. `settings.sqlite_path` hat gewechselt (Test-Hermetik: frisches tmp_path
+#      pro Test) → alte Connection wird verworfen.
+#   2. `invalidate_pooled_connections()` wurde gerufen (Restore tauscht die
+#      DB-DATEI aus: offene Handles zeigten auf Linux sonst auf die alte
+#      Inode, auf Windows blockierten sie den Datei-Tausch komplett).
+#   3. Verschachteltes `connect()` im selben Thread → frische WEGWERF-
+#      Connection, damit ein inneres Commit nie die äußere, noch offene
+#      Transaktion mit-committet (Sicherheitsnetz; im Code gibt es keine
+#      Verschachtelung, aber dieses Semantik-Risiko darf nicht am Aufrufer
+#      hängen).
+#
+# `check_same_thread=False`: die Connection wird weiterhin nur von ihrem
+# Besitzer-Thread BENUTZT (thread-local) — das Flag erlaubt lediglich dem
+# Restore-/Test-Teardown, fremde Handles zu SCHLIESSEN.
+
+_POOL_LOCK = threading.Lock()
+# thread-id → Connection. Nur fürs zentrale Schließen (Restore/Teardown);
+# die Wiederverwendung selbst läuft über das schnellere threading.local().
+_POOL: dict[int, sqlite3.Connection] = {}
+_LOCAL = threading.local()
+_GENERATION = 0
+
+
+def _open_connection(path: str) -> sqlite3.Connection:
+    con = sqlite3.connect(path, timeout=30.0, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys = ON")
+    con.execute("PRAGMA synchronous = NORMAL")
+    con.execute("PRAGMA busy_timeout = 30000")
+    # Performance-Haertung, alle per-Connection (daher hier, nicht in init_db):
+    #   cache_size (negativ = KiB) ~2 MB. Vor dem Pooling waren es 8 MB — mit
+    #     langlebigen Connections in bis zu ~100 Worker-Threads (32 asyncio +
+    #     64 anyio) würde das im 1-Gi-Container bis ~800 MB binden. Reads
+    #     trägt ohnehin das 128-MB-mmap (prozessweit geteilt, page-cache-
+    #     backed); der private Page-Cache braucht nur Arbeits-Seiten.
+    #   temp_store=MEMORY → ORDER BY/GROUP BY ohne passenden Index im RAM statt in
+    #     einer Temp-Datei (z.B. Sortierung nach created/comments).
+    #   mmap_size=128 MB → Reads ohne read()-Syscall/Copy, spuerbar bei grosser WAL.
+    #   journal_size_limit=16 MB → die .db-wal-Datei wird nach einem Checkpoint auf
+    #     <=16 MB gekappt statt unbegrenzt zu wachsen (sonst Read-Bremse, weil jeder
+    #     Query zusaetzlich die WAL durchsuchen muss).
+    con.execute("PRAGMA cache_size = -2000")
+    con.execute("PRAGMA temp_store = MEMORY")
+    con.execute("PRAGMA mmap_size = 134217728")
+    con.execute("PRAGMA journal_size_limit = 16777216")
+    return con
+
+
+def _drop_local_connection() -> None:
+    """Wirft die thread-lokale Connection weg (best-effort close + Registry)."""
+    con = getattr(_LOCAL, "con", None)
+    _LOCAL.con = None
+    if con is None:
+        return
+    with _POOL_LOCK:
+        tid = threading.get_ident()
+        if _POOL.get(tid) is con:
+            del _POOL[tid]
+    try:
+        con.close()
+    except Exception:
+        pass  # bereits geschlossen (z.B. durch invalidate) — egal
+
+
+def open_probe_ms() -> float:
+    """Misst die Kosten EINER frischen DB-Datei-Öffnung (open + Header-Page +
+    PRAGMAs) in Millisekunden — die Kennzahl der Storage-These: auf gesundem
+    Storage <1 ms, auf trägem ~35–40 ms (Live-Instanz-Vergleich 07/2026).
+    Wird in den /status-Mod-Diagnostics ausgewiesen, damit sich die Storage-
+    Gesundheit pro Instanz direkt vor Ort ablesen und vergleichen lässt."""
+    import time
+
+    _ensure_dir()
+    t0 = time.perf_counter()
+    con = _open_connection(str(settings.sqlite_path))
+    try:
+        con.execute("SELECT 1").fetchone()
+    finally:
+        con.close()
+    return (time.perf_counter() - t0) * 1000.0
+
+
+def invalidate_pooled_connections() -> None:
+    """Schließt ALLE gepoolten Connections und erhöht die Generation, sodass
+    jeder Thread beim nächsten `connect()` frisch öffnet.
+
+    MUSS vor dem Restore-Datei-Swap laufen (backup.restore_backup): auf
+    Windows blockieren offene Handles den Tausch, auf Linux läsen sie danach
+    die alte Inode. Ein Worker, der GENAU in diesem Moment mitten in einer
+    Query steckt, bekommt einen sqlite3-Fehler und sein Request schlägt
+    kontrolliert fehl — akzeptiert für die seltene Restore-Wartung."""
+    global _GENERATION
+    with _POOL_LOCK:
+        _GENERATION += 1
+        for con in _POOL.values():
+            try:
+                con.close()
+            except Exception:
+                pass
+        _POOL.clear()
+
+
 @contextmanager
 def connect():
-    """Connection-Factory mit großzügigem busy_timeout.
+    """Connection-Kontext mit großzügigem busy_timeout — thread-lokal gepoolt
+    (Begründung + Invalidierungsregeln: Kommentarblock oben).
 
     Der WAL-Journal-Mode ist eine *persistente* Eigenschaft der DB-Datei und
     wird einmalig in `init_db()` gesetzt (beim Start und nach jedem Restore,
-    der ebenfalls `init_db()` aufruft) — nicht mehr bei jeder Verbindung. WAL
+    der ebenfalls `init_db()` aufruft) — nicht bei jeder Verbindung. WAL
     erlaubt einen Writer + mehrere Reader gleichzeitig und verhindert die
-    `database is locked`-Fehler, wenn der 5-Minuten-Sync parallel zu
-    User-Aktionen (rate, comment, refresh_idea) schreibt.
+    `database is locked`-Fehler, wenn Sync parallel zu User-Aktionen schreibt.
 
     `busy_timeout=30000` lässt SQLite bis zu 30 Sekunden auf einen Lock warten,
     statt sofort mit `database is locked` abzubrechen. Der Sync hält die
@@ -466,29 +578,57 @@ def connect():
     Millisekunden gehalten wird — der 30s-Timeout ist nur das Sicherheitsnetz.
     """
     _ensure_dir()
-    con = sqlite3.connect(settings.sqlite_path, timeout=30.0)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys = ON")
-    con.execute("PRAGMA synchronous = NORMAL")
-    con.execute("PRAGMA busy_timeout = 30000")
-    # Performance-Haertung, alle per-Connection (daher hier, nicht in init_db):
-    #   cache_size (negativ = KiB) ~8 MB → haelt die kleine DB + Indizes heiss und
-    #     spart Disk-Reads, wenn der OS-Page-Cache unter Druck steht.
-    #   temp_store=MEMORY → ORDER BY/GROUP BY ohne passenden Index im RAM statt in
-    #     einer Temp-Datei (z.B. Sortierung nach created/comments).
-    #   mmap_size=128 MB → Reads ohne read()-Syscall/Copy, spuerbar bei grosser WAL.
-    #   journal_size_limit=16 MB → die .db-wal-Datei wird nach einem Checkpoint auf
-    #     <=16 MB gekappt statt unbegrenzt zu wachsen (sonst Read-Bremse, weil jeder
-    #     Query zusaetzlich die WAL durchsuchen muss).
-    con.execute("PRAGMA cache_size = -8000")
-    con.execute("PRAGMA temp_store = MEMORY")
-    con.execute("PRAGMA mmap_size = 134217728")
-    con.execute("PRAGMA journal_size_limit = 16777216")
+    path = str(settings.sqlite_path)
+
+    if getattr(_LOCAL, "in_use", False):
+        # Verschachtelung → Wegwerf-Connection (Invalidierungsfall 3).
+        con = _open_connection(path)
+        try:
+            yield con
+            con.commit()
+        except BaseException:
+            try:
+                con.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            con.close()
+        return
+
+    con = getattr(_LOCAL, "con", None)
+    if (
+        con is None
+        or getattr(_LOCAL, "path", None) != path
+        or getattr(_LOCAL, "generation", None) != _GENERATION
+    ):
+        _drop_local_connection()
+        con = _open_connection(path)
+        _LOCAL.con = con
+        _LOCAL.path = path
+        _LOCAL.generation = _GENERATION
+        with _POOL_LOCK:
+            tid = threading.get_ident()
+            stale = _POOL.get(tid)
+            if stale is not None and stale is not con:
+                # Thread-ID-Wiederverwendung nach Thread-Ende: Altlast schließen.
+                try:
+                    stale.close()
+                except Exception:
+                    pass
+            _POOL[tid] = con
+
+    _LOCAL.in_use = True
     try:
         yield con
         con.commit()
-    except Exception:
-        con.rollback()
+    except BaseException:
+        try:
+            con.rollback()
+        except Exception:
+            pass
+        # Zustand unklar (z.B. von invalidate geschlossen) → nicht weiterreichen.
+        _drop_local_connection()
         raise
     finally:
-        con.close()
+        _LOCAL.in_use = False

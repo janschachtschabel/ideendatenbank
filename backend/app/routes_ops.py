@@ -18,7 +18,7 @@ from fastapi import APIRouter, Header, HTTPException
 from . import backup as backup_mod
 from .auth import is_moderator
 from .config import settings
-from .db import connect
+from .db import connect, open_probe_ms
 
 router = APIRouter()
 
@@ -135,14 +135,28 @@ async def status(authorization: str | None = Header(None)):
             )
         except Exception:
             last_backup = None
-        return sample_query_ms, pragmas, idx_names, db_bytes, last_backup
+        # Storage-Kennzahl: Kosten einer FRISCHEN Datei-Öffnung (db.open_probe_ms).
+        # Im Normalbetrieb spart der Thread-Pool genau diese Kosten — die Zahl
+        # hier macht die Storage-Gesundheit der Instanz direkt vergleichbar
+        # (gesund <1 ms, träge ~35–40 ms, Live-Vergleich 07/2026).
+        try:
+            connect_open_ms = round(open_probe_ms(), 2)
+        except Exception:
+            connect_open_ms = None
+        return sample_query_ms, pragmas, idx_names, db_bytes, last_backup, connect_open_ms
 
-    sample_query_ms, pragmas, idx_names, db_bytes, last_backup = await asyncio.to_thread(
-        _read_diagnostics
-    )
+    (
+        sample_query_ms,
+        pragmas,
+        idx_names,
+        db_bytes,
+        last_backup,
+        connect_open_ms,
+    ) = await asyncio.to_thread(_read_diagnostics)
     out["diagnostics"] = {
         "server_time": datetime.now(UTC).isoformat(),
         "sample_query_ms": sample_query_ms,
+        "connect_open_ms": connect_open_ms,
         "db_bytes": db_bytes,
         "pragmas": pragmas,
         "last_backup": last_backup,

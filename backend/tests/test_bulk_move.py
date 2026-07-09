@@ -34,6 +34,46 @@ def test_bulk_move_references_all_nodes(client, fake_es, mod_headers):
     assert {c["collection_id"] for c in refs} == {"ch1"}
 
 
+def test_single_move_prewarms_children_cache(client, fake_es, mod_headers):
+    """Wie unten für bulk_move: auch der Einzel-Move wärmt den Anhang-Cache
+    der neuen Reference vor (Background-Task nach der Antwort)."""
+    _seed_topic()
+    r = client.post(
+        "/api/v1/moderation/move",
+        json={"node_id": "n9", "target_topic_id": "ch1"},
+        headers=mod_headers,
+    )
+    assert r.status_code == 200
+    ref_id = "ref::n9::ch1"
+    assert any(c["parent_id"] == ref_id for c in fake_es.called("list_child_objects"))
+    with connect() as con:
+        row = con.execute(
+            "SELECT children_cache FROM idea WHERE id=?", (ref_id,)
+        ).fetchone()
+    assert row is not None and row["children_cache"] == "[]"
+
+
+def test_bulk_move_prewarms_children_cache(client, fake_es, mod_headers):
+    """Prewarm: Nach dem Referenzieren wird der Anhang-Cache der neuen
+    Reference-Row als Background-Task gefüllt — der ERSTE Detailaufruf einer
+    frisch freigeschalteten Idee zahlt sonst den einzigen verbliebenen
+    synchronen ES-Call (Live-Befund: 4,5 s beim Erstaufruf unter ES-Last)."""
+    _seed_topic()
+    r = client.post(
+        "/api/v1/moderation/bulk_move",
+        json={"node_ids": ["n1"], "target_topic_id": "ch1"},
+        headers=mod_headers,
+    )
+    assert r.status_code == 200
+    ref_id = "ref::n1::ch1"  # FakeES-Namensschema für Reference-Knoten
+    assert any(c["parent_id"] == ref_id for c in fake_es.called("list_child_objects"))
+    with connect() as con:
+        row = con.execute(
+            "SELECT children_cache FROM idea WHERE id=?", (ref_id,)
+        ).fetchone()
+    assert row is not None and row["children_cache"] == "[]"
+
+
 def test_bulk_move_collects_per_item_failures(client, fake_es, mod_headers, monkeypatch):
     """Ein fehlschlagender Knoten darf die übrigen nicht mitreißen — die
     Antwort listet Erfolge UND Fehler (Sammelantwort, kein Abbruch)."""

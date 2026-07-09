@@ -91,6 +91,14 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
     ## @param ingress.annotations.nginx.ingress.kubernetes.io/proxy-buffering Disable nginx response buffering — stream upstream responses directly to the client. Prevents large bundles from blocking API requests on the same HTTP/2 connection (uvicorn single-worker).
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    ## OPTIONAL — HTTP/2 nur für diesen Host abschalten (siehe README
+    ## "Troubleshooting: sporadische 3-5-s-Haenger"). Wirkt gegen Ketten, die
+    ## idle h2-Verbindungen STILL kappen (alle Browser-Requests haengen dann
+    ## gleichzeitig im toten Socket). Erfordert allow-snippet-annotations=true
+    ## am Controller (seit ingress-nginx v1.9 default AUS — sonst lehnt der
+    ## Admission-Webhook das Deployment ab) und nginx >= 1.25. Cluster-weite
+    ## Alternative: Controller-ConfigMap use-http2: "false".
+    # nginx.ingress.kubernetes.io/server-snippet: "http2 off;"
 
   ## @param ingress.hosts Set ingress hosts
   hosts:

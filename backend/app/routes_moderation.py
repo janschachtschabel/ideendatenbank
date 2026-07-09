@@ -13,7 +13,7 @@ import asyncio
 import logging
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from . import edu_sharing
@@ -22,6 +22,7 @@ from .routes_common import (
     _log_activity,
     _publish_original_safe,
     _reference_into_collection,
+    _refresh_children_cache_bg,
     _require_moderator,
     _unpublish_original_safe,
 )
@@ -284,6 +285,7 @@ async def change_idea_topic(
 @router.post("/moderation/bulk_move", tags=["moderation"])
 async def bulk_move_to_topic(
     body: BulkMoveRequest,
+    background_tasks: BackgroundTasks,
     authorization: str | None = Header(None),
 ):
     """Referenziert mehrere Inbox-Ideen in eine Ziel-Herausforderung.
@@ -318,6 +320,9 @@ async def bulk_move_to_topic(
         except Exception as e:
             failed.append({"id": nid, "status": 0, "detail": str(e)[:160]})
             continue
+
+        # Anhang-Cache der frischen Reference vorwärmen (s. move_to_topic).
+        background_tasks.add_task(_refresh_children_cache_bg, new_id, authorization)
 
         # Titel für Log (aus Cache nach Upsert)
         def _read_moved_title(current_new_id=new_id, current_nid=nid):
@@ -359,6 +364,7 @@ async def bulk_move_to_topic(
 @router.post("/moderation/move", tags=["moderation"])
 async def move_to_topic(
     body: MoveRequest,
+    background_tasks: BackgroundTasks,
     authorization: str | None = Header(None),
 ):
     """Referenziert eine Inbox-Idee in eine Herausforderung. Caller muss
@@ -388,6 +394,12 @@ async def move_to_topic(
             e.response.status_code,
             f"edu-sharing: {e.response.text[:200]}",
         )
+
+    # Anhang-Cache der frischen Reference VORWÄRMEN (nach der Antwort): der
+    # erste Detailaufruf einer gerade freigeschalteten Idee zahlte sonst den
+    # einzigen verbliebenen synchronen ES-Call — bei ES-Lastspitzen live
+    # mehrere Sekunden. Ein ES-Call pro Freischaltung, best-effort.
+    background_tasks.add_task(_refresh_children_cache_bg, new_id, authorization)
 
     # Titel für Log
     def _read_moved_title():

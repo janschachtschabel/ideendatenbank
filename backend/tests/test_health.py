@@ -50,3 +50,8 @@ def test_status_shows_diagnostics_for_moderator(client, mod_headers):
     assert diag["expected_indexes_present"]["idea_owner_idx"] is True
     # Kein Backup angelegt → Feld existiert, ist aber leer.
     assert diag["last_backup"] is None
+    # Storage-Kennzahl: Kosten EINER frischen DB-Datei-Öffnung (open + PRAGMAs).
+    # Auf gesundem Storage <1 ms, auf trägem ~35–40 ms (Instanz-Vergleich) —
+    # macht die Storage-These pro Instanz direkt vor Ort messbar.
+    assert isinstance(diag["connect_open_ms"], int | float)
+    assert diag["connect_open_ms"] >= 0

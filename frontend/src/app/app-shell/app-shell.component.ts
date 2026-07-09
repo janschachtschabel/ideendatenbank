@@ -1030,6 +1030,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
       window.addEventListener('popstate', this._onPopState);
       this.syncHistory('replace');
     } catch { /* sandboxed Embed ohne History-Zugriff */ }
+    this.startConnectionKeepalive();
     // Falls bereits eingeloggt (sessionStorage): Mod-Status auffrischen
     if (this.api.hasCredentials()) {
       this.api.refreshMe().subscribe({
@@ -1266,6 +1267,41 @@ export class AppShellComponent implements OnInit, OnDestroy {
         this.go(v);
     }
     window.scrollTo({ top: 0 });
+  }
+
+  // ===== Verbindungs-Heartbeat ==============================================
+  // Bei HTTP/2 multiplext der Browser ALLE Requests über EINE Verbindung.
+  // Kappt ein vorgeschalteter Proxy/LB diese nach Leerlauf STILL (ohne
+  // GOAWAY/FIN — live gemessen: 1,3–4 s Hänger für ALLE XHRs beim nächsten
+  // Klick), hilft nur, die Verbindung nie idle werden zu lassen: ein Mini-
+  // /health-Ping alle 25 s bei sichtbarem Tab. Beim Tab-Rückwechsel pingt
+  // ein Sofort-Ping die Verbindung wieder warm, BEVOR der User klickt.
+  // Kosten: ~0,3 kB alle 25 s pro offenem Tab; /health ist I/O-frei.
+
+  private keepaliveHandle?: number;
+  private _onVisible = () => {
+    if (document.visibilityState === 'visible') {
+      this.api.ping().subscribe({
+        next: () => { /* nur Verbindungs-Warmhalten — Antwort irrelevant */ },
+        error: () => { /* best-effort — nächster Tick versucht es erneut */ },
+      });
+    }
+  };
+
+  private startConnectionKeepalive() {
+    try {
+      document.addEventListener('visibilitychange', this._onVisible);
+      this.keepaliveHandle = window.setInterval(() => {
+        // Hintergrund-Tabs nicht pingen (Browser drosseln Timer dort ohnehin);
+        // der visibilitychange-Ping deckt die Rückkehr ab.
+        if (document.visibilityState === 'visible') {
+          this.api.ping().subscribe({
+            next: () => { /* nur Verbindungs-Warmhalten — Antwort irrelevant */ },
+            error: () => { /* best-effort — nächster Tick versucht es erneut */ },
+          });
+        }
+      }, 25_000);
+    } catch { /* Embed ohne document/window-Zugriff */ }
   }
 
   /** Themen-Drill verlassen (Zurück-Link) — mit History-Eintrag. */
@@ -1783,5 +1819,12 @@ export class AppShellComponent implements OnInit, OnDestroy {
     try {
       window.removeEventListener('popstate', this._onPopState);
     } catch { /* symmetrisch zum add — Embed ohne History */ }
+    if (this.keepaliveHandle) {
+      clearInterval(this.keepaliveHandle);
+      this.keepaliveHandle = undefined;
+    }
+    try {
+      document.removeEventListener('visibilitychange', this._onVisible);
+    } catch { /* symmetrisch zum add */ }
   }
 }

@@ -36,15 +36,20 @@ from .routes_admin import router as _admin_router
 from .routes_attachments import router as _attachments_router
 from .routes_captcha import router as _captcha_router
 from .routes_common import (
+    CHILD_CACHE_TTL_SECONDS,
     _allowed_next_phases,
     _attachment_from_node,
     _collect_topic_subtree,
     _escape_like,
     _get_setting,
+    _map_child_attachments,
     _phase_order,
     _rating_open_for_events,
+    _refresh_children_cache_bg,
     _row_to_idea,
     _safe_get,
+    _store_children_cache,
+    _store_children_cache_failure,
 )
 from .routes_feedback import router as _feedback_router
 from .routes_idea_edit import router as _idea_edit_router
@@ -392,18 +397,9 @@ def _suggest_for_empty_query(q: str) -> dict:
     }
 
 
-# Tier C: TTL (Sekunden) für den Child-IO-Anhang-Cache der Detailseite.
-#
-# Die TTL ist bewusst LANG (1 h), weil sie NUR seltene out-of-band-Änderungen
-# bewacht: jede Anhang-Mutation ÜBER DIE APP (Upload/Ersetzen/Umbenennen/Löschen
-# in routes_attachments) ruft `_invalidate_children_cache` → NULL → der nächste
-# View lädt sofort frisch. Direkt-in-edu-sharing-Änderungen (abnormal) erscheinen
-# spätestens nach der TTL bzw. beim nächtlichen Attachment-Scan.
-#
-# Die frühere 60-s-TTL war ein Fehlgriff: sie erzwang bei praktisch JEDEM
-# Detailaufruf (>60 s Abstand) einen Live-`list_child_objects`-ES-Call (~300-450 ms
-# gemessen), obwohl der Cache bei App-Änderungen ohnehin invalidiert wird.
-CHILD_CACHE_TTL_SECONDS = 3600
+# Tier C (Child-IO-Anhang-Cache der Detailseite): TTL-Konstante + Helfer leben
+# in routes_common — neben get_idea nutzt sie auch der Moderations-Move
+# (Prewarm der frischen Reference) und der SWR-Hintergrund-Refresh.
 
 
 def _owner_display_name_cached(owner_username: str | None, cached_name: str | None) -> str | None:
@@ -425,36 +421,6 @@ def _owner_display_name_cached(owner_username: str | None, cached_name: str | No
         except Exception:
             pass
     return cached_name or None
-
-
-def _map_child_attachments(children: list[dict]) -> list[dict]:
-    """Child-IO-Knoten → Anhang-Dicts fürs Frontend (Serienobjekt-Flags)."""
-    out: list[dict] = []
-    for n in children:
-        a = _attachment_from_node(n)
-        a["from_folder"] = True  # Backwards-compat-Flag fürs Frontend
-        a["is_child_object"] = True
-        out.append(a)
-    return out
-
-
-def _store_children_cache(idea_id: str, atts: list[dict]) -> None:
-    with connect() as con:
-        con.execute(
-            "UPDATE idea SET children_cache=?, children_cache_at=? WHERE id=?",
-            (json.dumps(atts), datetime.now(UTC).isoformat(), idea_id),
-        )
-
-
-async def _refresh_children_cache_bg(idea_id: str, auth_header: str | None) -> None:
-    """Stale-while-revalidate-Refresh der Child-Anhänge — läuft als Background-
-    Task NACH der Antwort. Best-effort: Fehler nur loggen, der nächste Aufruf
-    serviert dann eben weiter den (funktionierenden) alten Stand."""
-    try:
-        children = await edu_sharing.client.list_child_objects(idea_id, auth_header=auth_header)
-        await asyncio.to_thread(_store_children_cache, idea_id, _map_child_attachments(children))
-    except Exception as e:
-        log.debug("children-Cache-SWR-Refresh für %s fehlgeschlagen: %s", idea_id, e)
 
 
 @router.get("/ideas/{idea_id}")
@@ -771,8 +737,19 @@ async def get_idea(
                 await asyncio.to_thread(_store_children_cache, row["id"], child_atts)
             except Exception:
                 pass  # Cache-Write best-effort — die Antwort stimmt trotzdem
-        except Exception:
+        except Exception as e:
+            # Fehlgeschlagener Live-Call → Leer-Fallback KURZ cachen (Negative-
+            # Cache): ohne ihn wiederholt JEDER Detailaufruf den werfenden
+            # ES-Call synchron (live gemessen: konstante +0,2 s pro get_idea
+            # auf einer Instanz mit 403 auf children). Danach übernimmt SWR.
+            # log.info (nicht debug): der Betreiber soll den Grund — z.B.
+            # fehlende Gast-Leserechte — in den Pod-Logs sehen.
+            log.info("Anhang-Live-Call für %s fehlgeschlagen: %s", row["id"], e)
             child_atts = []
+            try:
+                await asyncio.to_thread(_store_children_cache_failure, row["id"])
+            except Exception:
+                pass  # best-effort — nächster Aufruf versucht es erneut
     attachments.extend(child_atts)
 
     base["attachments"] = attachments

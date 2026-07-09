@@ -1,5 +1,133 @@
 # Changelog
 
+## 2026-07-09 — Diagnose verfeinert: Storage ist Hauptverdächtiger; `connect_open_ms` in /status
+
+Zwei neue Proben präzisieren die Instanz-These:
+
+- **TLS-Zertifikate:** beide Instanzen Let's Encrypt mit host-genauem SAN →
+  das TLS (und damit HTTP/2) terminiert auf BEIDEN der eigene Ingress-Stack;
+  der `use-http2`-Schalter liegt in eigener Hand (Controller-ConfigMap).
+- **h2-Frame-Probe (idle lauschen):** die hackathoern-Kette schließt idle
+  h2-Verbindungen nach exakt ~50 s mit SAUBEREM TCP-FIN (kein GOAWAY, aber
+  auch kein Blackhole). Ein sauberes FIN erzeugt keine Browser-Hänger →
+  die Idle-Kill-These wird ABGESCHWÄCHT. Neugewichtung: die 3–5-s-Fälle
+  passen am besten zu den BELEGTEN sporadischen Storage-Stalls (16-s-
+  bootstrap-Ausreißer): ein hängendes Volume stoppt ALLE parallelen
+  DB-Requests gleichzeitig → identische Zeiten. Der Heartbeat (25 s < 50 s)
+  bleibt sinnvoll: die Verbindung erreicht das FIN-Fenster nie.
+- **Neu: `diagnostics.connect_open_ms` in `GET /status`** (Mod-only):
+  misst die Kosten einer frischen DB-Datei-Öffnung direkt AUF der Instanz
+  (gesund <1 ms, träge ~35–40 ms) — macht die Storage-These pro Instanz
+  vergleichbar und nach dem Pool-Deploy dauerhaft überwachbar.
+- Attribution nach Deploy: `Server-Timing`-Header zeigt bei jedem 3–5-s-Fall
+  sofort, ob die Zeit im Server (dur groß → Storage) oder auf dem Weg lag.
+- Verifiziert: pytest 216/216 · ruff clean.
+
+## 2026-07-09 — Thread-gepoolte SQLite-Connections + h2-Rezepte im Chart
+
+Umsetzung des Connection-Reuse-Vorschlags (Messbefund: auf trägem Storage
+kostet JEDES Öffnen der DB-Datei ~35–40 ms; get_idea mit ~6–8 DB-Blöcken
+lag deshalb bei 303 ms statt 40 ms):
+
+- **`db.connect()` poolt jetzt pro Worker-Thread EINE offene Connection** —
+  identische Contextmanager-Semantik (Commit bei Erfolg, Rollback bei
+  Exception, per Test gepinnt). Invalidiert wird bei: sqlite_path-Wechsel
+  (Test-Hermetik), explizitem `invalidate_pooled_connections()` und kaputter
+  Connection. Verschachteltes `connect()` im selben Thread bekommt eine
+  Wegwerf-Connection (ein inneres Commit kann nie die äußere Transaktion
+  mit-committen). `check_same_thread=False` nur damit Restore/Teardown fremde
+  Handles SCHLIESSEN dürfen — benutzt wird jede Connection weiter nur von
+  ihrem Thread.
+- **Restore-Datei-Swap absichert:** `restore_backup` invalidiert den Pool vor
+  UND nach dem Tausch (Windows: offene Handles blockieren sonst den Swap;
+  Linux: Handles läsen die alte Inode; das Nachher deckt das Race-Fenster).
+  Test-Teardown invalidiert ebenfalls (tmp_path-Locks).
+- **`cache_size` 8 MB → 2 MB pro Connection:** mit bis zu ~100 langlebigen
+  Worker-Connections (32 asyncio + 64 anyio) wären 8 MB bis zu ~800 MB im
+  1-Gi-Container; Reads trägt ohnehin die prozessweit geteilte 128-MB-mmap.
+- Erwartung nach Deploy auf der trägen Instanz: get_idea ~303→~60 ms,
+  bootstrap ~334→~80 ms; auf gesunder Instanz neutral.
+- **deploy/ (Chart 0.2.1, nur Doku):** README-Abschnitt „Troubleshooting:
+  sporadische 3–5-s-Hänger (HTTP/2-Keepalive)" — erklärt den h2-Single-
+  Connection-Effekt + die drei Stellschrauben (Idle-Timeout/GOAWAY beim
+  Betreiber; Controller-ConfigMap `use-http2: "false"` clusterweit; per-Host
+  `server-snippet: http2 off;` als AUSKOMMENTIERTE values-Option inkl.
+  Snippet-Webhook-Warnung). Keine Default-Verhaltensänderung.
+- 6 neue Pool-Tests. Verifiziert: pytest 216/216 (inkl. aller 8
+  Backup/Restore-Tests mit Datei-Swap) · ruff clean · values.yaml parsebar.
+
+## 2026-07-09 — Instanz-Diagnose komplett + Verbindungs-Heartbeat gegen h2-Idle-Kill
+
+Messreihe beider Instanzen (8×9 Endpoints, warme Verbindung) + TLS/ALPN-Check.
+Drei belegte Effekte erklären, warum idee.hackathoern.de trotz identischem
+Code langsamer ist als nip.io:
+
+1. **HTTP/2 vs. HTTP/1.1:** hackathoern-Kette spricht h2 (EINE Browser-
+   Verbindung für alles), nip.io nur http/1.1 (bis zu 6 Sockets). Kappt der
+   vorgeschaltete Proxy die h2-Verbindung nach Leerlauf STILL (gemessen:
+   1,3–4 s Reuse-Hänger), hängen ALLE XHRs des nächsten Klicks gleichzeitig —
+   deshalb identische 3–5-s-Zeiten auf derselben Connection-ID.
+   → **Fix (App): Verbindungs-Heartbeat** — /health-Ping alle 25 s bei
+   sichtbarem Tab + Sofort-Ping beim Tab-Rückwechsel (Page Visibility). Die
+   Verbindung wird nie idle genug für den Kill; wirkt auf jeder Proxy-Kette.
+2. **DB-Datei-Open kostet dort ~35–40 ms** (nip.io ~0): ready 73 vs. 33 ms;
+   Endpoints mit mehreren DB-Blöcken multiplizieren das (get_idea 303 vs.
+   40 ms, bootstrap 334 vs. 40 ms) → Storage der Instanz ist träge.
+   → Vorschlag (nächster Schritt, nicht umgesetzt): Thread-lokale
+   Connection-Wiederverwendung mit Generation-Invalidierung (Restore-sicher).
+3. **Sporadische Storage-Stalls:** ein bootstrap-Aufruf hing 16 s (warme
+   Verbindung, reiner DB-Read) → PVC/Storage-Class der Instanz prüfen
+   (Betreiber). In-Memory-SQLite bewusst NICHT umgesetzt: Writes (Votes/
+   Interaktionen/Caches) bräuchten eine Sync-Back-Schicht mit Verlustfenster;
+   Connection-Reuse liefert den Read-Nutzen ohne Persistenzrisiko.
+
+Frontend-Gates: ng lint clean · 22/22 Tests · build:embed 0 Errors.
+
+## 2026-07-09 — Observability: Server-Timing-Header + Slow-Request-Log
+
+Für die Instanzvergleichs-Diagnose (idee.hackathoern.de langsam vs. nip.io
+flüssig): jede Antwort trägt jetzt `Server-Timing: app;dur=<ms>` — die
+Browser-DevTools (Request → Timing) zeigen damit die reine SERVER-Zeit pro
+Request. Ist ein Request 5 s langsam, aber `dur` ~10 ms, liegt die Zeit auf
+dem WEG (Proxy-Keepalive/DNS/TLS/Queueing), nicht in App/DB — das beendet das
+Rätselraten datenbasiert. API-Requests > 1 s landen zusätzlich als WARNING im
+Pod-Log. Messbasis dazu (von außen, gleicher Tag): DB-Endpoints der
+hackathoern-Instanz per Direktmessung median 0,21 s über 15 Bursts (Storage-
+These damit unwahrscheinlich); Keepalive-Reuse nach Idle dort erneut
+unzuverlässig (1,3–4 s vs. nip.io 0,04 s). Test gepinnt
+(test_security_headers). pytest 210/210 · ruff clean.
+
+## 2026-07-09 — Anhang-Cache: Negative-Caching + Prewarm beim Freischalten
+
+Live-Diagnose des Instanz-Vergleichs (idee.hackathoern.de vs. nip.io, gleicher
+Code): Listen auf beiden gleich schnell, aber `get_idea` auf hackathoern
+KONSTANT ~0,37 s (nip.io: 0,145 s) — dort läuft der Anhang-Live-Call
+(`list_child_objects`) offenbar bei JEDEM Aufruf, weil ein FEHLSCHLAGENDER
+Call (z.B. Gast ohne Leserecht) nie gecacht wurde. Der 4,5-s-Ausreißer des
+Users war zusätzlich der Erstaufruf einer frisch freigeschalteten Idee
+(leerer Cache) während einer ES-Lastspitze; `interactions` (4,4 s) wartete
+nur seriell dahinter (gleiche HTTP/1.1-Verbindung).
+
+- **Negative-Caching:** Schlägt der Anhang-Live-Call fehl, wird der
+  Leer-Fallback mit kurzem Stempel gecacht (60 s „frisch", danach
+  SWR-Zone) — statt bei jedem Detailaufruf erneut synchron gegen das
+  werfende edu-sharing zu laufen. `log.info` mit Fehlergrund, damit der
+  Betreiber die Ursache (z.B. 403) in den Pod-Logs sieht.
+- **Prewarm beim Freischalten:** `moderation/move` + `bulk_move` füllen den
+  Anhang-Cache der frischen Reference als Background-Task — der erste
+  Detailaufruf einer gerade freigeschalteten Idee zahlt den ES-Call nicht
+  mehr. Ein zusätzlicher ES-Call pro Freischaltung, best-effort.
+- Children-Cache-Helfer (TTL-Konstante, map/store/refresh) von routes.py
+  nach routes_common.py gezogen (get_idea + Move teilen sie jetzt).
+- 3 neue Tests (Negative-Cache greift ab Aufruf 2 ohne ES-Call; Move +
+  Bulk-Move wärmen die Reference vor). Verifiziert: pytest 209/209 ·
+  ruff clean.
+- **Zusätzlicher Infra-Befund (kein App-Fix möglich):** Der Proxy vor
+  idee.hackathoern.de kappt idle Keepalive-Verbindungen still (Messung:
+  Folgerequest nach 8 s idle = 4,05 s vs. nip.io 0,04 s) → sporadische
+  ~3-s-Hänger im Browser. Empfehlung an den Betreiber: Idle-Timeout ≥ 65 s
+  bzw. sauberes FIN, oder HTTP/2 aktivieren.
+
 ## 2026-07-09 — Browser-Zurück funktioniert jetzt in der App + Brotkrumen-Ausbau
 
 User-Feedback: Die Zurück-Taste des Browsers warf einen aus der App (SPA ohne

@@ -85,6 +85,7 @@ class FakeES:
         self.inbox_node_ids: set[str] = set()  # Kinder der Inbox-Sammlung
         self.collections: dict[str, dict] = {}  # coll_id -> {subcollections, references}
         self.child_objects: list[dict] = []  # was list_child_objects liefert (Anhang-Zähler)
+        self.child_objects_error: bool = False  # True → list_child_objects wirft (z.B. 403)
         self.fail_es: bool = False  # True → my_memberships + Walk werfen (kompletter ES-Ausfall)
         self.fail_collections: bool = False  # True → nur der Sammlungs-Walk wirft (Auth bleibt ok)
         self.add_rating_error: tuple[int, str] | None = None  # (status, body) → add_rating wirft
@@ -178,6 +179,8 @@ class FakeES:
 
     async def list_child_objects(self, parent_id: str, auth_header=None, **_) -> list[dict]:
         self._record("list_child_objects", parent_id=parent_id)
+        if self.child_objects_error:
+            raise http_error(403)
         return list(self.child_objects)
 
     async def update_metadata(self, node_id: str, *args, **kwargs) -> dict:
@@ -226,6 +229,12 @@ def _fresh_db(tmp_path, monkeypatch):
     auth._MOD_CACHE.clear()  # Mod-Status-Cache pro Test leeren (Isolation)
     auth._MEMBERSHIP_INFLIGHT.clear()  # In-Flight-Coalescing-Registry (defensiv)
     yield
+    # Thread-gepoolte Connections deterministisch schließen — sonst halten
+    # Worker-Threads die tmp_path-DB des Tests offen (Windows: Datei-Lock →
+    # pytest-tmp-Cleanup-Fehler; außerdem sauberer Pfadwechsel zum Folgetest).
+    from app.db import invalidate_pooled_connections
+
+    invalidate_pooled_connections()
 
 
 @pytest.fixture(autouse=True)

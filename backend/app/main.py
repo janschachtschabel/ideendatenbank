@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -186,8 +187,22 @@ async def _security_headers(request, call_next):
     als Web-Component in Partnerseiten (WLO) eingebettet — ein Frame-Verbot würde
     genau diesen Embed brechen. Eine vollständige CSP ist wegen des Embed-Szenarios
     noch offen (braucht Browser-Test gegen die Host-Seiten) und daher hier bewusst
-    nicht gesetzt."""
+    nicht gesetzt.
+
+    Zusätzlich Observability für Instanz-Latenz-Diagnosen:
+    - `Server-Timing: app;dur=<ms>` auf jeder Antwort — die Browser-DevTools
+      zeigen damit pro Request die reine SERVER-Verarbeitungszeit. Ist der
+      Request langsam, aber `dur` klein, liegt die Zeit auf dem WEG (Proxy-
+      Keepalive, DNS, TLS, Queueing) — nicht in App/DB. Beendet das
+      Instanzvergleichs-Rätselraten datenbasiert.
+    - API-Requests über 1 s landen als WARNING im Log (Pfad + Dauer), damit
+      `kubectl logs` langsame Aufrufe ohne DevTools-Sitzung benennt."""
+    t0 = time.perf_counter()
     response = await call_next(request)
+    dur_ms = (time.perf_counter() - t0) * 1000.0
+    response.headers["Server-Timing"] = f"app;dur={dur_ms:.1f}"
+    if dur_ms > 1000.0 and request.url.path.startswith("/api/"):
+        log.warning("slow request: %s %s -> %.0f ms", request.method, request.url.path, dur_ms)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response

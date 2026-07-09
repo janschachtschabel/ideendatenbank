@@ -173,6 +173,72 @@ def _attachment_from_node(n: dict) -> dict:
     }
 
 
+# ===== Child-Anhang-Cache (Tier C der Detailseite) =========================
+# Lebt hier (statt in routes.py), weil neben get_idea auch die Moderations-
+# Moves den Cache VORWÄRMEN — der Erstaufruf einer frisch freigeschalteten
+# Idee zahlte sonst den einzigen verbliebenen synchronen ES-Call, bei
+# ES-Lastspitzen live gemessen mehrere Sekunden.
+
+# TTL des children_cache. Anhang-Mutationen über die App invalidieren sofort
+# (routes_attachments); die TTL bewacht nur Out-of-band-Änderungen direkt in
+# edu-sharing. Abgelaufene Einträge werden per SWR sofort serviert und im
+# Hintergrund erneuert (get_idea) — die TTL kostet also keine Antwortzeit mehr.
+CHILD_CACHE_TTL_SECONDS = 3600
+
+# Negative-Cache-Frische: schlägt der Live-Call fehl (z.B. Gast ohne
+# Leserecht), wird der Leer-Fallback so gestempelt, dass er diese Spanne als
+# „frisch" gilt und danach in die SWR-Zone fällt — statt bei JEDEM
+# Detailaufruf erneut synchron gegen das werfende edu-sharing zu laufen.
+CHILD_CACHE_FAILURE_FRESH_SECONDS = 60
+
+
+def _map_child_attachments(children: list[dict]) -> list[dict]:
+    """Child-IO-Knoten → Anhang-Dicts fürs Frontend (Serienobjekt-Flags)."""
+    out: list[dict] = []
+    for n in children:
+        a = _attachment_from_node(n)
+        a["from_folder"] = True  # Backwards-compat-Flag fürs Frontend
+        a["is_child_object"] = True
+        out.append(a)
+    return out
+
+
+def _store_children_cache(idea_id: str, atts: list[dict]) -> None:
+    with connect() as con:
+        con.execute(
+            "UPDATE idea SET children_cache=?, children_cache_at=? WHERE id=?",
+            (json.dumps(atts), datetime.now(UTC).isoformat(), idea_id),
+        )
+
+
+def _store_children_cache_failure(idea_id: str) -> None:
+    """Leer-Fallback nach fehlgeschlagenem Live-Call — Stempel in der nahen
+    Vergangenheit: kurz „frisch" (kein sofortiger Retry-Sturm), danach stale →
+    SWR liefert sofort und der Hintergrund-Refresh korrigiert, sobald
+    edu-sharing wieder antwortet."""
+    stamp = datetime.now(UTC) - timedelta(
+        seconds=CHILD_CACHE_TTL_SECONDS - CHILD_CACHE_FAILURE_FRESH_SECONDS
+    )
+    with connect() as con:
+        con.execute(
+            "UPDATE idea SET children_cache=?, children_cache_at=? WHERE id=?",
+            ("[]", stamp.isoformat(), idea_id),
+        )
+
+
+async def _refresh_children_cache_bg(idea_id: str, auth_header: str | None) -> None:
+    """Anhang-Cache einer Idee füllen/erneuern — als Background-Task nach der
+    Antwort (SWR-Refresh in get_idea, Prewarm nach Moderations-Move).
+    Best-effort: Fehler nur loggen, der alte/leere Stand bleibt nutzbar."""
+    try:
+        children = await edu_sharing.client.list_child_objects(
+            idea_id, auth_header=auth_header
+        )
+        await asyncio.to_thread(_store_children_cache, idea_id, _map_child_attachments(children))
+    except Exception as e:
+        log.debug("children-Cache-Refresh für %s fehlgeschlagen: %s", idea_id, e)
+
+
 def _collect_topic_subtree(con, root_id: str) -> list[str]:
     """Return [root_id] + all transitive descendants from the topic table.
 

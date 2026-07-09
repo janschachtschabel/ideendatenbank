@@ -112,3 +112,38 @@ without them. They are stored in the chart-managed `Secret` (`<release>-...-env`
 | `resources.limits.memory`              | Set memory limit on resources                                          | `1Gi`                |
 | `resources.requests.cpu`               | Set CPU for requests on resources                                      | `250m`               |
 | `resources.requests.memory`            | Set memory for requests on resources                                   | `512Mi`              |
+
+## Troubleshooting: sporadische 3–5-s-Hänger (HTTP/2-Keepalive)
+
+Symptom: Nach kurzen Lesepausen hängen ALLE XHRs eines Klicks gleichzeitig
+3–5 s (identische Zeiten, gleiche Connection-ID in den DevTools), danach ist
+alles wieder flüssig. Ursache: Bei **HTTP/2** bündelt der Browser sämtliche
+Requests auf **eine** Verbindung. Kappt ein Proxy/LB in der Kette diese
+Verbindung nach Leerlauf **still** (ohne `GOAWAY`/FIN — z. B. NAT-/Firewall-
+Conntrack oder ein LB mit kurzem Idle-Timeout), sendet der Browser in einen
+toten Socket und merkt es erst nach dem TCP-Retransmit-Timeout.
+
+Diagnose: `curl -svo /dev/null https://<host>/ 2>&1 | grep ALPN` — meldet die
+Kette `h2`, ist sie betroffen, sobald irgendwo still gekappt wird. Die App
+bringt seit 07/2026 eine eingebaute Mitigation mit (Verbindungs-Heartbeat:
+`/health`-Ping alle 25 s bei sichtbarem Tab); auf Infrastruktur-Ebene gibt es
+drei Stellschrauben:
+
+1. **Kein stilles Kappen**: Idle-Timeout aller Glieder ≥ 65 s (Browser halten
+   Verbindungen ähnlich lange) ODER sauber schließen lassen (h2 `GOAWAY` /
+   TCP FIN) — dann wechselt der Browser verlustfrei.
+2. **HTTP/2 clusterweit abschalten** (Verhalten wie eine HTTP/1.1-Kette mit
+   bis zu 6 parallelen Browser-Sockets, robuste Recovery): ingress-nginx-
+   **Controller**-ConfigMap `use-http2: "false"`. Das ist eine Einstellung
+   des Ingress-Controllers im Cluster — sie liegt AUSSERHALB dieses Charts
+   und wirkt auf alle Ingresse des Controllers.
+3. **Nur für diesen Host** (nginx ≥ 1.25 im Controller): Annotation
+   `nginx.ingress.kubernetes.io/server-snippet: http2 off;` über
+   `ingress.annotations` in `values.yaml`. Achtung: funktioniert nur, wenn
+   der Controller Snippets erlaubt (`allow-snippet-annotations: true`; seit
+   ingress-nginx v1.9 standardmäßig AUS) — sonst lehnt der Admission-Webhook
+   das Deployment ab. Deshalb ist das hier bewusst kein Default.
+
+Terminiert ein LB VOR dem Ingress das TLS (Indiz: `Server:`-Header fehlt,
+Header wie HSTS werden injiziert), greifen 2./3. nicht — dann entscheidet
+der Betreiber dieses LB über ALPN/h2 und Idle-Verhalten (Punkt 1 dort).

@@ -76,10 +76,23 @@ class Settings(BaseSettings):
         hl = self.rating_decay_halflife_days or 0.0
         return (math.log(2) / hl) if hl > 0 else 0.0
 
+    # Ephemeral-DB-Modus (Variante A des Storage-Befunds 07/2026): die SQLite-
+    # Datei liegt auf einer RAM-Disk (tmpfs) — der Request-Pfad berührt den
+    # (ggf. trägen) Cluster-Storage nie. Persistenz übernehmen die Backups auf
+    # dem echten Volume: JEDER Pod-Start restauriert aus dem jüngsten Backup
+    # (Marker wird nicht konsumiert), Backups laufen minütlich-granular
+    # (backup_interval_minutes) und zusätzlich beim geplanten Shutdown.
+    # Verlustfenster: nur bei HARTEM Crash die App-eigenen Writes seit dem
+    # letzten Backup (edu-sharing-Inhalte stellt der Sync ohnehin wieder her).
+    db_ephemeral: bool = False
+
     # Backup
     backup_enabled: bool = True
     backup_dir: Path = Path("./data/backups")
     backup_interval_hours: int = 24
+    # >0 übersteuert das Stunden-Intervall (Minuten-Granularität — im
+    # Ephemeral-Modus ist das Backup-Intervall zugleich das Verlustfenster).
+    backup_interval_minutes: int = 0
     backup_keep: int = 3
     # Auto-Restore beim Erststart nur, wenn diese Marker-Datei im
     # Backup-Verzeichnis existiert (`<backup_dir>/AUTO_RESTORE_OK`).

@@ -190,6 +190,26 @@ persistence:
   enabled: true
   ## @param persistence.mountPath Mount path for the data volume
   mountPath: /data
+
+  ## Ephemeral-DB-Modus ("Variante A", siehe README-Troubleshooting): die
+  ## SQLite-Datei liegt auf einer RAM-Disk (tmpfs) — der Request-Pfad
+  ## beruehrt den Cluster-Storage nie (Abhilfe bei traegen/stallenden
+  ## Volumes, gemessen: ~40 ms pro Datei-Open bzw. 16-s-I/O-Stalls).
+  ## Persistenz uebernehmen die Backups auf dem PVC: jeder Pod-Start
+  ## restauriert aus dem juengsten Backup (Marker AUTO_RESTORE_OK muss im
+  ## Backup-Verzeichnis liegen und bleibt in diesem Modus erhalten), Backups
+  ## laufen im Minuten-Intervall und zusaetzlich beim geplanten Shutdown.
+  ## VERLUSTFENSTER: bei einem HARTEN Crash (OOM/Node-Ausfall) gehen die
+  ## app-eigenen Schreibdaten (Votes/Team-Anfragen/Kontakte/Reports) seit dem
+  ## letzten Backup verloren — maximal `backupIntervalMinutes`. edu-sharing-
+  ## Inhalte stellt der Sync ohnehin wieder her.
+  dbInMemory:
+    ## @param persistence.dbInMemory.enabled Put the SQLite DB on a tmpfs (RAM) volume; persistence via frequent backups on the PVC
+    enabled: false
+    ## @param persistence.dbInMemory.sizeLimit Size limit of the tmpfs volume (DB is a few MB + max 16 MB WAL; counts against the container memory limit)
+    sizeLimit: 64Mi
+    ## @param persistence.dbInMemory.backupIntervalMinutes Auto-backup interval in minutes (= max data-loss window on hard crash)
+    backupIntervalMinutes: 10
   ## @param persistence.storageClassName StorageClass for the data PVC (empty → cluster default)
   storageClassName: ""
   ## @param persistence.accessModes Access modes for the data PVC

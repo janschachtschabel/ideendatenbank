@@ -10,7 +10,15 @@ data:
   APP_CORS_ORIGINS: {{ .Values.config.app.corsOrigins | quote }}
 
   # ---- Daten ----
+  {{- if .Values.persistence.dbInMemory.enabled }}
+  # Ephemeral-DB-Modus: DB auf tmpfs; jeder Start restauriert aus dem
+  # juengsten Backup, Backups laufen im Minuten-Takt + beim Shutdown.
+  SQLITE_PATH: {{ printf "%s/db-mem/ideendb.sqlite" .Values.persistence.mountPath | quote }}
+  DB_EPHEMERAL: "true"
+  BACKUP_INTERVAL_MINUTES: {{ .Values.persistence.dbInMemory.backupIntervalMinutes | quote }}
+  {{- else }}
   SQLITE_PATH: {{ printf "%s/ideendb.sqlite" .Values.persistence.mountPath | quote }}
+  {{- end }}
   SYNC_NIGHTLY_HOUR: {{ .Values.config.app.syncNightlyHour | quote }}
 
   # ---- edu-sharing ----

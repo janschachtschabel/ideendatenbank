@@ -135,6 +135,13 @@ async def lifespan(app: FastAPI):
         sync_task.cancel()
         startup_sync_task.cancel()
         backup_task.cancel()
+        # Ephemeral-Modus: letzten Stand sichern, BEVOR das tmpfs mit dem Pod
+        # stirbt — geplante Restarts/Deployments verlieren damit nichts
+        # (no-op im Default-Modus, s. backup.shutdown_backup).
+        try:
+            await asyncio.to_thread(backup_mod.shutdown_backup)
+        except Exception:
+            log.exception("shutdown-backup fehlgeschlagen")
         await edu_sharing.client.close()
 
 

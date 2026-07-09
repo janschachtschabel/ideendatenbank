@@ -432,12 +432,16 @@ def auto_restore_if_fresh() -> dict | None:
     # nochmal automatisch restoren möchte (z.B. nach erneutem Volume-
     # Verlust), muss den Marker erneut anlegen. Das verhindert, dass eine
     # versehentlich gelöschte DB stillschweigend durch ein altes Backup
-    # ersetzt wird.
-    try:
-        marker.unlink()
-        log.info("auto-restore: Marker %s konsumiert", marker.name)
-    except Exception as e:
-        log.warning("auto-restore: Marker konnte nicht entfernt werden: %s", e)
+    # ersetzt wird. AUSNAHME Ephemeral-Modus (DB auf tmpfs): dort ist der
+    # Restore der NORMALE Startvorgang jedes Pods — der Marker bleibt liegen.
+    if settings.db_ephemeral:
+        log.info("auto-restore: ephemeral-Modus — Marker bleibt für den nächsten Start")
+    else:
+        try:
+            marker.unlink()
+            log.info("auto-restore: Marker %s konsumiert", marker.name)
+        except Exception as e:
+            log.warning("auto-restore: Marker konnte nicht entfernt werden: %s", e)
 
     log.info("auto-restore: erfolgreich aus %s — Schema-Migration via init_db", newest["filename"])
     return {
@@ -453,9 +457,33 @@ def auto_restore_if_fresh() -> dict | None:
 _last_auto_backup: datetime | None = None
 
 
+def _backup_interval_seconds() -> int:
+    """Effektives Auto-Backup-Intervall: `backup_interval_minutes` (>0)
+    übersteuert die Stunden — im Ephemeral-Modus ist dieses Intervall
+    zugleich das Verlustfenster bei einem harten Crash."""
+    minutes = int(settings.backup_interval_minutes or 0)
+    if minutes > 0:
+        return minutes * 60
+    return max(1, int(settings.backup_interval_hours)) * 3600
+
+
+def shutdown_backup() -> None:
+    """Abschluss-Backup beim geplanten Shutdown — NUR im Ephemeral-Modus
+    (dort ginge sonst das letzte Intervall verloren; geplante Deployments
+    verlieren damit nichts). Im Default-Modus bewusst no-op, um Backup-Churn
+    bei jedem Restart zu vermeiden."""
+    if not (settings.db_ephemeral and settings.backup_enabled):
+        return
+    try:
+        path = create_backup()
+        log.info("shutdown-backup (ephemeral): %s", path.name)
+    except Exception as e:
+        log.warning("shutdown-backup fehlgeschlagen: %s", e)
+
+
 async def auto_backup_loop() -> None:
-    """Hintergrund-Task: prüft jede Stunde, ob ein Auto-Backup fällig ist
-    (älter als `backup_interval_hours`). Erster Lauf erfolgt nach kurzer
+    """Hintergrund-Task: prüft periodisch, ob ein Auto-Backup fällig ist
+    (Intervall: `_backup_interval_seconds`). Erster Lauf erfolgt nach kurzer
     Verzögerung, damit die App vorher gestartet ist."""
     global _last_auto_backup
     if not settings.backup_enabled:
@@ -475,12 +503,12 @@ async def auto_backup_loop() -> None:
 
     await asyncio.sleep(120)  # 2 Min Anlauf
     while True:
+        interval_s = _backup_interval_seconds()
         try:
-            interval = max(1, int(settings.backup_interval_hours))
             now = datetime.now(UTC)
             due = (
                 _last_auto_backup is None
-                or (now - _last_auto_backup).total_seconds() >= interval * 3600
+                or (now - _last_auto_backup).total_seconds() >= interval_s
             )
             if due:
                 # Im Executor laufen lassen, damit das Event-Loop nicht blockiert
@@ -488,5 +516,6 @@ async def auto_backup_loop() -> None:
                 _last_auto_backup = now
         except Exception as e:
             log.warning("auto-backup tick failed: %s", e)
-        # Stündlich nachschauen, ob's wieder fällig ist
-        await asyncio.sleep(3600)
+        # Prüf-Takt: halbes Intervall, gedeckelt auf [60 s, 1 h] — trägt sowohl
+        # das 24-h-Default als auch Minuten-Intervalle des Ephemeral-Modus.
+        await asyncio.sleep(min(3600, max(60, interval_s // 2)))

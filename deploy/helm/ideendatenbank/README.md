@@ -91,6 +91,9 @@ without them. They are stored in the chart-managed `Secret` (`<release>-...-env`
 | -------------------------------------- | ---------------------------------------------------------------------- | -------------------- |
 | `persistence.enabled`                  | Enable persistent storage for `/data`                                  | `true`               |
 | `persistence.mountPath`                | Mount path for the data volume                                         | `/data`              |
+| `persistence.dbInMemory.enabled`       | SQLite auf tmpfs (RAM); Persistenz via Backups auf dem PVC (s. unten)  | `false`              |
+| `persistence.dbInMemory.sizeLimit`     | tmpfs-Größe (zählt gegen das Container-Memory-Limit)                   | `64Mi`               |
+| `persistence.dbInMemory.backupIntervalMinutes` | Auto-Backup-Takt = max. Verlustfenster bei hartem Crash        | `10`                 |
 | `persistence.storageClassName`         | StorageClass for the data PVC (empty → cluster default)               | `""`                 |
 | `persistence.accessModes`              | Access modes for the data PVC                                          | `["ReadWriteOnce"]`  |
 | `persistence.size`                     | Storage request for the data PVC                                       | `2Gi`                |
@@ -112,6 +115,25 @@ without them. They are stored in the chart-managed `Secret` (`<release>-...-env`
 | `resources.limits.memory`              | Set memory limit on resources                                          | `1Gi`                |
 | `resources.requests.cpu`               | Set CPU for requests on resources                                      | `250m`               |
 | `resources.requests.memory`            | Set memory for requests on resources                                   | `512Mi`              |
+
+## Betriebsmodus: Ephemeral-DB (`persistence.dbInMemory`)
+
+Für Cluster mit trägem/stallendem Storage (Messbefund 07/2026: ~40 ms pro
+DB-Datei-Öffnung, vereinzelt 16-s-I/O-Stalls): Die SQLite-Datei liegt auf
+einer RAM-Disk — **der Request-Pfad berührt den Cluster-Storage nie**, nur
+die asynchronen Backups schreiben aufs PVC.
+
+Funktionsweise: Jeder Pod-Start restauriert automatisch aus dem jüngsten
+Backup (die Marker-Datei `AUTO_RESTORE_OK` muss einmalig ins Backup-
+Verzeichnis gelegt werden und bleibt in diesem Modus erhalten). Backups
+laufen alle `backupIntervalMinutes` Minuten und zusätzlich beim geplanten
+Shutdown — **geplante Deployments/Restarts verlieren nichts**. Verlustfenster
+nur bei hartem Crash (OOM/Node-Ausfall): die app-eigenen Schreibdaten
+(Votes, Team-Anfragen, Kontakte, Reports) seit dem letzten Backup, maximal
+`backupIntervalMinutes`; edu-sharing-Inhalte stellt der Nightly-Sync ohnehin
+wieder her. Erstaktivierung auf einer Bestandsinstanz: vorher ein Backup
+erzeugen (`POST /api/v1/admin/backup`) und den Marker anlegen — sonst startet
+der Pod leer bis zum Initial-Sync.
 
 ## Troubleshooting: sporadische 3–5-s-Hänger (HTTP/2-Keepalive)
 

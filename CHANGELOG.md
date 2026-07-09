@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-07-09 — Ephemeral-DB-Modus (Variante A): SQLite auf RAM-Disk, Opt-in
+
+Umsetzung der These „Request-Pfad darf den Storage nie berühren" — als
+Opt-in für Instanzen mit trägem/stallendem Volume (Messbefund: ~40 ms pro
+Datei-Open, 16-s-I/O-Stalls):
+
+- **Backend:** `DB_EPHEMERAL=true` aktiviert den Modus. Auto-Restore läuft
+  dann bei JEDEM Pod-Start (Marker `AUTO_RESTORE_OK` wird nicht mehr
+  konsumiert — im Default-Modus unverändert einmalig, per Test gepinnt).
+  `BACKUP_INTERVAL_MINUTES` (>0) übersteuert das Stunden-Intervall — es ist
+  zugleich das maximale Verlustfenster bei hartem Crash. Beim geplanten
+  Shutdown zieht der Lifespan ein Abschluss-Backup (`shutdown_backup`,
+  no-op im Default-Modus) → Deployments/Restarts verlieren NICHTS.
+- **Chart (0.3.0):** `persistence.dbInMemory.{enabled,sizeLimit,
+  backupIntervalMinutes}` — mountet ein `emptyDir(medium: Memory)` für die
+  DB, biegt `SQLITE_PATH` darauf um und setzt die beiden Env-Vars; Backups
+  (und der Marker) bleiben auf dem PVC. README: Betriebsmodus-Abschnitt
+  inkl. Erstaktivierungs-Hinweis (vorher Backup erzeugen + Marker anlegen).
+- Verlustfenster ehrlich dokumentiert: nur bei HARTEM Crash die app-eigenen
+  Writes (Votes/Team/Kontakte/Reports) seit dem letzten Backup, max.
+  `backupIntervalMinutes`; edu-sharing-Inhalte stellt der Sync wieder her.
+- 4 neue Tests (Minuten-Intervall, Marker-Konsum Default vs. ephemeral,
+  Shutdown-Backup nur im Modus). Dabei gelernt: conftest deaktiviert
+  BACKUP_ENABLED global — der Shutdown-Test aktiviert es gezielt.
+- Verifiziert: pytest 220/220 · ruff clean · values.yaml parsebar ·
+  Template↔Values-Keys konsistent · Env-Mapping-Smoke (DB_EPHEMERAL,
+  BACKUP_INTERVAL_MINUTES) grün.
+- **Nachtrag für Compose-Deployments (nip.io nutzt kein Helm):**
+  `docker-compose.ephemeral.yml` als Override — Aktivierung per
+  `docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d`
+  (setzt die 3 Env-Vars + tmpfs-Mount; Daten-Volume/Backups aus der Basis
+  bleiben). Inkl. dokumentierter Einmal-Schritte (Backup + Marker) und
+  Rückwechsel-Hinweis (alte Disk-DB entfernen, sonst veralteter Stand).
+  Merge per `docker compose config` verifiziert.
+
 ## 2026-07-09 — Diagnose verfeinert: Storage ist Hauptverdächtiger; `connect_open_ms` in /status
 
 Zwei neue Proben präzisieren die Instanz-These:

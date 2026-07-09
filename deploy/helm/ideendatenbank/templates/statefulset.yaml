@@ -88,16 +88,30 @@ spec:
         volumeMounts:
         - name: data
           mountPath: {{ .Values.persistence.mountPath }}
+        {{- if .Values.persistence.dbInMemory.enabled }}
+        # Ephemeral-DB-Modus: tmpfs fuer die SQLite-Datei (SQLITE_PATH zeigt
+        # hierauf, s. ConfigMap) — Backups bleiben auf dem data-Volume.
+        - name: db-mem
+          mountPath: {{ printf "%s/db-mem" .Values.persistence.mountPath }}
+        {{- end }}
         {{- with .Values.resources }}
         resources: {{ toYaml . | nindent 10 }}
         {{- end }}
         {{- with .Values.securityContext }}
         securityContext: {{ toYaml . | nindent 10 }}
         {{- end }}
-      {{- if not .Values.persistence.enabled }}
+      {{- if or (not .Values.persistence.enabled) .Values.persistence.dbInMemory.enabled }}
       volumes:
+      {{- if not .Values.persistence.enabled }}
       - name: data
         emptyDir: {}
+      {{- end }}
+      {{- if .Values.persistence.dbInMemory.enabled }}
+      - name: db-mem
+        emptyDir:
+          medium: Memory
+          sizeLimit: {{ .Values.persistence.dbInMemory.sizeLimit }}
+      {{- end }}
       {{- end }}
   {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:

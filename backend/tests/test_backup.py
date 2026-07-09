@@ -159,3 +159,69 @@ def test_restore_rejects_oversize_upload(client, mod_headers, monkeypatch):
         headers=mod_headers,
     )
     assert r.status_code == 413
+
+
+# ---- Ephemeral-Modus (DB auf tmpfs/RAM-Disk, Persistenz via Backups) --------
+# Variante A des Storage-Befunds: der Request-Pfad berührt den (trägen)
+# Storage nie; dafür restauriert JEDER Pod-Start aus dem jüngsten Backup und
+# Backups laufen minütlich-granular + beim Shutdown.
+
+
+def test_backup_interval_prefers_minutes_over_hours(monkeypatch):
+    """`backup_interval_minutes > 0` übersteuert das Stunden-Intervall —
+    im Ephemeral-Modus ist das Backup-Intervall das Verlustfenster."""
+    monkeypatch.setattr(settings, "backup_interval_hours", 24)
+    monkeypatch.setattr(settings, "backup_interval_minutes", 10)
+    assert backup_mod._backup_interval_seconds() == 600
+    monkeypatch.setattr(settings, "backup_interval_minutes", 0)
+    assert backup_mod._backup_interval_seconds() == 24 * 3600
+
+
+def _prepare_auto_restore(tmp_path, monkeypatch) -> None:
+    """Backup + Marker-Datei anlegen, dann auf eine fehlende DB-Datei zeigen —
+    die Ausgangslage eines frischen (tmpfs-)Starts."""
+    _seed_marker("aus-dem-backup")
+    backup_mod.create_backup()
+    marker = backup_mod._backup_dir() / settings.backup_auto_restore_marker
+    marker.write_text("")
+    monkeypatch.setattr(settings, "sqlite_path", tmp_path / "fresh" / "db.sqlite")
+
+
+def test_auto_restore_consumes_marker_by_default(tmp_path, monkeypatch):
+    """Default-Modus (persistente DB): Auto-Restore ist ein EINMALIGER Vorgang —
+    der Marker wird konsumiert (Schutz vor stillem Ersetzen einer gelöschten DB)."""
+    _prepare_auto_restore(tmp_path, monkeypatch)
+    result = backup_mod.auto_restore_if_fresh()
+    assert result and result["ok"] is True
+    assert _marker_title() == "aus-dem-backup"
+    marker = backup_mod._backup_dir() / settings.backup_auto_restore_marker
+    assert not marker.exists()  # konsumiert
+
+
+def test_auto_restore_keeps_marker_in_ephemeral_mode(tmp_path, monkeypatch):
+    """Ephemeral-Modus: JEDER Start restauriert (tmpfs ist leer) → der Marker
+    bleibt liegen, sonst käme der zweite Restart leer hoch."""
+    monkeypatch.setattr(settings, "db_ephemeral", True)
+    _prepare_auto_restore(tmp_path, monkeypatch)
+    result = backup_mod.auto_restore_if_fresh()
+    assert result and result["ok"] is True
+    assert _marker_title() == "aus-dem-backup"
+    marker = backup_mod._backup_dir() / settings.backup_auto_restore_marker
+    assert marker.exists()  # bleibt für den nächsten Pod-Start
+
+
+def test_shutdown_backup_only_in_ephemeral_mode(monkeypatch):
+    """Beim geplanten Shutdown sichert der Ephemeral-Modus den letzten Stand —
+    geplante Deployments verlieren damit NICHTS. Im Default-Modus (persistente
+    DB) passiert nichts (unnötige Backup-Churn vermeiden)."""
+    _seed_marker()
+    # conftest deaktiviert BACKUP_ENABLED global (Hermetik) — hier gezielt an.
+    monkeypatch.setattr(settings, "backup_enabled", True)
+    monkeypatch.setattr(settings, "db_ephemeral", False)
+    backup_mod.shutdown_backup()
+    assert backup_mod.list_backups() == []
+    monkeypatch.setattr(settings, "db_ephemeral", True)
+    backup_mod.shutdown_backup()
+    backups = backup_mod.list_backups()
+    assert len(backups) == 1
+    assert backups[0]["metadata"]["topic_count"] == 1

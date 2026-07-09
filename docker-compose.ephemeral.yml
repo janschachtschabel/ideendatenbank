@@ -1,0 +1,39 @@
+# Ephemeral-DB-Modus („Variante A" des Storage-Befunds 07/2026): die SQLite-
+# Datei liegt auf einer RAM-Disk (tmpfs) — der Request-Pfad berührt den
+# Host-Storage nie; Persistenz übernehmen die Backups auf dem Daten-Volume
+# (Minuten-Takt + Abschluss-Backup beim geplanten Stop).
+#
+# AKTIVIEREN (zusätzlich zur Basis-Compose):
+#   docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d
+#
+# EINMALIGE VORAUSSETZUNG (sonst startet die App leer bis zum Initial-Sync):
+#   1. Auf der laufenden Instanz ein Backup erzeugen (Mod-UI oder
+#      POST /api/v1/admin/backup).
+#   2. Marker fürs Auto-Restore anlegen (bleibt in diesem Modus erhalten):
+#      docker compose exec ideendb sh -c 'touch /data/backups/AUTO_RESTORE_OK'
+#
+# ZURÜCKWECHSELN (ohne dieses File starten): VORHER die alte Disk-DB
+# entfernen und den Marker neu anlegen, sonst startet die App mit dem
+# VERALTETEN Disk-Stand von vor der Umstellung:
+#   docker compose exec ideendb sh -c 'rm -f /data/ideendb.sqlite* && touch /data/backups/AUTO_RESTORE_OK'
+#
+# Verlustfenster: nur bei HARTEM Crash (Container-Kill/OOM/Host-Ausfall) die
+# app-eigenen Schreibdaten (Votes/Team-Anfragen/Kontakte/Reports) seit dem
+# letzten Backup — maximal BACKUP_INTERVAL_MINUTES. edu-sharing-Inhalte
+# stellt der Nightly-Sync ohnehin wieder her. `docker compose down`/Restart
+# ist verlustfrei (Shutdown-Backup).
+
+services:
+  ideendb:
+    environment:
+      SQLITE_PATH: /data/db-mem/ideendb.sqlite
+      DB_EPHEMERAL: "true"
+      # = maximales Verlustfenster bei hartem Crash
+      BACKUP_INTERVAL_MINUTES: ${BACKUP_INTERVAL_MINUTES:-10}
+    volumes:
+      # tmpfs für die DB — 64 MiB reichen (DB wenige MB + max. 16 MB WAL).
+      # Das Daten-Volume (/data, Backups + Marker) kommt aus der Basis-Compose.
+      - type: tmpfs
+        target: /data/db-mem
+        tmpfs:
+          size: 67108864

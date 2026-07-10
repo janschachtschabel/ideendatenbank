@@ -231,9 +231,7 @@ async def _refresh_children_cache_bg(idea_id: str, auth_header: str | None) -> N
     Antwort (SWR-Refresh in get_idea, Prewarm nach Moderations-Move).
     Best-effort: Fehler nur loggen, der alte/leere Stand bleibt nutzbar."""
     try:
-        children = await edu_sharing.client.list_child_objects(
-            idea_id, auth_header=auth_header
-        )
+        children = await edu_sharing.client.list_child_objects(idea_id, auth_header=auth_header)
         await asyncio.to_thread(_store_children_cache, idea_id, _map_child_attachments(children))
     except Exception as e:
         log.debug("children-Cache-Refresh für %s fehlgeschlagen: %s", idea_id, e)

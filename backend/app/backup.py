@@ -237,6 +237,47 @@ def delete_backup(filename: str) -> None:
     log.info("backup deleted: %s", filename)
 
 
+# ===== Auto-Restore-Marker (per Mod-API steuerbar) ==================
+# Der Marker ist das bewusste Opt-in für den automatischen Restore beim Start
+# (Pflicht-Dauerzustand im Ephemeral-Modus). Die API-Steuerung macht die
+# Ephemeral-Aktivierung kubectl-frei — Sicherheitsniveau unverändert: nur
+# Mods, und die dürfen ohnehin beliebige Backups einspielen (Restore-Upload).
+
+
+def _auto_restore_marker_path() -> Path | None:
+    name = (settings.backup_auto_restore_marker or "").strip()
+    if not name:
+        return None  # Auto-Restore per Konfiguration deaktiviert
+    return _backup_dir() / name
+
+
+def auto_restore_marker_exists() -> bool:
+    p = _auto_restore_marker_path()
+    return bool(p and p.exists())
+
+
+def set_auto_restore_marker() -> str:
+    """Legt den Marker an (idempotent). ValueError, wenn Auto-Restore per
+    Konfiguration deaktiviert ist (leerer Marker-Name) — dann wäre das Setzen
+    ein stilles No-op."""
+    p = _auto_restore_marker_path()
+    if p is None:
+        raise ValueError("Auto-Restore ist deaktiviert (kein Marker-Name konfiguriert)")
+    p.touch()
+    log.info("auto-restore: Marker %s angelegt", p.name)
+    return p.name
+
+
+def clear_auto_restore_marker() -> bool:
+    """Entfernt den Marker (idempotent). True, wenn er existierte."""
+    p = _auto_restore_marker_path()
+    if p is None or not p.exists():
+        return False
+    p.unlink()
+    log.info("auto-restore: Marker %s entfernt", p.name)
+    return True
+
+
 async def restore_backup(zip_bytes: bytes) -> dict:
     """Stellt aus einem ZIP-Bytes-Blob wieder her.
 
@@ -507,8 +548,7 @@ async def auto_backup_loop() -> None:
         try:
             now = datetime.now(UTC)
             due = (
-                _last_auto_backup is None
-                or (now - _last_auto_backup).total_seconds() >= interval_s
+                _last_auto_backup is None or (now - _last_auto_backup).total_seconds() >= interval_s
             )
             if due:
                 # Im Executor laufen lassen, damit das Event-Loop nicht blockiert

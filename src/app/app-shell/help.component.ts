@@ -1,0 +1,364 @@
+
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+
+/**
+ * Endnutzer-Hilfeseite. Erklärt die wichtigsten Workflows der Ideendatenbank
+ * in einfacher Sprache: Idee einreichen, Mithacken/Folgen, Kommentieren,
+ * Bewerten, Suche, Filter, Profil, Melden, Anmeldung.
+ */
+@Component({
+  selector: 'ideendb-help',
+  standalone: true,
+  imports: [],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  styles: [`
+    :host { display: block; max-width: 1200px;
+            margin: 32px auto 64px; padding: 0 24px;
+            line-height: 1.65; color: var(--wlo-text); }
+    h1 { font-size: 1.85rem; margin: 0 0 6px; color: var(--wlo-primary); }
+    h2 { font-size: 1.3rem; margin: 28px 0 8px; color: var(--wlo-primary); }
+    h3 { font-size: 1.05rem; margin: 20px 0 6px; }
+    p, li { font-size: .96rem; }
+    .intro { color: var(--wlo-muted); margin: 0 0 24px; }
+    .toc {
+      display: flex; flex-wrap: wrap; gap: 6px 16px;
+      font-size: .9rem; padding-bottom: 12px; margin-bottom: 16px;
+      border-bottom: 1px solid var(--wlo-border);
+      a { color: var(--wlo-primary); text-decoration: none;
+          &:hover { text-decoration: underline; } }
+    }
+    section {
+      background: var(--wlo-surface, #fff);
+      border: 1px solid var(--wlo-border);
+      border-radius: 12px;
+      padding: 18px 22px; margin: 16px 0 24px;
+    }
+    ol, ul { padding-left: 22px; }
+    li { margin: 4px 0; }
+    .step { font-weight: 600; color: var(--wlo-primary); }
+    .tip {
+      background: var(--wlo-primary-soft, #e6edf7);
+      border-left: 3px solid var(--wlo-primary);
+      padding: 10px 14px; border-radius: 6px;
+      margin: 10px 0; font-size: .92rem;
+    }
+    .faq dt {
+      font-weight: 600; margin-top: 14px;
+      color: var(--wlo-text);
+    }
+    .faq dd {
+      margin: 4px 0 8px 0; padding-left: 14px;
+      color: var(--wlo-text);
+    }
+    code.inline {
+      background: var(--wlo-bg); padding: 1px 6px; border-radius: 4px;
+      font-size: .85em; color: var(--wlo-primary);
+    }
+  `],
+  template: `
+    <h1>Hilfe &amp; Anleitung</h1>
+    <p class="intro">
+      Diese Seite erklärt die wichtigsten Funktionen der HackathOERn-
+      Ideendatenbank — was du als Besucher:in, Idee-Einreicher:in
+      oder Mithackende:r tun kannst.
+    </p>
+
+    <div class="toc">
+      <strong>Inhalt:</strong>
+      <a href="#was">Was ist das?</a>
+      <a href="#stoebern">Stöbern &amp; Suchen</a>
+      <a href="#einreichen">Idee einreichen</a>
+      <a href="#mithacken">Mithacken &amp; Folgen</a>
+      <a href="#kommentieren">Kommentieren &amp; Bewerten</a>
+      <a href="#profil">Konto &amp; Profil</a>
+      <a href="#melden">Probleme melden</a>
+      <a href="#faq">Häufige Fragen</a>
+    </div>
+
+    <!-- ===== Was ist das? ===== -->
+    <section id="was">
+      <h2>Was ist die Ideendatenbank?</h2>
+      <p>
+        Eine offene Sammlung von Ideen rund um Open Educational Resources (OER).
+        Ideen stammen vom HackathOERn-Camp sowie aus der Community.
+        Jede Idee hat:
+      </p>
+      <ul>
+        <li>einen <strong>Titel</strong> und eine <strong>Beschreibung</strong>,</li>
+        <li>eine <strong>Herausforderung</strong> (im passenden Themenbereich, zu der sie thematisch passt),</li>
+        <li>eine <strong>Phase</strong> (Anregung → Pitch-bereit → In Umsetzung → Abgeschlossen),</li>
+        <li>optional eine zugeordnete <strong>Veranstaltung</strong> (z.B. HackathOERn 3).</li>
+      </ul>
+      <p>
+        Du kannst Ideen <strong>stöbern und bewerten</strong> ohne Konto.
+        Zum <strong>Einreichen</strong> einer neuen Idee oder zum
+        <strong>Kommentieren</strong> brauchst du ein
+        <a href="https://ideenbank.hackathoern.de/edu-sharing/components/register"
+           target="_blank" rel="noopener">WirLernenOnline-Konto</a>.
+      </p>
+    </section>
+
+    <!-- ===== Stöbern ===== -->
+    <section id="stoebern">
+      <h2>Stöbern &amp; Suchen</h2>
+
+      <h3>Startseite</h3>
+      <p>
+        Zeigt die zuletzt geänderten Ideen, die aktuellen Themenbereiche
+        und einen Schnelleinstieg zur Rangliste.
+      </p>
+      <p>
+        Läuft gerade eine Veranstaltung (z.B. ein „Call for Ideas"), erscheint
+        oben ein hervorgehobener <strong>Aktuelle-Veranstaltung-Block</strong>
+        mit der Anzahl bereits eingereichter Ideen sowie den Buttons
+        <strong>„+ Idee einreichen"</strong> (Veranstaltung vorausgewählt) und
+        <strong>„Jetzt voten"</strong> (springt zur Voting-Ansicht der
+        Veranstaltung).
+      </p>
+
+      <h3>Ideen-Übersicht</h3>
+      <ul>
+        <li>
+          <strong>Suchfeld</strong>: durchsucht Titel, Beschreibung und Stichwörter.
+          Treffer werden im Tile-Grid hervorgehoben.
+        </li>
+        <li>
+          <strong>Filter</strong> für Phase, Veranstaltung, Themenbereich und
+          Herausforderung — als Pillen mit Zähler in Klammern hinter jeder
+          Option (z.B. „Anregung (12)" zeigt 12 Ideen in dieser Phase). Ein
+          „Filter zurücksetzen" leert alle Filter auf einmal.
+        </li>
+        <li>
+          <strong>Sortierung</strong>: Datum, Bewertung, Kommentare, Titel.
+        </li>
+      </ul>
+
+      <h3>Themenbereiche</h3>
+      <p>
+        Übergeordnete Sammlungen (z.B. „Lernortübergreifende Bildung").
+        Klick öffnet die Liste aller Ideen in diesem Themenbereich, mit
+        Drilldown auf einzelne Herausforderungen.
+      </p>
+
+      <h3>Rangliste</h3>
+      <p>
+        Sortierbar nach Bewertung, Kommentaren oder „Mithacken". Die Liste
+        zeigt <strong>alle Ideen</strong> — auch noch unbewertete, damit auch
+        Bewegungen in unteren Rängen sichtbar bleiben. Oben ein
+        Verlaufs-Chart der Top-3 plus eine „Top-Steiger der letzten 7 Tage"-
+        Sektion.
+      </p>
+      <div class="tip">
+        <strong>Direkt abstimmen:</strong> In jeder Ranglisten-Zeile kannst du
+        direkt Sterne vergeben. Deine Stimme verändert die Reihenfolge
+        <strong>sofort</strong> — Anmeldung erforderlich.
+      </div>
+
+      <h3>Veranstaltungen</h3>
+      <p>
+        Pro Veranstaltung eine eigene Hub-Seite mit zugeordneten Ideen. Jede
+        Veranstaltung hat einen <strong>Status</strong> (in Vorbereitung,
+        läuft, archiviert); laufende erscheinen prominent auf der Startseite.
+        Über den Kacheln zeigt ein <strong>Voting-Verlauf</strong> der Top-3,
+        und an jeder Kachel kannst du direkt Sterne vergeben.
+      </p>
+      <p>
+        Der „Teilen"-Button rechts oben liefert einen Link + QR-Code für
+        Plakate und Folien — ideal für offline-Werbung am Workshop-Tisch.
+        Über einen solchen Link landen Teilnehmende direkt im
+        Einreich-Formular mit vorausgewählter Veranstaltung.
+      </p>
+    </section>
+
+    <!-- ===== Idee einreichen ===== -->
+    <section id="einreichen">
+      <h2>Idee einreichen</h2>
+      <ol>
+        <li><span class="step">Schritt 1</span> — Auf den gelben „+ Idee einreichen"-Button klicken (Topbar oder Startseite-Hero).</li>
+        <li><span class="step">Schritt 2</span> — <strong>Titel</strong> eingeben (mindestens 3 Zeichen). Optional Beschreibung, Themenbereich/Herausforderung, Phase. <strong>Veranstaltung ist Pflicht</strong> — wähle eine laufende Veranstaltung oder „Keine Veranstaltungszugehörigkeit".</li>
+        <li><span class="step">Schritt 3</span> — Bei anonymer Einreichung kurz die <strong>Rechenaufgabe (Spam-Schutz)</strong> lösen. Angemeldete überspringen das.</li>
+        <li><span class="step">Schritt 4</span> — Abschicken. Deine Idee landet in der <strong>Moderations-Inbox</strong>.</li>
+        <li><span class="step">Schritt 5</span> — Das Mod-Team prüft und ordnet sie der passenden Herausforderung zu. Danach erscheint sie öffentlich.</li>
+      </ol>
+      <div class="tip">
+        Anonyme Einreichungen sind möglich (mit kurzer Rechenaufgabe als
+        Spam-Schutz — kein Drittanbieter, kein Tracking). Wenn du angemeldet
+        bist, entfällt die Aufgabe, und du wirst als
+        <strong>Eigentümer:in</strong> hinterlegt — du kannst die Idee später
+        selbst bearbeiten oder löschen.
+      </div>
+      <h3>Anhänge hinzufügen</h3>
+      <p>
+        Nach dem Einreichen kannst du auf der Idee-Detailseite weitere
+        Dokumente (PDF, Bilder, Pitch-Decks) hochladen. Die werden direkt
+        an die Idee gehängt und sind für andere zum Download verfügbar.
+      </p>
+      <h3>Vorschaubild</h3>
+      <p>
+        Eigentümer:innen können im „Bearbeiten"-Dialog ein Vorschaubild
+        setzen — empfohlen 16:9, idealerweise unter 500 KB.
+      </p>
+    </section>
+
+    <!-- ===== Mithacken ===== -->
+    <section id="mithacken">
+      <h2>Mithacken &amp; Folgen</h2>
+      <p>
+        Auf jeder Idee-Detailseite gibt's zwei Buttons:
+      </p>
+      <ul>
+        <li>
+          <strong>Ich will mithacken</strong>: Signalisiert öffentlich Interesse,
+          aktiv an der Umsetzung mitzuwirken. Andere Mithackende sehen dich
+          in der Avatar-Reihe.
+        </li>
+        <li>
+          <strong>Folgen</strong>: Du bekommst Updates zu dieser Idee
+          (Phasenwechsel, Kommentare, Anhänge). Im Profil-Tab „Was ist neu"
+          wird alles gesammelt.
+        </li>
+      </ul>
+      <div class="tip">
+        Beide Aktionen erfordern eine Anmeldung. Wer angemeldet ist, kann
+        beliebige Ideen mit einem Klick markieren — Stand wird in deinem
+        Profil unter „Mithacken" und „Gefolgt" aufgelistet.
+      </div>
+    </section>
+
+    <!-- ===== Kommentieren ===== -->
+    <section id="kommentieren">
+      <h2>Kommentieren &amp; Bewerten</h2>
+      <h3>Bewertung</h3>
+      <p>
+        Du kannst jede Idee bewerten — je nach Einstellung mit Sternen (1–5)
+        oder mit Daumen hoch. An mehreren Stellen:
+      </p>
+      <ul>
+        <li>auf der <strong>Idee-Detailseite</strong> unter „Bewertung",</li>
+        <li>direkt in jeder Zeile der <strong>Rangliste</strong>,</li>
+        <li>an den Kacheln auf den <strong>Veranstaltungs-Seiten</strong>.</li>
+      </ul>
+      <p>
+        Die Reihenfolge aktualisiert sich nach deiner Stimme sofort.
+        Bewerten erfordert eine Anmeldung.
+      </p>
+      <h3>Kommentare</h3>
+      <ul>
+        <li>Frage stellen, Idee weiterentwickeln, Beispiele zeigen.</li>
+        <li>Auf andere Kommentare antworten (1 Ebene tief — flacher Thread).</li>
+        <li>Eigene Kommentare lassen sich später wieder löschen.</li>
+      </ul>
+    </section>
+
+    <!-- ===== Konto & Profil ===== -->
+    <section id="profil">
+      <h2>Konto &amp; Profil</h2>
+      <h3>Anmelden</h3>
+      <p>
+        Oben rechts „Anmelden" klicken und mit deinen WirLernenOnline-/
+        edu-sharing-Zugangsdaten einloggen.
+      </p>
+      <h3>Mein Bereich</h3>
+      <p>
+        Unter deinem Namen oben rechts → „Mein Bereich". Tabs:
+      </p>
+      <ul>
+        <li>
+          <strong>Was ist neu</strong>: Aktivität auf Ideen, denen du folgst
+          oder die dir gehören. Eine kleine Zahl-Plakette am Username zeigt
+          ungelesene Events.
+        </li>
+        <li><strong>Meine Ideen</strong>: alle von dir eingereichten Ideen.</li>
+        <li><strong>Gefolgt</strong>: alle Ideen, denen du folgst.</li>
+        <li><strong>Mithacken</strong>: Ideen, bei denen du mithackst.</li>
+        <li>
+          <strong>Profil &amp; Teilen</strong>: pflege optionale Profil-Felder
+          (Anzeigename, Kurzbeschreibung, Website, Rolle) und teile dein
+          öffentliches Profil per Link oder QR-Code.
+        </li>
+      </ul>
+      <h3>Öffentliches Profil</h3>
+      <p>
+        Klick auf einen Autor-Namen (z.B. in der Idee-Detailseite) öffnet
+        sein/ihr öffentliches Profil mit allen eingereichten Ideen, den
+        gepflegten Profil-Feldern und Stats (Anzahl Ideen, Kommentare
+        gesamt, Schnittbewertung). Über den „Teilen"-Button gibt's auch hier
+        Link + QR-Code zum Weitergeben.
+      </p>
+      <h3>Konto neu anlegen</h3>
+      <p>
+        Wenn du noch kein Konto hast, klicke im Anmelde-Dialog auf
+        „Registrieren" → Browser-Weiterleitung zum WLO-Formular.
+      </p>
+    </section>
+
+    <!-- ===== Melden ===== -->
+    <section id="melden">
+      <h2>Probleme melden</h2>
+      <p>
+        Auf jeder Idee gibt's in der Aktionen-Sidebar einen Button
+        <strong>„⚠ Melden"</strong>. Klick öffnet ein kleines Formular —
+        beschreibe kurz, was nicht stimmt (Spam, doppelt eingereicht,
+        falsche Sammlung, …).
+      </p>
+      <ul>
+        <li>Deine Meldung geht ans Mod-Team.</li>
+        <li>Du siehst beim erneuten Öffnen, ob deine Meldung bereits
+            bearbeitet wurde.</li>
+        <li>Doppel-Meldungen derselben Idee werden erkannt.</li>
+      </ul>
+    </section>
+
+    <!-- ===== FAQ ===== -->
+    <section id="faq">
+      <h2>Häufige Fragen</h2>
+      <dl class="faq">
+        <dt>Brauche ich ein Konto, um zu lesen oder zu bewerten?</dt>
+        <dd>Nein — Stöbern und Bewerten geht anonym. Bewertungen werden
+            pro Browser/Cookie gezählt.</dd>
+
+        <dt>Was passiert mit meinen Beiträgen, wenn ich mein Konto lösche?</dt>
+        <dd>Eingereichte Ideen, Kommentare und Anhänge bleiben in
+            edu-sharing erhalten (sie sind dort technisch fest verankert).
+            Falls Löschung gewünscht: ans Mod-Team wenden.</dd>
+
+        <dt>Unter welcher Lizenz stehen meine Beiträge?</dt>
+        <dd>Eingereichte Ideen werden automatisch unter
+            <strong>CC BY 4.0</strong> veröffentlicht — du behältst die
+            Urheberschaft, andere dürfen den Inhalt nutzen und weitergeben,
+            solange sie dich nennen.</dd>
+
+        <dt>Ich finde keine Schaltfläche „Bearbeiten" an meiner Idee.</dt>
+        <dd>Du musst angemeldet sein — und zwar mit demselben Konto, mit
+            dem die Idee ursprünglich eingereicht wurde. Anonyme
+            Einreichungen können nicht nachträglich übernommen werden.</dd>
+
+        <dt>Warum sehe ich bei meiner Idee „Keine ausreichenden Rechte" als Vorschaubild?</dt>
+        <dd>Das Vorschaubild wird ohne Authentifizierung geladen.
+            Die Idee selbst wird vom Mod-Team in eine öffentlich sichtbare
+            Sammlung verschoben — sobald das passiert ist, klappt auch das
+            Vorschaubild für alle.</dd>
+
+        <dt>Kann ich eine Idee aus dem Repository in die App ziehen?</dt>
+        <dd>Wenn du eine Idee direkt im edu-sharing-Repo bearbeitet hast,
+            klick auf der App-Detailseite „Aus Repo aktualisieren" —
+            zieht die frischen Daten manuell, statt auf den 5-Minuten-
+            Hintergrund-Sync zu warten.</dd>
+
+        <dt>Wie teile ich eine Idee, ein Profil oder eine Veranstaltung?</dt>
+        <dd>In der Sidebar einer Idee „🔗 Link kopieren" für den Direktlink
+            oder einen der Sharing-Buttons (E-Mail, WhatsApp, X, Mastodon, …).
+            Über „🔲 QR-Code / Link für Plakate" gibt's zusätzlich einen
+            QR-Code samt Embed-Snippet. Dasselbe Teilen-Fenster (Link + QR +
+            Embed) gibt es auch für <strong>öffentliche Profile</strong> und
+            für die <strong>Veranstaltungs-Hub-Seiten</strong>.</dd>
+
+        <dt>Ich möchte eine Idee in meiner eigenen Webseite einbetten.</dt>
+        <dd>Siehe <a href="?view=embed">Einbinden in eigene Webseiten</a>
+            im Footer — Code-Snippets für die Voll-App, einzelne Ideen,
+            Profile und das Tile-Grid-Widget.</dd>
+      </dl>
+    </section>
+  `,
+})
+export class HelpComponent {}

@@ -161,6 +161,33 @@ def test_restore_rejects_oversize_upload(client, mod_headers, monkeypatch):
     assert r.status_code == 413
 
 
+def test_auto_restore_marker_via_api(client, mod_headers):
+    """Der Auto-Restore-Marker ist per Mod-API setz-/löschbar — die
+    Ephemeral-Aktivierung braucht damit KEINEN kubectl-/Shell-Zugriff mehr.
+    Sicherheitsniveau unverändert: Mods dürfen ohnehin beliebige Backups
+    einspielen (Restore-Upload); der Marker ist dieselbe Vertrauensstufe."""
+    listing = client.get("/api/v1/admin/backups", headers=mod_headers).json()
+    assert listing["auto_restore_marker"] is False
+
+    r = client.post("/api/v1/admin/backups/auto-restore-marker", headers=mod_headers)
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert backup_mod.auto_restore_marker_exists() is True
+    listing = client.get("/api/v1/admin/backups", headers=mod_headers).json()
+    assert listing["auto_restore_marker"] is True
+
+    r = client.delete("/api/v1/admin/backups/auto-restore-marker", headers=mod_headers)
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert backup_mod.auto_restore_marker_exists() is False
+
+
+def test_auto_restore_marker_rejected_when_disabled(client, mod_headers, monkeypatch):
+    """Ist der Auto-Restore per Konfiguration deaktiviert (leerer Marker-Name),
+    ist Marker-Setzen sinnlos → klare 400 statt stillem No-op."""
+    monkeypatch.setattr(settings, "backup_auto_restore_marker", "")
+    r = client.post("/api/v1/admin/backups/auto-restore-marker", headers=mod_headers)
+    assert r.status_code == 400
+
+
 # ---- Ephemeral-Modus (DB auf tmpfs/RAM-Disk, Persistenz via Backups) --------
 # Variante A des Storage-Befunds: der Request-Pfad berührt den (trägen)
 # Storage nie; dafür restauriert JEDER Pod-Start aus dem jüngsten Backup und

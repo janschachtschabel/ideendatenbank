@@ -131,9 +131,15 @@ Shutdown — **geplante Deployments/Restarts verlieren nichts**. Verlustfenster
 nur bei hartem Crash (OOM/Node-Ausfall): die app-eigenen Schreibdaten
 (Votes, Team-Anfragen, Kontakte, Reports) seit dem letzten Backup, maximal
 `backupIntervalMinutes`; edu-sharing-Inhalte stellt der Nightly-Sync ohnehin
-wieder her. Erstaktivierung auf einer Bestandsinstanz: vorher ein Backup
-erzeugen (`POST /api/v1/admin/backup`) und den Marker anlegen — sonst startet
-der Pod leer bis zum Initial-Sync.
+wieder her. Erstaktivierung auf einer Bestandsinstanz — komplett per Mod-API,
+kein kubectl nötig: vorher ein Backup erzeugen (`POST /api/v1/admin/backup`)
+und den Marker anlegen (`POST /api/v1/admin/backups/auto-restore-marker`;
+Status sichtbar in `GET /api/v1/admin/backups` → `auto_restore_marker`) —
+sonst startet der Pod leer bis zum Initial-Sync. Backups lassen sich zur
+zusätzlichen Absicherung extern sichern/wieder einspielen
+(`GET /admin/backups/{file}` bzw. Restore-Upload). **Retention anpassen:** `config.backup.keep`
+auf z. B. `48` erhöhen — das Default `3` hielte im 10-Minuten-Takt nur
+30 Minuten Historie (ältere Backups werden weggeprunt; ~300 KB pro ZIP).
 
 ## Troubleshooting: sporadische 3–5-s-Hänger (HTTP/2-Keepalive)
 

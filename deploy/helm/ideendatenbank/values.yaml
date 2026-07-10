@@ -205,11 +205,14 @@ persistence:
   ## Inhalte stellt der Sync ohnehin wieder her.
   dbInMemory:
     ## @param persistence.dbInMemory.enabled Put the SQLite DB on a tmpfs (RAM) volume; persistence via frequent backups on the PVC
-    enabled: false
+    enabled: true
     ## @param persistence.dbInMemory.sizeLimit Size limit of the tmpfs volume (DB is a few MB + max 16 MB WAL; counts against the container memory limit)
     sizeLimit: 64Mi
     ## @param persistence.dbInMemory.backupIntervalMinutes Auto-backup interval in minutes (= max data-loss window on hard crash)
-    backupIntervalMinutes: 10
+    backupIntervalMinutes: 15
+    ## HINWEIS: `config.backup.keep` in diesem Modus erhoehen (z.B. 48) —
+    ## das Default 3 hielte im 10-min-Takt nur 30 Minuten Historie
+    ## (aeltere Tages-Backups werden weggeprunt; ~300 KB/ZIP).
   ## @param persistence.storageClassName StorageClass for the data PVC (empty → cluster default)
   storageClassName: ""
   ## @param persistence.accessModes Access modes for the data PVC

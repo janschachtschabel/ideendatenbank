@@ -25,6 +25,8 @@ MOD_ONLY = [
     # Testdateien mit gültigem Body.
     ("POST", "/api/v1/admin/backup"),
     ("GET", "/api/v1/admin/backups"),
+    ("POST", "/api/v1/admin/backups/auto-restore-marker"),
+    ("DELETE", "/api/v1/admin/backups/auto-restore-marker"),
     ("POST", "/api/v1/admin/sync"),
     ("GET", "/api/v1/admin/taxonomy-usage"),
     ("DELETE", "/api/v1/admin/events/some-event"),

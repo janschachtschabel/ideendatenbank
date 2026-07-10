@@ -68,10 +68,49 @@ async def admin_backup_list(authorization: str | None = Header(None)):
 
     return {
         "backups": await _aio.to_thread(backup_mod.list_backups),
+        # Opt-in-Status des automatischen Restores beim Start (Pflicht-
+        # Dauerzustand im Ephemeral-Modus) — für UI/Verifikation.
+        "auto_restore_marker": backup_mod.auto_restore_marker_exists(),
         "keep": settings.backup_keep,
         "interval_hours": settings.backup_interval_hours,
         "enabled": settings.backup_enabled,
     }
+
+
+@router.post("/admin/backups/auto-restore-marker", tags=["admin"])
+async def admin_set_auto_restore_marker(authorization: str | None = Header(None)):
+    """Legt den Auto-Restore-Marker an (Opt-in für den automatischen Restore
+    beim Start; Pflicht-Dauerzustand im Ephemeral-Modus). Per API statt
+    kubectl/Shell — Mods dürfen ohnehin beliebige Backups einspielen, der
+    Marker ist dieselbe Vertrauensstufe."""
+    await _require_moderator(authorization)
+    try:
+        marker = backup_mod.set_auto_restore_marker()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _log_activity(
+        action="auto_restore_marker_set",
+        authorization=authorization,
+        is_mod=True,
+        target_type="backup",
+        target_label=marker,
+    )
+    return {"ok": True, "marker": marker, "exists": True}
+
+
+@router.delete("/admin/backups/auto-restore-marker", tags=["admin"])
+async def admin_clear_auto_restore_marker(authorization: str | None = Header(None)):
+    """Entfernt den Auto-Restore-Marker (deaktiviert den automatischen
+    Restore beim nächsten Start — z.B. beim Rückbau des Ephemeral-Modus)."""
+    await _require_moderator(authorization)
+    existed = backup_mod.clear_auto_restore_marker()
+    _log_activity(
+        action="auto_restore_marker_cleared",
+        authorization=authorization,
+        is_mod=True,
+        target_type="backup",
+    )
+    return {"ok": True, "existed": existed, "exists": False}
 
 
 @router.get("/admin/backups/{filename}", tags=["admin"])

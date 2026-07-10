@@ -27,6 +27,23 @@ Datei-Open, 16-s-I/O-Stalls):
 - Verifiziert: pytest 220/220 · ruff clean · values.yaml parsebar ·
   Template↔Values-Keys konsistent · Env-Mapping-Smoke (DB_EPHEMERAL,
   BACKUP_INTERVAL_MINUTES) grün.
+- **Nachtrag Marker per API (kubectl-frei):** Neue Mod-Endpoints
+  `POST/DELETE /admin/backups/auto-restore-marker` legen/entfernen den
+  Auto-Restore-Marker; `GET /admin/backups` liefert den Status
+  (`auto_restore_marker`). Damit ist die Ephemeral-Aktivierung komplett über
+  die API möglich (Backup erzeugen + Marker setzen + helm upgrade) —
+  Sicherheitsniveau unverändert (Mod-gated wie der Restore-Upload; Aktionen
+  im Activity-Log). 4 neue Tests inkl. Auth-Gating. pytest 224/224.
+- **Nachtrag CI-Readiness:** Alle GitLab-Gates lokal reproduziert — dabei
+  hätte das `ruff format --diff`-Gate die Pipeline gestoppt (2 Dateien aus
+  den heutigen Edits nicht format-konform) → `ruff format` angewendet,
+  Suite erneut 220/220. `npm audit --omit=dev --audit-level=high`: 0.
+  Template-Review der neuen dbInMemory-Blöcke (helm lokal nicht verfügbar).
+- **Nachtrag Retention (Live-Test nip.io):** Ephemeral-Modus erfolgreich in
+  Betrieb genommen (Auto-Restore + Marker-Erhalt in den Logs, Daten von außen
+  verifiziert, TTFB 0,18 s). Dabei aufgefallen: `BACKUP_KEEP=3` hielte im
+  10-min-Takt nur 30 Minuten Historie → Compose-Override defaultet jetzt
+  `BACKUP_KEEP=48` (8 h, ~15 MB), values/README entsprechend dokumentiert.
 - **Nachtrag für Compose-Deployments (nip.io nutzt kein Helm):**
   `docker-compose.ephemeral.yml` als Override — Aktivierung per
   `docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d`

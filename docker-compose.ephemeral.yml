@@ -9,8 +9,11 @@
 # EINMALIGE VORAUSSETZUNG (sonst startet die App leer bis zum Initial-Sync):
 #   1. Auf der laufenden Instanz ein Backup erzeugen (Mod-UI oder
 #      POST /api/v1/admin/backup).
-#   2. Marker fürs Auto-Restore anlegen (bleibt in diesem Modus erhalten):
-#      docker compose exec ideendb sh -c 'touch /data/backups/AUTO_RESTORE_OK'
+#   2. Marker fürs Auto-Restore anlegen (bleibt in diesem Modus erhalten) —
+#      per Mod-API (kein Shell-Zugriff noetig):
+#      POST /api/v1/admin/backups/auto-restore-marker
+#      (alternativ per Shell:
+#      docker compose exec ideendb sh -c 'touch /data/backups/AUTO_RESTORE_OK')
 #
 # ZURÜCKWECHSELN (ohne dieses File starten): VORHER die alte Disk-DB
 # entfernen und den Marker neu anlegen, sonst startet die App mit dem
@@ -30,6 +33,10 @@ services:
       DB_EPHEMERAL: "true"
       # = maximales Verlustfenster bei hartem Crash
       BACKUP_INTERVAL_MINUTES: ${BACKUP_INTERVAL_MINUTES:-10}
+      # Retention MITDENKEN: das Default BACKUP_KEEP=3 hielte im 10-min-Takt
+      # nur 30 Minuten Historie (aeltere Tages-Backups werden weggeprunt!).
+      # 48 x 10 min = 8 h Ruecksprung-Fenster; ~300 KB/ZIP => ~15 MB gesamt.
+      BACKUP_KEEP: ${BACKUP_KEEP:-48}
     volumes:
       # tmpfs für die DB — 64 MiB reichen (DB wenige MB + max. 16 MB WAL).
       # Das Daten-Volume (/data, Backups + Marker) kommt aus der Basis-Compose.
